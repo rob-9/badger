@@ -5,7 +5,8 @@
       "Bash(npm run dev:*)",
       "Bash(npm config delete:*)",
       "Bash(rm:*)",
-      "Bash(npx tailwindcss init:*)"
+      "Bash(npx tailwindcss init:*)",
+      "Bash(touch:*)"
     ],
     "deny": []
   }
