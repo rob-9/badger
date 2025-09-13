@@ -7,10 +7,10 @@ import { AgentContext, AgentResponse } from '@/types'
 interface AgentAssistantProps {
   selectedText: string
   context: AgentContext
-  onClose: () => void
+  onCloseAction: () => void
 }
 
-export default function AgentAssistant({ selectedText, context, onClose }: AgentAssistantProps) {
+export default function AgentAssistant({ selectedText, context, onCloseAction }: AgentAssistantProps) {
   const [response, setResponse] = useState<AgentResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -78,7 +78,7 @@ export default function AgentAssistant({ selectedText, context, onClose }: Agent
             <h2 className="text-xl font-semibold">AI Reading Assistant</h2>
           </div>
           <button
-            onClick={onClose}
+            onClick={onCloseAction}
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />
@@ -181,7 +181,7 @@ export default function AgentAssistant({ selectedText, context, onClose }: Agent
         {/* Footer */}
         <div className="p-6 border-t bg-gray-50 flex justify-end space-x-3">
           <button
-            onClick={onClose}
+            onClick={onCloseAction}
             className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
           >
             Close

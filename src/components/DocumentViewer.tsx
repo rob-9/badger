@@ -149,7 +149,7 @@ export default function DocumentViewer({ content, fileName, onClose }: DocumentV
             ),
             documentTitle: fileName
           }}
-          onClose={() => setShowAgent(false)}
+          onCloseAction={() => setShowAgent(false)}
         />
       )}
     </div>
