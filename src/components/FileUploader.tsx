@@ -33,7 +33,7 @@ export default function FileUploader({ onFileLoad }: FileUploaderProps) {
         for (const navItem of navigation.toc) {
           try {
             const section = book.section(navItem.href)
-            const content = await section.load(book.load.bind(book))
+            const content = section.load(book.load.bind(book))
             const textElement = content.querySelector('body') || content
             textContent.push(textElement.textContent || '')
           } catch (err) {
@@ -43,11 +43,12 @@ export default function FileUploader({ onFileLoad }: FileUploaderProps) {
         
         // If no TOC, try getting all sections directly
         if (textContent.length === 0) {
-          const spine = book.spine
-          for (let i = 0; i < spine.length; i++) {
+          await book.loaded.spine
+          const spineItems = await book.loaded.spine
+          for (let i = 0; i < spineItems.length; i++) {
             try {
               const section = book.section(i)
-              const content = await section.load(book.load.bind(book))
+              const content = section.load(book.load.bind(book))
               const textElement = content.querySelector('body') || content
               textContent.push(textElement.textContent || '')
             } catch (err) {

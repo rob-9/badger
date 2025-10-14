@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { X, Brain, BookOpen, Lightbulb, HelpCircle } from 'lucide-react'
 import { AgentContext, AgentResponse } from '@/types'
 
@@ -15,13 +15,7 @@ export default function AgentAssistant({ selectedText, context, onClose }: Agent
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (selectedText) {
-      handleAgentRequest()
-    }
-  }, [selectedText])
-
-  const handleAgentRequest = async () => {
+  const handleAgentRequest = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     
@@ -66,7 +60,13 @@ export default function AgentAssistant({ selectedText, context, onClose }: Agent
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [selectedText, context])
+
+  useEffect(() => {
+    if (selectedText) {
+      handleAgentRequest()
+    }
+  }, [selectedText, handleAgentRequest])
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -88,7 +88,7 @@ export default function AgentAssistant({ selectedText, context, onClose }: Agent
         {/* Selected Text */}
         <div className="p-6 bg-gray-50 border-b">
           <p className="text-sm text-gray-600 mb-2">Selected text:</p>
-          <p className="font-medium italic">"{selectedText}"</p>
+          <p className="font-medium italic">&ldquo;{selectedText}&rdquo;</p>
         </div>
 
         {/* Content */}

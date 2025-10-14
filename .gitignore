@@ -64,3 +64,4 @@ temp/
 test-document.txt
 
 package-lock.json
+.claude/
