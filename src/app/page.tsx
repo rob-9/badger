@@ -17,7 +17,7 @@ export default function Home() {
     <main className="min-h-screen bg-paper">
       {!document ? (
         <div className="flex items-center justify-center min-h-screen">
-          <FileUploader onFileLoad={handleFileLoad} />
+          <FileUploader onFileLoadAction={handleFileLoad} />
         </div>
       ) : (
         <DocumentViewer 

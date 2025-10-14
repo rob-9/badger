@@ -5,10 +5,10 @@ import { Upload, FileText, Book, File } from 'lucide-react'
 import ePub from 'epubjs'
 
 interface FileUploaderProps {
-  onFileLoad: (content: string, fileName: string) => void
+  onFileLoadAction: (content: string, fileName: string) => void
 }
 
-export default function FileUploader({ onFileLoad }: FileUploaderProps) {
+export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -63,13 +63,13 @@ export default function FileUploader({ onFileLoad }: FileUploaderProps) {
         text = await file.text()
       }
       
-      onFileLoad(text, file.name)
+      onFileLoadAction(text, file.name)
     } catch (error) {
       console.error('Error reading file:', error)
     } finally {
       setIsLoading(false)
     }
-  }, [onFileLoad])
+  }, [onFileLoadAction])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
