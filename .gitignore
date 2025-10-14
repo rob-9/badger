@@ -62,3 +62,5 @@ temp/
 
 # Test files
 test-document.txt
+
+package-lock.json

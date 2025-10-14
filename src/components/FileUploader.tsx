@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { Upload, FileText, Book, File } from 'lucide-react'
+import ePub from 'epubjs'
 
 interface FileUploaderProps {
   onFileLoad: (content: string, fileName: string) => void
@@ -15,7 +16,52 @@ export default function FileUploader({ onFileLoad }: FileUploaderProps) {
     setIsLoading(true)
     
     try {
-      const text = await file.text()
+      let text: string
+      
+      if (file.name.toLowerCase().endsWith('.epub')) {
+        // Handle EPUB files
+        const arrayBuffer = await file.arrayBuffer()
+        const book = ePub(arrayBuffer)
+        await book.ready
+        
+        // Get all spine items (chapters)
+        const textContent: string[] = []
+        
+        // Get the navigation and extract text from each section
+        const navigation = await book.loaded.navigation
+        
+        for (const navItem of navigation.toc) {
+          try {
+            const section = book.section(navItem.href)
+            const content = await section.load(book.load.bind(book))
+            const textElement = content.querySelector('body') || content
+            textContent.push(textElement.textContent || '')
+          } catch (err) {
+            console.warn('Failed to load section:', err)
+          }
+        }
+        
+        // If no TOC, try getting all sections directly
+        if (textContent.length === 0) {
+          const spine = book.spine
+          for (let i = 0; i < spine.length; i++) {
+            try {
+              const section = book.section(i)
+              const content = await section.load(book.load.bind(book))
+              const textElement = content.querySelector('body') || content
+              textContent.push(textElement.textContent || '')
+            } catch (err) {
+              console.warn('Failed to load section:', err)
+            }
+          }
+        }
+        
+        text = textContent.join('\n\n')
+      } else {
+        // Handle other file types as plain text
+        text = await file.text()
+      }
+      
       onFileLoad(text, file.name)
     } catch (error) {
       console.error('Error reading file:', error)
