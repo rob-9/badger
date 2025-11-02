@@ -22,41 +22,37 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
         // Handle EPUB files
         const arrayBuffer = await file.arrayBuffer()
         const book = ePub(arrayBuffer)
-        await book.ready
-        
+        await book.opened
+
         // Get all spine items (chapters)
         const textContent: string[] = []
-        
-        // Get the navigation and extract text from each section
-        const navigation = await book.loaded.navigation
-        
-        for (const navItem of navigation.toc) {
+
+        // Get sections as an array
+        const sections: any[] = []
+        book.spine.each((section: any) => {
+          sections.push(section)
+        })
+
+        // Process each section sequentially
+        for (const section of sections) {
           try {
-            const section = book.section(navItem.href)
-            const content = section.load(book.load.bind(book))
-            const textElement = content.querySelector('body') || content
-            textContent.push(textElement.textContent || '')
+            await section.load(book.load.bind(book))
+
+            // Extract text content
+            if (section.document) {
+              const body = section.document.querySelector('body')
+              const text = body?.textContent || section.document.textContent || ''
+              if (text.trim()) {
+                textContent.push(text.trim())
+              }
+            }
+
+            section.unload()
           } catch (err) {
             console.warn('Failed to load section:', err)
           }
         }
-        
-        // If no TOC, try getting all sections directly
-        if (textContent.length === 0) {
-          await book.loaded.spine
-          const spineItems = await book.loaded.spine
-          for (let i = 0; i < spineItems.length; i++) {
-            try {
-              const section = book.section(i)
-              const content = section.load(book.load.bind(book))
-              const textElement = content.querySelector('body') || content
-              textContent.push(textElement.textContent || '')
-            } catch (err) {
-              console.warn('Failed to load section:', err)
-            }
-          }
-        }
-        
+
         text = textContent.join('\n\n')
       } else {
         // Handle other file types as plain text
@@ -93,7 +89,7 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
       <div className="text-center mb-8">
         <Book className="w-16 h-16 mx-auto mb-4 text-accent" />
         <h1 className="text-3xl font-bold mb-2">Curio</h1>
-        <p className="text-gray-600">Intelligent reading with AI assistance</p>
+        <p className="text-gray-600">Read Better.</p>
       </div>
 
       <div
