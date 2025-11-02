@@ -1,6 +1,6 @@
-# Curio
+# boom
 
-Assisted Reading.
+Read Better with AI.
 
 ## Setup
 
