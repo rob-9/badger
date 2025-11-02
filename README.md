@@ -1,6 +1,6 @@
 # Curio
 
-AI-powered reading application with contextual assistance.
+Assisted Reading.
 
 ## Setup
 
