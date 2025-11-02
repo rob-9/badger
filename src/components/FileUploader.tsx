@@ -88,7 +88,7 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
     <div className="w-full max-w-2xl mx-auto p-8">
       <div className="text-center mb-8">
         <Book className="w-16 h-16 mx-auto mb-4 text-accent" />
-        <h1 className="text-3xl font-bold mb-2">Curio</h1>
+        <h1 className="text-3xl font-bold mb-2">boom</h1>
         <p className="text-gray-600">Read Better.</p>
       </div>
 
