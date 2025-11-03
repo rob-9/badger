@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
-import { X, HelpCircle, Bookmark, Settings, ChevronLeft, ChevronRight } from 'lucide-react'
+import { X, HelpCircle, Bookmark, Settings, ChevronLeft } from 'lucide-react'
 import AgentAssistant from './AgentAssistant'
 import TextHighlighter from './TextHighlighter'
+import { useTextSelection } from '@/hooks/useTextSelection'
 
 interface DocumentViewerProps {
   content: string
@@ -12,30 +13,12 @@ interface DocumentViewerProps {
 }
 
 export default function DocumentViewer({ content, fileName, onClose }: DocumentViewerProps) {
-  const [selectedText, setSelectedText] = useState('')
-  const [selectionPosition, setSelectionPosition] = useState<{ x: number; y: number } | null>(null)
   const [showAgent, setShowAgent] = useState(false)
   const [fontSize, setFontSize] = useState(18)
   const [lineHeight, setLineHeight] = useState(1.7)
   const contentRef = useRef<HTMLDivElement>(null)
 
-  const handleTextSelection = useCallback(() => {
-    const selection = window.getSelection()
-    if (selection && selection.toString().trim()) {
-      const text = selection.toString().trim()
-      const range = selection.getRangeAt(0)
-      const rect = range.getBoundingClientRect()
-      
-      setSelectedText(text)
-      setSelectionPosition({
-        x: rect.left + rect.width / 2,
-        y: rect.top - 10
-      })
-    } else {
-      setSelectedText('')
-      setSelectionPosition(null)
-    }
-  }, [])
+  const { selectedText, selectionPosition } = useTextSelection(contentRef)
 
   const handleAgentRequest = useCallback(() => {
     if (selectedText) {
@@ -107,8 +90,6 @@ export default function DocumentViewer({ content, fileName, onClose }: DocumentV
             lineHeight: lineHeight,
             fontFamily: 'Georgia, Times New Roman, serif'
           }}
-          onMouseUp={handleTextSelection}
-          onTouchEnd={handleTextSelection}
         >
           <TextHighlighter content={content} />
         </div>

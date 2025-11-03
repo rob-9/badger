@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, RefObject } from 'react'
 
 interface TextSelection {
   text: string
@@ -6,7 +6,7 @@ interface TextSelection {
   position: { x: number; y: number } | null
 }
 
-export function useTextSelection() {
+export function useTextSelection(targetRef: RefObject<HTMLElement>) {
   const [selection, setSelection] = useState<TextSelection>({
     text: '',
     range: null,
@@ -15,20 +15,23 @@ export function useTextSelection() {
 
   const handleSelection = useCallback(() => {
     const windowSelection = window.getSelection()
-    
+
     if (windowSelection && windowSelection.toString().trim()) {
-      const text = windowSelection.toString().trim()
+      // Check if selection is within the target element
       const range = windowSelection.getRangeAt(0)
-      const rect = range.getBoundingClientRect()
-      
-      setSelection({
-        text,
-        range,
-        position: {
-          x: rect.left + rect.width / 2,
-          y: rect.top - 10
-        }
-      })
+      if (targetRef.current && targetRef.current.contains(range.commonAncestorContainer)) {
+        const text = windowSelection.toString().trim()
+        const rect = range.getBoundingClientRect()
+
+        setSelection({
+          text,
+          range,
+          position: {
+            x: rect.left + rect.width / 2,
+            y: rect.top - 10
+          }
+        })
+      }
     } else {
       setSelection({
         text: '',
@@ -36,7 +39,7 @@ export function useTextSelection() {
         position: null
       })
     }
-  }, [])
+  }, [targetRef])
 
   const clearSelection = useCallback(() => {
     setSelection({
@@ -44,21 +47,24 @@ export function useTextSelection() {
       range: null,
       position: null
     })
-    
+
     if (window.getSelection) {
       window.getSelection()?.removeAllRanges()
     }
   }, [])
 
   useEffect(() => {
-    document.addEventListener('mouseup', handleSelection)
-    document.addEventListener('touchend', handleSelection)
-    
+    const element = targetRef.current
+    if (!element) return
+
+    element.addEventListener('mouseup', handleSelection)
+    element.addEventListener('touchend', handleSelection)
+
     return () => {
-      document.removeEventListener('mouseup', handleSelection)
-      document.removeEventListener('touchend', handleSelection)
+      element.removeEventListener('mouseup', handleSelection)
+      element.removeEventListener('touchend', handleSelection)
     }
-  }, [handleSelection])
+  }, [handleSelection, targetRef])
 
   return {
     selectedText: selection.text,
