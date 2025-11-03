@@ -37,7 +37,7 @@ export default function HomeScreen() {
       {/* Top Icons */}
       <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3">
         <a
-          href="https://github.com/rob-9/boom"
+          href="https://github.com/rob-9/boomm"
           target="_blank"
           rel="noopener noreferrer"
           className="p-2 rounded-lg hover:bg-[#f7f7f4]/10 transition-all duration-200"
@@ -46,7 +46,9 @@ export default function HomeScreen() {
           <Github className="w-4 h-4 text-[#f7f7f4]/60 hover:text-[#f7f7f4]" />
         </a>
         <a
-          href="mailto:contact@boom.ai"
+          href="mailto:robert.ji888@gmail.com"
+          target="_blank"
+          rel="noopener noreferrer"
           className="p-2 rounded-lg hover:bg-[#f7f7f4]/10 transition-all duration-200"
           aria-label="Contact"
         >
@@ -101,13 +103,13 @@ export default function HomeScreen() {
             {/* CTA Buttons */}
             <div className="flex items-center gap-2.5">
               <Link
-                href="/read"
+                href="/early-access"
                 className="group px-5 py-2.5 rounded-lg bg-[#f7f7f4] text-[#14120b] hover:bg-[#f7f7f4]/90 transition-all duration-200 font-semibold text-sm flex items-center gap-1.5"
               >
-                Get Started
+                Early Access
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
               </Link>
-              <button className="px-5 py-2.5 rounded-lg bg-[#f7f7f4]/5 hover:bg-[#f7f7f4]/10 border border-[#f7f7f4]/10 transition-all duration-200 font-semibold text-sm">
+              <button className="px-5 py-2.5 rounded-lg bg-[#f7f7f4]/5 hover:bg-[#f7f7f4]/10 border border-[#f7f7f4]/10 transition-all duration-200 font-semibold text-sm cursor-default">
                 Learn More
               </button>
             </div>
