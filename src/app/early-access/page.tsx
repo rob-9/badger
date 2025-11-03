@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Mail, CheckCircle } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
 
 export default function EarlyAccessPage() {
   const router = useRouter()
@@ -17,7 +18,7 @@ export default function EarlyAccessPage() {
     setIsVisible(true)
   }, [])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
 
@@ -28,16 +29,36 @@ export default function EarlyAccessPage() {
       return
     }
 
-    // TODO: Add email submission logic here (e.g., send to backend/API)
-    setSubmitted(true)
+    try {
+      // Insert email into Supabase
+      const { error: supabaseError } = await supabase
+        .from('emails')
+        .insert([{ email }])
 
-    // Fade out then redirect to home
-    setTimeout(() => {
-      setIsVisible(false)
+      if (supabaseError) {
+        // Check if email already exists
+        if (supabaseError.code === '23505') {
+          setError('This email is already on the waitlist')
+        } else {
+          setError('Something went wrong. Please try again.')
+          console.error('Supabase error:', supabaseError)
+        }
+        return
+      }
+
+      setSubmitted(true)
+
+      // Fade out then redirect to home
       setTimeout(() => {
-        router.push('/')
-      }, 500)
-    }, 1200)
+        setIsVisible(false)
+        setTimeout(() => {
+          router.push('/')
+        }, 500)
+      }, 1200)
+    } catch (err) {
+      setError('Something went wrong. Please try again.')
+      console.error('Error:', err)
+    }
   }
 
   return (
