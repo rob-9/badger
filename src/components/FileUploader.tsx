@@ -8,6 +8,12 @@ interface FileUploaderProps {
   onFileLoadAction: (content: string, fileName: string) => void
 }
 
+interface EpubSection {
+  load: (loader: unknown) => Promise<void>
+  unload: () => void
+  document?: Document
+}
+
 export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -28,8 +34,8 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
         const textContent: string[] = []
 
         // Get sections as an array
-        const sections: any[] = []
-        book.spine.each((section: any) => {
+        const sections: EpubSection[] = []
+        book.spine.each((section: EpubSection) => {
           sections.push(section)
         })
 
@@ -117,7 +123,7 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
             </p>
             <input
               type="file"
-              accept=".txt,.pdf,.epub,.docx"
+              accept=".txt,.pdf,.epub"
               onChange={handleFileInput}
               className="hidden"
               id="file-input"
