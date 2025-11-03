@@ -3,9 +3,10 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { Book, Sparkles, ArrowRight, FileText, Github, Mail, FileCode } from 'lucide-react'
+import ReaderDemo from './ReaderDemo'
 
 export default function HomeScreen() {
-  const words = ["doesn't spoil books like forums do.", "knows exactly what you're thinking.", 'understands contexts and plot lines.', 'is your confidant for thoughts & theories.']
+  const words = ["doesn't spoil books like online forums do.", "knows exactly what you're thinking.", 'understands specific contexts and plot lines.', 'is your confidant for thoughts & theories.']
   const [currentWord, setCurrentWord] = useState(0)
   const [previousWord, setPreviousWord] = useState(words.length - 1)
 
@@ -115,10 +116,7 @@ export default function HomeScreen() {
           {/* Right: Interactive Demo */}
           <div className="relative">
             <div className="aspect-[4/3] bg-[#1a1812] rounded-xl border border-[#f7f7f4]/10 overflow-hidden shadow-2xl">
-              {/* Demo content will go here */}
-              <div className="w-full h-full flex items-center justify-center text-[#f7f7f4]/40">
-                Interactive Demo
-              </div>
+              <ReaderDemo />
             </div>
           </div>
 
