@@ -2,15 +2,19 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Book, Sparkles, ArrowRight, FileText } from 'lucide-react'
+import { Book, Sparkles, ArrowRight, FileText, Github, Mail, FileCode } from 'lucide-react'
 
 export default function HomeScreen() {
+  const words = ['understands contexts and plot lines.', "doesn't spoil books like forums do.", "knows exactly what you're thinking."]
   const [currentWord, setCurrentWord] = useState(0)
-  const words = ['understands context and plot lines.', "doesn't spoil books like online forums.", "knows exactly what you're thinking."]
+  const [previousWord, setPreviousWord] = useState(words.length - 1)
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setCurrentWord((prev) => (prev + 1) % words.length)
+      setCurrentWord((prev) => {
+        setPreviousWord(prev)
+        return (prev + 1) % words.length
+      })
     }, 3000)
     return () => clearInterval(interval)
   }, [words])
@@ -29,6 +33,33 @@ export default function HomeScreen() {
         <div className="absolute top-[25%] left-[35%] w-[330px] h-[330px] rounded-full bg-[#d9955f] opacity-[0.07] blur-[87px]"></div>
       </div>
 
+      {/* Top Icons */}
+      <div className="fixed top-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4">
+        <a
+          href="https://github.com/rob-9/boom"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="p-2 rounded-lg hover:bg-[#f7f7f4]/10 transition-all duration-200"
+          aria-label="GitHub"
+        >
+          <Github className="w-5 h-5 text-[#f7f7f4]/60 hover:text-[#f7f7f4]" />
+        </a>
+        <a
+          href="mailto:contact@boom.ai"
+          className="p-2 rounded-lg hover:bg-[#f7f7f4]/10 transition-all duration-200"
+          aria-label="Contact"
+        >
+          <Mail className="w-5 h-5 text-[#f7f7f4]/60 hover:text-[#f7f7f4]" />
+        </a>
+        <Link
+          href="/read"
+          className="p-2 rounded-lg hover:bg-[#f7f7f4]/10 transition-all duration-200"
+          aria-label="Application"
+        >
+          <FileCode className="w-5 h-5 text-[#f7f7f4]/60 hover:text-[#f7f7f4]" />
+        </Link>
+      </div>
+
       {/* Hero Section */}
       <main className="relative z-10 px-8 min-h-screen flex items-center justify-center">
         <div className="max-w-7xl mx-auto w-full">
@@ -39,12 +70,14 @@ export default function HomeScreen() {
             </h1>
 
             <div className="text-3xl md:text-4xl text-[#f7f7f4]/80 mb-16 h-12 flex items-center justify-center w-full px-4 gap-3 pl-32">
-              <span className="bg-gradient-to-br from-[#d4a574]/20 to-[#c9986a]/20 px-3 py-1 rounded-lg border border-[#d4a574]/30">boom</span>
+              <span className="relative px-4 py-2">
+                <span className="absolute inset-0 bg-gradient-to-r from-[#d4a574]/30 to-[#c9986a]/30 blur-sm rounded-lg"></span>
+                <span className="relative">boom</span>
+              </span>
               <div className="relative h-12 flex items-center min-w-[700px]">
                 {words.map((word, index) => {
                   const isActive = index === currentWord
-                  // Items that have already been shown should slide up
-                  const isPast = index < currentWord
+                  const isPrevious = index === previousWord
 
                   return (
                     <span
@@ -52,7 +85,7 @@ export default function HomeScreen() {
                       className={`absolute left-0 transition-all duration-500 whitespace-nowrap ${
                         isActive
                           ? 'opacity-100 translate-y-0'
-                          : isPast
+                          : isPrevious
                           ? 'opacity-0 -translate-y-full'
                           : 'opacity-0 translate-y-full'
                       }`}
@@ -70,7 +103,7 @@ export default function HomeScreen() {
                 href="/read"
                 className="group px-8 py-4 rounded-lg bg-[#f7f7f4] text-[#14120b] hover:bg-[#f7f7f4]/90 transition-all duration-200 font-semibold text-lg flex items-center gap-2"
               >
-                Try boom
+                Get Started
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
               </Link>
               <button className="px-8 py-4 rounded-lg bg-[#f7f7f4]/5 hover:bg-[#f7f7f4]/10 border border-[#f7f7f4]/10 transition-all duration-200 font-semibold text-lg">
