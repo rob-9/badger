@@ -9,6 +9,7 @@ export default function HomeScreen() {
   const words = useMemo(() => ["is the world's first agentic reader.", "knows exactly what you're thinking.", "doesn't spoil books like online forums do.", 'digests specific contexts and plotlines.', 'is your confidant for thoughts & theories.', 'keeps your reading in motion.'], [])
   const [currentWord, setCurrentWord] = useState(0)
   const [previousWord, setPreviousWord] = useState(words.length - 1)
+  const [isScrolled, setIsScrolled] = useState(false)
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -19,6 +20,14 @@ export default function HomeScreen() {
     }, 3000)
     return () => clearInterval(interval)
   }, [words])
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 20)
+    }
+    window.addEventListener('scroll', handleScroll)
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
 
   return (
     <div className="min-h-screen bg-[#14120b] text-[#f7f7f4] overflow-hidden relative">
@@ -36,9 +45,14 @@ export default function HomeScreen() {
 
       {/* Top Bar */}
       <div className="fixed top-8 left-0 right-0 z-50 px-8">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          {/* Left: Logo */}
-          <div className="flex items-center gap-3 xl:ml-[75px]">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between px-6 py-1.5 rounded-2xl border border-transparent transition-all duration-300" style={{
+            backgroundColor: isScrolled ? 'rgba(20, 18, 11, 0.8)' : 'transparent',
+            backdropFilter: isScrolled ? 'blur(4px)' : 'none',
+            borderColor: isScrolled ? 'rgba(247, 247, 244, 0.1)' : 'transparent'
+          }}>
+            {/* Left: Logo */}
+            <div className="flex items-center gap-3 xl:ml-[51px]">
             <img
               src="/logo.png"
               alt="Proactive, Agentic Intelligence"
@@ -79,13 +93,14 @@ export default function HomeScreen() {
             </button>
           </div>
         </div>
+        </div>
       </div>
 
       {/* Hero Section */}
       <main className="relative z-10 px-8 min-h-screen flex items-center">
         <div className="max-w-7xl mx-auto w-full grid grid-cols-1 xl:grid-cols-2 gap-12 items-start xl:items-center">
           {/* Left: Hero Content */}
-          <div className="flex flex-col justify-start xl:justify-between items-start text-left xl:ml-[75px] pt-36 xl:pt-0 xl:h-[580px]">
+          <div className="flex flex-col justify-start xl:justify-between items-start text-left ml-6 xl:ml-[75px] pt-36 xl:pt-0 xl:h-[580px]">
             <div className="xl:pt-36">
               <h1 className="text-4xl md:text-5xl font-bold mb-8 tracking-tight">
                 Read Smarter.
