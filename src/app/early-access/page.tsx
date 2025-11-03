@@ -141,7 +141,7 @@ export default function EarlyAccessPage() {
           </form>
 
           <p className="text-xs text-[#f7f7f4]/40 mt-6 text-center">
-            We'll notify you on launch.
+            We&apos;ll notify you on launch.
           </p>
         </div>
       </div>

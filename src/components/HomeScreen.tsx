@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { Book, Sparkles, ArrowRight, FileText, Github, Mail, FileCode } from 'lucide-react'
 import ReaderDemo from './ReaderDemo'
 
 export default function HomeScreen() {
-  const words = ["doesn't spoil books like online forums do.", "knows exactly what you're thinking.", 'understands specific contexts and plot lines.', 'is your confidant for thoughts & theories.']
+  const words = useMemo(() => ["doesn't spoil books like online forums do.", "knows exactly what you're thinking.", 'understands specific contexts and plot lines.', 'is your confidant for thoughts & theories.'], [])
   const [currentWord, setCurrentWord] = useState(0)
   const [previousWord, setPreviousWord] = useState(words.length - 1)
 

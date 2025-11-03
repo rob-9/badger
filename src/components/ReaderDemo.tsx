@@ -56,7 +56,7 @@ export default function ReaderDemo() {
       }, 300)
     }, 3500)
     return () => clearInterval(interval)
-  }, [])
+  }, [demoSteps.length])
 
   useEffect(() => {
     // Show answer with delay when step has an answer
