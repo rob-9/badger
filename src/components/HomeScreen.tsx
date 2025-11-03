@@ -6,7 +6,7 @@ import { Book, Sparkles, ArrowRight, FileText, Github, Mail, FileCode } from 'lu
 import ReaderDemo from './ReaderDemo'
 
 export default function HomeScreen() {
-  const words = useMemo(() => ["doesn't spoil books like online forums do.", "knows exactly what you're thinking.", 'digests specific contexts and plotlines.', 'is your confidant for thoughts & theories.', 'keeps your reading in motion.'], [])
+  const words = useMemo(() => ["is the world's first agentic reader.", "knows exactly what you're thinking.", "doesn't spoil books like online forums do.", 'digests specific contexts and plotlines.', 'is your confidant for thoughts & theories.', 'keeps your reading in motion.'], [])
   const [currentWord, setCurrentWord] = useState(0)
   const [previousWord, setPreviousWord] = useState(words.length - 1)
 
