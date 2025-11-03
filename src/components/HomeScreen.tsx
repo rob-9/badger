@@ -50,7 +50,7 @@ export default function HomeScreen() {
           {/* Right: Icons */}
           <div className="flex items-center gap-4">
             <a
-              href="https://github.com/rob-9/boomm"
+              href="https://github.com/rob-9/boom"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-[#f7f7f4]/10 transition-all duration-200"
