@@ -2,69 +2,98 @@
 
 import { useState, useCallback } from 'react'
 import { Upload, FileText, Book, File } from 'lucide-react'
-import ePub from 'epubjs'
+import JSZip from 'jszip'
 
 interface FileUploaderProps {
   onFileLoadAction: (content: string, fileName: string) => void
-}
-
-interface EpubSection {
-  load: (loader: unknown) => Promise<void>
-  unload: () => void
-  document?: Document
 }
 
 export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
+  const parseEpub = async (file: File): Promise<string> => {
+    const arrayBuffer = await file.arrayBuffer()
+    const zip = await JSZip.loadAsync(arrayBuffer)
+
+    // Find the OPF file (contains manifest and spine)
+    const containerFile = await zip.file('META-INF/container.xml')?.async('text')
+    if (!containerFile) {
+      throw new Error('Invalid EPUB: container.xml not found')
+    }
+
+    // Parse container.xml to get OPF file path
+    const parser = new DOMParser()
+    const containerDoc = parser.parseFromString(containerFile, 'text/xml')
+    const opfPath = containerDoc.querySelector('rootfile')?.getAttribute('full-path')
+
+    if (!opfPath) {
+      throw new Error('Invalid EPUB: OPF file path not found')
+    }
+
+    // Get the OPF file
+    const opfFile = await zip.file(opfPath)?.async('text')
+    if (!opfFile) {
+      throw new Error('Invalid EPUB: OPF file not found')
+    }
+
+    const opfDoc = parser.parseFromString(opfFile, 'text/xml')
+    const opfDir = opfPath.substring(0, opfPath.lastIndexOf('/') + 1)
+
+    // Get spine items (reading order)
+    const spineItems = Array.from(opfDoc.querySelectorAll('spine itemref'))
+    const manifest = opfDoc.querySelector('manifest')
+
+    const textContent: string[] = []
+
+    // Process each spine item
+    for (const spineItem of spineItems) {
+      const idref = spineItem.getAttribute('idref')
+      if (!idref) continue
+
+      // Find corresponding manifest item
+      const manifestItem = manifest?.querySelector(`item[id="${idref}"]`)
+      const href = manifestItem?.getAttribute('href')
+
+      if (!href) continue
+
+      // Get the content file
+      const contentPath = opfDir + href
+      const contentFile = await zip.file(contentPath)?.async('text')
+
+      if (!contentFile) continue
+
+      // Parse HTML and extract text
+      try {
+        const contentDoc = parser.parseFromString(contentFile, 'text/html')
+        const body = contentDoc.querySelector('body')
+        const text = body?.textContent || contentDoc.documentElement.textContent || ''
+
+        if (text.trim()) {
+          textContent.push(text.trim())
+        }
+      } catch (err) {
+        console.warn('Failed to parse content file:', err)
+      }
+    }
+
+    return textContent.join('\n\n')
+  }
+
   const handleFile = useCallback(async (file: File) => {
     setIsLoading(true)
-    
+
     try {
       let text: string
-      
+
       if (file.name.toLowerCase().endsWith('.epub')) {
         // Handle EPUB files
-        const arrayBuffer = await file.arrayBuffer()
-        const book = ePub(arrayBuffer)
-        await book.opened
-
-        // Get all spine items (chapters)
-        const textContent: string[] = []
-
-        // Get sections as an array
-        const sections: EpubSection[] = []
-        book.spine.each((section: EpubSection) => {
-          sections.push(section)
-        })
-
-        // Process each section sequentially
-        for (const section of sections) {
-          try {
-            await section.load(book.load.bind(book))
-
-            // Extract text content
-            if (section.document) {
-              const body = section.document.querySelector('body')
-              const text = body?.textContent || section.document.textContent || ''
-              if (text.trim()) {
-                textContent.push(text.trim())
-              }
-            }
-
-            section.unload()
-          } catch (err) {
-            console.warn('Failed to load section:', err)
-          }
-        }
-
-        text = textContent.join('\n\n')
+        text = await parseEpub(file)
       } else {
         // Handle other file types as plain text
         text = await file.text()
       }
-      
+
       onFileLoadAction(text, file.name)
     } catch (error) {
       console.error('Error reading file:', error)
