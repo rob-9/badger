@@ -1,5 +1,3 @@
 # boom
 
-Read Smarter.
-
-[Early Access](https://readboom.vercel.app/)
+[About](https://readboom.vercel.app/)
