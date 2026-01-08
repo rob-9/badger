@@ -149,9 +149,9 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
         ) : (
           <>
             <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-            <h3 className="text-xl font-semibold mb-2">Upload a document</h3>
+            <h3 className="text-xl font-semibold mb-2">Upload Document</h3>
             <p className="text-gray-600 mb-6">
-              Drag and drop your file here, or click to browse
+              
             </p>
             <input
               type="file"

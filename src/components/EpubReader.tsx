@@ -10,6 +10,9 @@ interface EpubReaderProps {
   onCloseAction: () => void
 }
 
+// Book page aspect ratio (width:height)
+const ASPECT_RATIO = 7 / 9
+
 export default function EpubReader({ epubData, fileName, onCloseAction }: EpubReaderProps) {
   const [fontSize, setFontSize] = useState(100)
   const [isReady, setIsReady] = useState(false)
@@ -17,27 +20,22 @@ export default function EpubReader({ epubData, fileName, onCloseAction }: EpubRe
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
 
+  // Initialize book
   useEffect(() => {
     if (!viewerRef.current) return
 
-    let rendition: Rendition | null = null
     let mounted = true
 
     const initBook = async () => {
       try {
-        console.log('Initializing EPUB from ArrayBuffer')
-
-        // Create book directly from ArrayBuffer (epub.js supports this!)
         const book = ePub(epubData)
         bookRef.current = book
 
         await book.ready
-        console.log('Book opened successfully')
 
         if (!mounted || !viewerRef.current) return
 
-        // Create rendition
-        rendition = book.renderTo(viewerRef.current, {
+        const rendition = book.renderTo(viewerRef.current, {
           width: '100%',
           height: '100%',
           flow: 'paginated',
@@ -46,49 +44,27 @@ export default function EpubReader({ epubData, fileName, onCloseAction }: EpubRe
 
         renditionRef.current = rendition
 
-        // Display the book
         await rendition.display()
-
-        console.log('Book displayed!')
-        console.log('ViewerRef children:', viewerRef.current?.children)
-        console.log('ViewerRef HTML:', viewerRef.current?.innerHTML)
-
-        // Check iframe after a short delay
-        setTimeout(() => {
-          const iframe = viewerRef.current?.querySelector('iframe')
-          console.log('Iframe element:', iframe)
-          if (iframe) {
-            console.log('Iframe dimensions:', {
-              width: iframe.style.width,
-              height: iframe.style.height,
-              visibility: iframe.style.visibility,
-            })
-            console.log('Iframe computed style:', window.getComputedStyle(iframe))
-          }
-        }, 500)
-
         setIsReady(true)
 
-        // Save location on page change
         rendition.on('relocated', (location: any) => {
           if (location.start?.cfi) {
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
           }
         })
-
-        return () => {
-          rendition?.destroy()
-        }
       } catch (error) {
         console.error('Error loading EPUB:', error)
       }
     }
 
-    const cleanup = initBook()
+    initBook()
 
     return () => {
       mounted = false
-      cleanup.then((cleanupFn) => cleanupFn?.())
+      if (renditionRef.current) {
+        renditionRef.current.destroy()
+        renditionRef.current = null
+      }
     }
   }, [epubData, fileName])
 
@@ -168,16 +144,17 @@ export default function EpubReader({ epubData, fileName, onCloseAction }: EpubRe
       </header>
 
       {/* Reader */}
-      <div className="flex-1 relative bg-paper p-8">
-        <div className="max-w-5xl mx-auto" style={{ height: 'calc(100vh - 120px)' }}>
-          <div
-            ref={viewerRef}
-            className="w-full relative bg-white rounded-lg shadow-lg"
-            style={{
-              height: '100%',
-              fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
-            }}
-          />
+      <div className="flex-1 relative bg-paper p-8 flex items-center justify-center overflow-hidden">
+        <div
+          ref={viewerRef}
+          className="relative bg-white rounded-lg shadow-lg"
+          style={{
+            aspectRatio: '7 / 9',
+            height: 'calc(100vh - 140px)',
+            maxWidth: 'calc((100vh - 140px) * 7 / 9)',
+            fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+          }}
+        />
 
           {/* Navigation Arrows */}
           {isReady && (
@@ -198,7 +175,6 @@ export default function EpubReader({ epubData, fileName, onCloseAction }: EpubRe
               </button>
             </>
           )}
-        </div>
       </div>
     </div>
   )
