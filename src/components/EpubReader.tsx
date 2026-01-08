@@ -169,13 +169,13 @@ export default function EpubReader({ epubData, fileName, onCloseAction }: EpubRe
 
       {/* Reader */}
       <div className="flex-1 relative bg-paper p-8">
-        <div className="max-w-5xl mx-auto" style={{ height: 'calc(100vh - 200px)' }}>
+        <div className="max-w-5xl mx-auto" style={{ height: 'calc(100vh - 120px)' }}>
           <div
             ref={viewerRef}
-            className="w-full relative bg-white"
+            className="w-full relative bg-white rounded-lg shadow-lg"
             style={{
               height: '100%',
-              border: '2px solid red', // Debug border
+              fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
             }}
           />
 
