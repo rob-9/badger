@@ -28,4 +28,29 @@
   .highlight {
     @apply bg-yellow-200 px-1 rounded;
   }
+
+  /* EPUB Reader Styles - Book-like appearance */
+  .epub-container {
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.1),
+      0 4px 16px rgba(0, 0, 0, 0.05);
+  }
+
+  /* Style the react-reader iframe content */
+  :global(.epub-view iframe) {
+    background: #f9f7f4 !important;
+  }
+
+  /* Navigation arrows styling */
+  :global(.epub-view > button) {
+    background: rgba(255, 255, 255, 0.9) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+    border-radius: 4px !important;
+    transition: all 0.2s ease !important;
+  }
+
+  :global(.epub-view > button:hover) {
+    background: rgba(255, 255, 255, 1) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+  }
 }

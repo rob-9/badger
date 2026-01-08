@@ -5,7 +5,7 @@ import { Upload, FileText, Book, File } from 'lucide-react'
 import JSZip from 'jszip'
 
 interface FileUploaderProps {
-  onFileLoadAction: (content: string, fileName: string) => void
+  onFileLoadAction: (content: string, fileName: string, arrayBuffer?: ArrayBuffer) => void
 }
 
 export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
@@ -85,16 +85,19 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
 
     try {
       let text: string
+      let arrayBuffer: ArrayBuffer | undefined
 
       if (file.name.toLowerCase().endsWith('.epub')) {
-        // Handle EPUB files
+        // Get ArrayBuffer for EPUB file (needed by react-reader)
+        arrayBuffer = await file.arrayBuffer()
+        // Still parse for fallback/preview
         text = await parseEpub(file)
       } else {
         // Handle other file types as plain text
         text = await file.text()
       }
 
-      onFileLoadAction(text, file.name)
+      onFileLoadAction(text, file.name, arrayBuffer)
     } catch (error) {
       console.error('Error reading file:', error)
     } finally {
