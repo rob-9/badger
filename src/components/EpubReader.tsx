@@ -4,16 +4,23 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import ePub, { Book, Rendition } from 'epubjs'
 import { ChevronLeft, ChevronRight, Bookmark, Settings, ZoomIn, ZoomOut } from 'lucide-react'
 
+export interface TextSelection {
+  text: string
+  position: { x: number; y: number }
+  pageRect: { left: number; right: number; top: number; bottom: number }
+}
+
 interface EpubReaderProps {
   epubData: ArrayBuffer
   fileName: string
   onCloseAction: () => void
+  onTextSelect?: (selection: TextSelection) => void
 }
 
 // Book page aspect ratio (width:height)
 const ASPECT_RATIO = 7 / 9
 
-export default function EpubReader({ epubData, fileName, onCloseAction }: EpubReaderProps) {
+export default function EpubReader({ epubData, fileName, onCloseAction, onTextSelect }: EpubReaderProps) {
   const [fontSize, setFontSize] = useState(100)
   const [isReady, setIsReady] = useState(false)
   const viewerRef = useRef<HTMLDivElement>(null)
@@ -51,6 +58,48 @@ export default function EpubReader({ epubData, fileName, onCloseAction }: EpubRe
           if (location.start?.cfi) {
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
           }
+        })
+
+        // Custom highlight styling
+        rendition.themes.default({
+          '::selection': {
+            'background': 'rgba(59, 130, 246, 0.15)',
+            'color': 'inherit'
+          }
+        })
+
+        // Handle text selection
+        rendition.on('selected', (cfiRange: string, contents: any) => {
+          if (!onTextSelect) return
+
+          const selection = contents.window.getSelection()
+          if (!selection || selection.isCollapsed) return
+
+          const text = selection.toString().trim()
+          if (!text) return
+
+          // Get position of selection
+          const range = selection.getRangeAt(0)
+          const rect = range.getBoundingClientRect()
+
+          // Get iframe and viewer positions
+          const iframe = viewerRef.current?.querySelector('iframe')
+          const iframeRect = iframe?.getBoundingClientRect() || { left: 0, top: 0 }
+          const viewerRect = viewerRef.current?.getBoundingClientRect() || { left: 0, top: 0, right: 0, bottom: 0 }
+
+          onTextSelect({
+            text,
+            position: {
+              x: iframeRect.left + rect.left + rect.width / 2,
+              y: iframeRect.top + rect.top,
+            },
+            pageRect: {
+              left: viewerRect.left,
+              right: viewerRect.right,
+              top: viewerRect.top,
+              bottom: viewerRect.bottom,
+            },
+          })
         })
       } catch (error) {
         console.error('Error loading EPUB:', error)

@@ -37,10 +37,7 @@ export default function BookHistory({ history, onOpenBook }: BookHistoryProps) {
         {history.map((book) => (
           <button
             key={book.id}
-            onClick={() => {
-              console.log('Opening book:', book.fileName)
-              onOpenBook(book)
-            }}
+            onClick={() => onOpenBook(book)}
             className="w-full flex items-center gap-4 p-4 bg-white rounded-lg border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all text-left cursor-pointer"
           >
             <div className="flex-shrink-0 w-10 h-12 bg-gray-100 rounded flex items-center justify-center">
