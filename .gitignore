@@ -63,5 +63,8 @@ temp/
 # Test files
 test-document.txt
 
+# Personal notes
+TY.md
+
 package-lock.json
 .claude/
