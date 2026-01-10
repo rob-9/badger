@@ -15,6 +15,8 @@ export default function Home() {
   const [epubData, setEpubData] = useState<ArrayBuffer | null>(null)
   const [isEpub, setIsEpub] = useState(false)
   const [history, setHistory] = useState<BookMetadata[]>([])
+  const [bookId, setBookId] = useState<string | null>(null)
+  const [isIndexing, setIsIndexing] = useState(false)
 
   // Chat state
   const [selection, setSelection] = useState<TextSelection | null>(null)
@@ -30,13 +32,36 @@ export default function Home() {
   const handleFileLoad = async (content: string, name: string, arrayBuffer?: ArrayBuffer) => {
     setDocument(content)
     setFileName(name)
-    setIsEpub(name.toLowerCase().endsWith('.epub'))
+    const isEpubFile = name.toLowerCase().endsWith('.epub')
+    setIsEpub(isEpubFile)
 
     // For EPUB files, store the ArrayBuffer for the reader and save to history
-    if (name.toLowerCase().endsWith('.epub') && arrayBuffer) {
+    if (isEpubFile && arrayBuffer) {
       setEpubData(arrayBuffer)
-      await addBook(name, arrayBuffer)
+      const id = await addBook(name, arrayBuffer)
+      setBookId(id)
       setHistory(getBookHistory()) // Refresh history
+
+      // Index the book for RAG
+      console.log('[App] Starting RAG indexing for book')
+      setIsIndexing(true)
+      try {
+        const response = await fetch('/api/rag/index', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookId: id, text: content })
+        })
+
+        if (!response.ok) {
+          throw new Error('Failed to index book')
+        }
+
+        console.log('[App] Book indexed successfully')
+      } catch (error) {
+        console.error('[App] Failed to index book:', error)
+      } finally {
+        setIsIndexing(false)
+      }
     }
   }
 
@@ -46,6 +71,7 @@ export default function Home() {
       setEpubData(data)
       setFileName(book.fileName)
       setIsEpub(true)
+      setBookId(book.id)
       setDocument('loaded') // Set truthy value to trigger reader view
     }
   }, [])
@@ -55,6 +81,8 @@ export default function Home() {
     setFileName('')
     setEpubData(null)
     setIsEpub(false)
+    setBookId(null)
+    setIsIndexing(false)
     setHistory(getBookHistory()) // Refresh history
     // Reset chat state
     setSelection(null)
@@ -78,21 +106,46 @@ export default function Home() {
     }
     setChatMessages(prev => [...prev, userMessage])
 
-    // TODO: Replace with actual LLM API call
     setIsChatLoading(true)
     try {
-      // Placeholder response - replace with RAG/LLM integration
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      console.log('[App] Querying with RAG:', { bookId, question, hasContext: !!context })
+
+      const response = await fetch('/api/rag/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookId,
+          question,
+          selectedText: context,
+          useRag: !!bookId // Use RAG if we have a bookId, otherwise simple query
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to query book')
+      }
+
+      const data = await response.json()
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `This is a placeholder response. To enable real answers, integrate an LLM API.\n\nYour question: "${question}"\n\nContext: "${context.slice(0, 200)}..."`,
+        content: data.answer,
       }
       setChatMessages(prev => [...prev, assistantMessage])
+
+      console.log('[App] Got answer from RAG')
+    } catch (error) {
+      console.error('[App] Failed to query:', error)
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'Sorry, I encountered an error processing your question. Please try again.',
+      }
+      setChatMessages(prev => [...prev, errorMessage])
     } finally {
       setIsChatLoading(false)
     }
-  }, [])
+  }, [bookId])
 
   const handleChatMessage = useCallback(async (message: string) => {
     const userMessage: ChatMessage = {
@@ -102,20 +155,45 @@ export default function Home() {
     }
     setChatMessages(prev => [...prev, userMessage])
 
-    // TODO: Replace with actual LLM API call
     setIsChatLoading(true)
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      console.log('[App] Follow-up query with RAG:', { bookId, message })
+
+      const response = await fetch('/api/rag/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookId,
+          question: message,
+          useRag: !!bookId
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to query book')
+      }
+
+      const data = await response.json()
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `Placeholder follow-up response to: "${message}"`,
+        content: data.answer,
       }
       setChatMessages(prev => [...prev, assistantMessage])
+
+      console.log('[App] Got follow-up answer from RAG')
+    } catch (error) {
+      console.error('[App] Failed to query:', error)
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'Sorry, I encountered an error processing your question. Please try again.',
+      }
+      setChatMessages(prev => [...prev, errorMessage])
     } finally {
       setIsChatLoading(false)
     }
-  }, [])
+  }, [bookId])
 
   return (
     <main className="min-h-screen">
