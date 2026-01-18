@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import ePub, { Book, Rendition } from 'epubjs'
-import { ChevronLeft, ChevronRight, Bookmark, Settings, ZoomIn, ZoomOut } from 'lucide-react'
+import ePub, { Book, Rendition, NavItem } from 'epubjs'
+import { ChevronLeft, ChevronRight, Bookmark, Settings, ZoomIn, ZoomOut, List } from 'lucide-react'
 
 export interface TextSelection {
   text: string
@@ -23,6 +23,8 @@ const ASPECT_RATIO = 7 / 9
 export default function EpubReader({ epubData, fileName, onCloseAction, onTextSelect }: EpubReaderProps) {
   const [fontSize, setFontSize] = useState(100)
   const [isReady, setIsReady] = useState(false)
+  const [toc, setToc] = useState<NavItem[]>([])
+  const [showToc, setShowToc] = useState(false)
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
@@ -42,6 +44,14 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
 
         if (!mounted || !viewerRef.current) return
 
+        // Wait for spine to be parsed
+        await book.spine.load(book.packaging)
+
+        if (!book.spine || book.spine.length === 0) {
+          console.error('Book spine is empty')
+          return
+        }
+
         const rendition = book.renderTo(viewerRef.current, {
           width: '100%',
           height: '100%',
@@ -51,8 +61,30 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
 
         renditionRef.current = rendition
 
-        await rendition.display()
+        // Clear any invalid saved location first
+        const savedLocation = localStorage.getItem(`epub-location-${fileName}`)
+
+        try {
+          if (savedLocation) {
+            await rendition.display(savedLocation)
+          } else {
+            await rendition.display()
+          }
+        } catch (error) {
+          console.error('Error displaying, clearing saved location and restarting:', error)
+          // Clear invalid saved location
+          localStorage.removeItem(`epub-location-${fileName}`)
+          // Start from beginning
+          await rendition.display()
+        }
+
         setIsReady(true)
+
+        // Load table of contents
+        const navigation = book.navigation
+        if (navigation?.toc) {
+          setToc(navigation.toc)
+        }
 
         rendition.on('relocated', (location: any) => {
           if (location.start?.cfi) {
@@ -129,6 +161,24 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
     }
   }, [])
 
+  const handleNavigate = useCallback(async (href: string) => {
+    if (renditionRef.current) {
+      try {
+        await renditionRef.current.display(href)
+        setShowToc(false)
+      } catch (error) {
+        console.error('Error navigating to section:', error)
+        // If navigation fails, try going to start of book
+        try {
+          await renditionRef.current.display()
+          setShowToc(false)
+        } catch (fallbackError) {
+          console.error('Failed to recover from navigation error:', fallbackError)
+        }
+      }
+    }
+  }, [])
+
   // Handle keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -178,6 +228,13 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
           </div>
 
           <button
+            onClick={() => setShowToc(!showToc)}
+            className={`p-2 hover:bg-gray-100 rounded-lg ${showToc ? 'bg-gray-100' : ''}`}
+            title="Table of Contents"
+          >
+            <List className="w-5 h-5" />
+          </button>
+          <button
             className="p-2 hover:bg-gray-100 rounded-lg"
             title="Bookmarks"
           >
@@ -191,6 +248,20 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
           </button>
         </div>
       </header>
+
+      {/* Table of Contents Sidebar */}
+      {showToc && (
+        <div className="fixed left-0 top-[73px] h-[calc(100vh-73px)] w-80 bg-white border-r border-gray-200 shadow-lg z-30 overflow-y-auto">
+          <div className="p-4">
+            <h2 className="text-lg font-semibold mb-4">Table of Contents</h2>
+            <div className="space-y-1">
+              {toc.map((item, index) => (
+                <TocItem key={index} item={item} onNavigate={handleNavigate} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reader */}
       <div className="flex-1 relative bg-paper p-8 flex items-center justify-center overflow-hidden">
@@ -225,6 +296,28 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
             </>
           )}
       </div>
+    </div>
+  )
+}
+
+// TOC Item component
+function TocItem({ item, onNavigate, level = 0 }: { item: NavItem; onNavigate: (href: string) => void; level?: number }) {
+  return (
+    <div>
+      <button
+        onClick={() => onNavigate(item.href)}
+        className="w-full text-left px-3 py-2 hover:bg-gray-100 rounded-lg transition-colors text-sm"
+        style={{ paddingLeft: `${12 + level * 16}px` }}
+      >
+        <span className="text-gray-800">{item.label}</span>
+      </button>
+      {item.subitems && item.subitems.length > 0 && (
+        <div>
+          {item.subitems.map((subitem, index) => (
+            <TocItem key={index} item={subitem} onNavigate={onNavigate} level={level + 1} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
