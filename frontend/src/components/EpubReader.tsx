@@ -44,13 +44,8 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
 
         if (!mounted || !viewerRef.current) return
 
-        // Wait for spine to be parsed
-        await book.spine.load(book.packaging)
-
-        if (!book.spine || book.spine.length === 0) {
-          console.error('Book spine is empty')
-          return
-        }
+        // Wait for spine to be loaded
+        await book.loaded.spine
 
         const rendition = book.renderTo(viewerRef.current, {
           width: '100%',
@@ -101,7 +96,7 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
         })
 
         // Handle text selection
-        rendition.on('selected', (cfiRange: string, contents: any) => {
+        rendition.on('selected', (_cfiRange: string, contents: any) => {
           if (!onTextSelect) return
 
           const selection = contents.window.getSelection()
@@ -147,7 +142,7 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
         renditionRef.current = null
       }
     }
-  }, [epubData, fileName])
+  }, [epubData, fileName, onTextSelect])
 
   const handleNext = useCallback(async () => {
     if (renditionRef.current) {

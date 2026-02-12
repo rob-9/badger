@@ -8,6 +8,7 @@ import BookHistory from '@/components/BookHistory'
 import QuestionPopup from '@/components/QuestionPopup'
 import ChatPanel, { type ChatMessage } from '@/components/ChatPanel'
 import { addBook, getBookData, getBookHistory, type BookMetadata } from '@/lib/bookStorage'
+import { indexBook, queryBook } from '@/lib/api'
 
 export default function Home() {
   const [document, setDocument] = useState<string | null>(null)
@@ -46,16 +47,7 @@ export default function Home() {
       console.log('[App] Starting RAG indexing for book')
       setIsIndexing(true)
       try {
-        const response = await fetch('/api/rag/index', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bookId: id, text: content })
-        })
-
-        if (!response.ok) {
-          throw new Error('Failed to index book')
-        }
-
+        await indexBook(id, content)
         console.log('[App] Book indexed successfully')
       } catch (error) {
         console.error('[App] Failed to index book:', error)
@@ -110,22 +102,12 @@ export default function Home() {
     try {
       console.log('[App] Querying with RAG:', { bookId, question, hasContext: !!context })
 
-      const response = await fetch('/api/rag/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bookId,
-          question,
-          selectedText: context,
-          useRag: !!bookId // Use RAG if we have a bookId, otherwise simple query
-        })
+      const data = await queryBook({
+        bookId: bookId || undefined,
+        question,
+        selectedText: context,
+        useRag: !!bookId
       })
-
-      if (!response.ok) {
-        throw new Error('Failed to query book')
-      }
-
-      const data = await response.json()
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -159,21 +141,11 @@ export default function Home() {
     try {
       console.log('[App] Follow-up query with RAG:', { bookId, message })
 
-      const response = await fetch('/api/rag/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bookId,
-          question: message,
-          useRag: !!bookId
-        })
+      const data = await queryBook({
+        bookId: bookId || undefined,
+        question: message,
+        useRag: !!bookId
       })
-
-      if (!response.ok) {
-        throw new Error('Failed to query book')
-      }
-
-      const data = await response.json()
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',

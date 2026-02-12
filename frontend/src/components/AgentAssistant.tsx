@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, Brain, BookOpen, Lightbulb, HelpCircle } from 'lucide-react'
 import { AgentContext, AgentResponse } from '@/types'
+import { getAgentAssistance } from '@/lib/api'
 
 interface AgentAssistantProps {
   selectedText: string
@@ -18,25 +19,13 @@ export default function AgentAssistant({ selectedText, context, onClose }: Agent
   const handleAgentRequest = useCallback(async () => {
     setIsLoading(true)
     setError(null)
-    
+
     try {
-      const response = await fetch('/api/agent', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          selectedText: context.selectedText,
-          surroundingText: context.surroundingText,
-          documentTitle: context.documentTitle,
-        }),
+      const data = await getAgentAssistance({
+        selectedText: context.selectedText,
+        surroundingText: context.surroundingText,
+        documentTitle: context.documentTitle,
       })
-
-      if (!response.ok) {
-        throw new Error('Failed to get AI assistance')
-      }
-
-      const data = await response.json()
       setResponse(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')

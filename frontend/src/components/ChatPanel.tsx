@@ -64,7 +64,7 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
             <div className={`max-w-[85%] ${msg.role === 'user' ? 'order-1' : ''}`}>
               {msg.context && (
                 <div className="text-xs text-gray-400 mb-1 italic line-clamp-2">
-                  Re: "{msg.context.slice(0, 80)}{msg.context.length > 80 ? '...' : ''}"
+                  Re: &ldquo;{msg.context.slice(0, 80)}{msg.context.length > 80 ? '...' : ''}&rdquo;
                 </div>
               )}
               <div
