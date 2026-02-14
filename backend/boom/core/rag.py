@@ -14,14 +14,23 @@ Learn more:
 - https://github.com/anthropics/claude-cookbooks
 """
 
-import os
+import json
+import logging
+from datetime import datetime
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 import voyageai
 from anthropic import Anthropic
 
+from boom import config
 from .chunker import chunk_text
 from .vector_store import VectorStore, VectorEntry
+
+logger = logging.getLogger(__name__)
+
+LOG_DIR = Path(".data/logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
@@ -34,21 +43,17 @@ class RAGResponse:
 class RAGService:
     """Simple RAG for personal reading assistant."""
 
-    def __init__(self, storage_dir: str = ".data/vectors"):
+    def __init__(self, storage_dir: str = config.VECTOR_STORAGE_DIR):
         """
         Initialize RAG service.
 
         Args:
             storage_dir: Directory to store vector embeddings
         """
-        # Initialize clients
-        self.voyage = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
-        self.anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-        # Initialize vector store
+        self.voyage = voyageai.Client(api_key=config.VOYAGE_API_KEY)
+        self.anthropic = Anthropic(api_key=config.ANTHROPIC_API_KEY)
         self.vector_store = VectorStore(storage_dir)
-
-        print("[RAG] Service initialized")
+        logger.info("Service initialized")
 
     async def get_embedding(
         self,
@@ -71,12 +76,11 @@ class RAGService:
         Returns:
             Embedding vector
         """
-        print(f"[RAG] Embedding text ({input_type})")
-        print(f"[RAG] Text length: {len(text)} characters")
+        logger.debug("Embedding text (%s), %d chars", input_type, len(text))
 
         response = self.voyage.embed(
             texts=[text],
-            model="voyage-3",
+            model=config.VOYAGE_MODEL,
             input_type=input_type
         )
 
@@ -84,7 +88,7 @@ class RAGService:
             raise ValueError("No embedding returned from Voyage AI")
 
         embedding = response.embeddings[0]
-        print(f"[RAG] Generated embedding with {len(embedding)} dimensions")
+        logger.debug("Generated embedding with %d dimensions", len(embedding))
         return embedding
 
     async def get_embeddings(
@@ -102,18 +106,18 @@ class RAGService:
         Returns:
             List of embedding vectors
         """
-        print(f"[RAG] Embedding {len(texts)} texts in batch ({input_type})")
+        logger.info("Embedding %d texts in batch (%s)", len(texts), input_type)
 
         response = self.voyage.embed(
             texts=texts,
-            model="voyage-3",
+            model=config.VOYAGE_MODEL,
             input_type=input_type
         )
 
         if not response.embeddings:
             raise ValueError("No embeddings returned from Voyage AI")
 
-        print(f"[RAG] Generated {len(response.embeddings)} embeddings")
+        logger.info("Generated %d embeddings", len(response.embeddings))
         return response.embeddings
 
     async def index_book(self, book_id: str, text: str) -> None:
@@ -129,43 +133,29 @@ class RAGService:
             book_id: Unique identifier for the book
             text: Full text of the book
         """
-        print("=" * 60)
-        print("[RAG] Starting book indexing process")
-        print(f"[RAG] Book ID: {book_id}")
-        print(f"[RAG] Text length: {len(text)} characters")
+        logger.info("Indexing book %s (%d chars)", book_id, len(text))
 
         # Check if already indexed
         if self.vector_store.has_book(book_id):
-            print("[RAG] Book already indexed, skipping")
-            print("=" * 60)
+            logger.info("Book %s already indexed, skipping", book_id)
             return
 
-        # STEP 1: Chunk the text
-        print("[RAG] STEP 1: Chunking text")
+        # Chunk the text
         chunks = chunk_text(text, book_id)
-        print(f"[RAG] Created {len(chunks)} chunks")
-        if chunks:
-            print(f"[RAG] Average chunk size: {len(text) // len(chunks)} characters")
+        logger.info("Created %d chunks (avg %d chars)", len(chunks), len(text) // len(chunks) if chunks else 0)
 
-        # STEP 2: Get embeddings for all chunks (batched)
-        print("[RAG] STEP 2: Generating embeddings")
+        # Get embeddings for all chunks (batched)
         texts = [chunk.text for chunk in chunks]
         embeddings = await self.get_embeddings(texts, input_type="document")
 
-        # STEP 3: Create vector entries
-        print("[RAG] STEP 3: Creating vector entries")
+        # Create vector entries and store
         entries = [
             VectorEntry(chunk=chunk, embedding=embedding)
             for chunk, embedding in zip(chunks, embeddings)
         ]
-        print(f"[RAG] Created {len(entries)} vector entries")
-
-        # STEP 4: Store in vector store
-        print("[RAG] STEP 4: Storing in vector store")
         await self.vector_store.add_book(book_id, entries)
 
-        print("[RAG] Indexing complete!")
-        print("=" * 60)
+        logger.info("Indexing complete for %s", book_id)
 
     async def query_book(
         self,
@@ -191,39 +181,29 @@ class RAGService:
         Returns:
             RAGResponse with answer and sources
         """
-        print("=" * 60)
-        print("[RAG] Starting query process")
-        print(f"[RAG] Book ID: {book_id}")
-        print(f"[RAG] Question: \"{question}\"")
-        if selected_text:
-            print(f"[RAG] Selected text: \"{selected_text[:100]}...\"")
+        logger.info("Query book=%s question=%r", book_id, question[:80])
 
-        # STEP 1: Embed the question
-        print("[RAG] STEP 1: Embedding question")
+        # Embed the question
         question_embedding = await self.get_embedding(question, input_type="query")
 
-        # STEP 2: Find relevant chunks
-        print("[RAG] STEP 2: Searching for relevant chunks")
+        # Find relevant chunks
         results = await self.vector_store.search(book_id, question_embedding, top_k=5)
 
         if not results:
-            print("[RAG] No relevant chunks found")
-            print("=" * 60)
+            logger.info("No relevant chunks found")
             return RAGResponse(
                 answer="I couldn't find relevant information in the book to answer this question.",
                 sources=[]
             )
 
-        print(f"[RAG] Found {len(results)} relevant chunks:")
         for i, result in enumerate(results):
             chunk_idx = result.chunk.metadata['chunk_index']
-            print(f"[RAG]   {i + 1}. Chunk {chunk_idx} (similarity: {result.score:.3f})")
+            logger.debug("  %d. Chunk %d (similarity: %.3f)", i + 1, chunk_idx, result.score)
 
-        # STEP 3: Tag chunks as PAST or AHEAD based on reader position
-        print("[RAG] STEP 3: Tagging chunks by reader position")
+        # Tag chunks as PAST or AHEAD based on reader position
         total_chunks = await self.vector_store.get_total_chunks(book_id)
         reader_chunk_index = int((reader_position or 0) * total_chunks)
-        print(f"[RAG] Reader at chunk ~{reader_chunk_index} of {total_chunks}")
+        logger.debug("Reader at chunk ~%d of %d", reader_chunk_index, total_chunks)
 
         past_chunks = []
         ahead_chunks = []
@@ -232,10 +212,9 @@ class RAGService:
                 past_chunks.append(result)
             else:
                 ahead_chunks.append(result)
-        print(f"[RAG] Past chunks: {len(past_chunks)}, Ahead chunks: {len(ahead_chunks)}")
+        logger.debug("Past chunks: %d, Ahead chunks: %d", len(past_chunks), len(ahead_chunks))
 
-        # STEP 4: Build context with labeled sections
-        print("[RAG] STEP 4: Building context from chunks")
+        # Build context with labeled sections
         context_parts = []
         if past_chunks:
             context_parts.append(
@@ -252,10 +231,8 @@ class RAGService:
                 )
             )
         context = "\n\n===\n\n".join(context_parts)
-        print(f"[RAG] Context length: {len(context)} characters")
 
-        # STEP 5: Build the prompt
-        print("[RAG] STEP 5: Building prompt")
+        # Build the prompt
         system_prompt = """You are a thoughtful reading companion helping a reader through a book.
 
 You have two types of context:
@@ -277,12 +254,9 @@ Question: {question}"""
 
 Question: {question}"""
 
-        print(f"[RAG] Prompt tokens (approx): {len(user_prompt) // 4}")
-
-        # STEP 6: Generate answer with Claude
-        print("[RAG] STEP 6: Generating answer with Claude")
+        # Generate answer with Claude
         response = self.anthropic.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=config.CLAUDE_MODEL,
             max_tokens=1024,
             system=system_prompt,
             messages=[
@@ -292,9 +266,38 @@ Question: {question}"""
 
         answer = response.content[0].text if response.content else "Unable to generate response"
 
-        print(f"[RAG] Generated answer: {answer[:100]}...")
-        print("[RAG] Query complete!")
-        print("=" * 60)
+        # Log full exchange to file
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "book_id": book_id,
+            "reader_position": reader_position,
+            "reader_chunk_index": reader_chunk_index,
+            "total_chunks": total_chunks,
+            "question": question,
+            "selected_text": selected_text,
+            "retrieved_chunks": [
+                {
+                    "chunk_index": r.chunk.metadata["chunk_index"],
+                    "score": round(r.score, 4),
+                    "label": "PAST" if r.chunk.metadata["chunk_index"] <= reader_chunk_index else "AHEAD",
+                    "text": r.chunk.text,
+                }
+                for r in results
+            ],
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "response": {
+                "answer": answer,
+                "model": response.model,
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "stop_reason": response.stop_reason,
+            },
+        }
+        log_file = LOG_DIR / "queries.jsonl"
+        with open(log_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+        logger.info("Query complete: %d in / %d out tokens", response.usage.input_tokens, response.usage.output_tokens)
 
         return RAGResponse(
             answer=answer,
@@ -322,7 +325,7 @@ Question: {question}"""
             Claude's answer
         """
         response = self.anthropic.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=config.CLAUDE_MODEL,
             max_tokens=1024,
             system="You are a helpful reading assistant. Answer questions about the provided text concisely.",
             messages=[

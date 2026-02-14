@@ -16,12 +16,15 @@ Learn more:
 - https://docs.trychroma.com/
 """
 
-from dataclasses import dataclass, asdict
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 import json
 import math
 from typing import Optional
 from .chunker import TextChunk
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -81,7 +84,7 @@ class VectorStore:
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.entries: dict[str, list[VectorEntry]] = {}
-        print(f"[VectorStore] Initialized with storage: {self.storage_dir}")
+        logger.info("Initialized with storage: %s", self.storage_dir)
 
     def _get_file_path(self, book_id: str) -> Path:
         """Get file path for a book's vectors."""
@@ -120,7 +123,7 @@ class VectorStore:
         with open(file_path, 'w') as f:
             json.dump(data, f)
 
-        print(f"[VectorStore] Saved {len(entries)} entries to: {file_path}")
+        logger.info("Saved %d entries to %s", len(entries), file_path)
 
     async def load_from_file(self, book_id: str) -> Optional[list[VectorEntry]]:
         """Load vectors from file."""
@@ -134,10 +137,10 @@ class VectorStore:
                 data = json.load(f)
 
             entries = [self._deserialize_entry(e) for e in data['entries']]
-            print(f"[VectorStore] Loaded {len(entries)} entries from: {file_path}")
+            logger.info("Loaded %d entries from %s", len(entries), file_path)
             return entries
         except Exception as e:
-            print(f"[VectorStore] Error loading from file: {e}")
+            logger.error("Error loading from file: %s", e)
             return None
 
     async def add_book(self, book_id: str, entries: list[VectorEntry]) -> None:
@@ -149,8 +152,7 @@ class VectorStore:
             entries: List of VectorEntry objects
         """
         self.entries[book_id] = entries
-        print(f"[VectorStore] Added {len(entries)} chunks to in-memory store")
-        print(f"[VectorStore] Book ID: {book_id}")
+        logger.info("Added %d chunks for book %s", len(entries), book_id)
 
         # Persist to file system
         await self.save_to_file(book_id, entries)
@@ -172,28 +174,25 @@ class VectorStore:
         Returns:
             List of SearchResult objects sorted by similarity
         """
-        print(f"[VectorStore] Searching book: {book_id}")
-        print(f"[VectorStore] Query embedding dimensions: {len(query_embedding)}")
-        print(f"[VectorStore] Returning top {top_k} results")
+        logger.debug("Searching book %s (top %d)", book_id, top_k)
 
         # Try to get from memory first
         book_entries = self.entries.get(book_id)
 
         # If not in memory, try loading from file
         if not book_entries:
-            print("[VectorStore] Not in memory, loading from disk")
+            logger.debug("Not in memory, loading from disk")
             book_entries = await self.load_from_file(book_id)
 
             if book_entries:
                 # Cache in memory for future queries
                 self.entries[book_id] = book_entries
-                print("[VectorStore] Loaded from disk and cached in memory")
 
         if not book_entries:
-            print(f"[VectorStore] No entries found for book: {book_id}")
+            logger.info("No entries found for book: %s", book_id)
             return []
 
-        print(f"[VectorStore] Comparing against {len(book_entries)} chunks")
+        logger.debug("Comparing against %d chunks", len(book_entries))
 
         # Calculate similarity for each chunk
         results = [
@@ -205,7 +204,7 @@ class VectorStore:
         top_results = sorted(results, key=lambda r: r.score, reverse=True)[:top_k]
 
         if top_results:
-            print(f"[VectorStore] Best match similarity: {top_results[0].score:.3f}")
+            logger.debug("Best match similarity: %.3f", top_results[0].score)
 
         return top_results
 
@@ -223,7 +222,7 @@ class VectorStore:
         file_path = self._get_file_path(book_id)
         if file_path.exists():
             file_path.unlink()
-            print(f"[VectorStore] Deleted from disk: {book_id}")
+            logger.info("Deleted from disk: %s", book_id)
 
     async def get_total_chunks(self, book_id: str) -> int:
         """Return total number of indexed chunks for a book."""

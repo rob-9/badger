@@ -7,7 +7,8 @@ Simple API with three endpoints:
 3. POST /api/agent - Get AI assistance for selected text
 """
 
-import os
+import json
+import logging
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 load_dotenv()
@@ -17,21 +18,35 @@ from pydantic import BaseModel
 from typing import Optional
 from anthropic import Anthropic
 
+from boom import config
 from boom.core.rag import RAGService
 
-# Global RAG service instance
+logger = logging.getLogger(__name__)
+
+# Global services
 rag_service: Optional[RAGService] = None
+anthropic_client: Optional[Anthropic] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize services on startup."""
-    global rag_service
-    print("[Server] Initializing RAG service...")
-    rag_service = RAGService()
-    print("[Server] Server ready!")
+    global rag_service, anthropic_client
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    config.validate_keys()
+
+    logger.info("Initializing services...")
+    anthropic_client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    rag_service = RAGService(storage_dir=config.VECTOR_STORAGE_DIR)
+    logger.info("Server ready")
     yield
-    print("[Server] Shutting down...")
+    logger.info("Shutting down")
 
 
 app = FastAPI(
@@ -44,7 +59,7 @@ app = FastAPI(
 # CORS - allow Next.js frontend to call this API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -88,7 +103,7 @@ async def index_book(request: IndexBookRequest):
         await rag_service.index_book(request.book_id, request.text)
         return {"success": True, "book_id": request.book_id}
     except Exception as e:
-        print(f"[Server] Error indexing book: {e}")
+        logger.error("Error indexing book: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -129,7 +144,7 @@ async def query_book(request: QueryBookRequest):
                 detail="Must provide either book_id (for RAG) or selected_text (for simple query)"
             )
     except Exception as e:
-        print(f"[Server] Error querying book: {e}")
+        logger.error("Error querying book: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -157,9 +172,10 @@ async def agent_assist(request: AgentRequest):
 
     Provides explanation, definitions, related concepts, and suggestions.
     """
-    try:
-        anthropic = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    if not anthropic_client:
+        raise HTTPException(status_code=503, detail="Anthropic client not initialized")
 
+    try:
         prompt = f"""You are a reading assistant AI. A user is reading "{request.document_title or 'a document'}" and has selected the following text: "{request.selected_text}".
 
 Here is the surrounding context:
@@ -179,8 +195,8 @@ Respond in JSON format with the following structure:
   "suggestions": ["string array"]
 }}"""
 
-        message = anthropic.messages.create(
-            model="claude-sonnet-4-20250514",
+        message = anthropic_client.messages.create(
+            model=config.CLAUDE_MODEL,
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -189,8 +205,11 @@ Respond in JSON format with the following structure:
         if content.type != 'text':
             raise HTTPException(status_code=500, detail="No text response from AI")
 
-        import json
-        response_data = json.loads(content.text)
+        try:
+            response_data = json.loads(content.text)
+        except json.JSONDecodeError:
+            logger.error("Failed to parse Claude response as JSON: %s", content.text[:200])
+            raise HTTPException(status_code=500, detail="Invalid JSON response from AI")
 
         return AgentResponse(
             explanation=response_data.get("explanation", ""),
@@ -198,8 +217,10 @@ Respond in JSON format with the following structure:
             related_concepts=response_data.get("relatedConcepts", []),
             suggestions=response_data.get("suggestions", [])
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[Server] Error in agent assist: {e}")
+        logger.error("Error in agent assist: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
