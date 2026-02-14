@@ -171,7 +171,8 @@ class RAGService:
         self,
         book_id: str,
         question: str,
-        selected_text: Optional[str] = None
+        selected_text: Optional[str] = None,
+        reader_position: Optional[float] = None
     ) -> RAGResponse:
         """
         Query a book with RAG.
@@ -218,19 +219,50 @@ class RAGService:
             chunk_idx = result.chunk.metadata['chunk_index']
             print(f"[RAG]   {i + 1}. Chunk {chunk_idx} (similarity: {result.score:.3f})")
 
-        # STEP 3: Build context from retrieved chunks
-        print("[RAG] STEP 3: Building context from chunks")
-        context = "\n\n---\n\n".join([
-            f"[Source {i + 1}]\n{result.chunk.text}"
-            for i, result in enumerate(results)
-        ])
+        # STEP 3: Tag chunks as PAST or AHEAD based on reader position
+        print("[RAG] STEP 3: Tagging chunks by reader position")
+        total_chunks = await self.vector_store.get_total_chunks(book_id)
+        reader_chunk_index = int((reader_position or 0) * total_chunks)
+        print(f"[RAG] Reader at chunk ~{reader_chunk_index} of {total_chunks}")
+
+        past_chunks = []
+        ahead_chunks = []
+        for result in results:
+            if result.chunk.metadata['chunk_index'] <= reader_chunk_index:
+                past_chunks.append(result)
+            else:
+                ahead_chunks.append(result)
+        print(f"[RAG] Past chunks: {len(past_chunks)}, Ahead chunks: {len(ahead_chunks)}")
+
+        # STEP 4: Build context with labeled sections
+        print("[RAG] STEP 4: Building context from chunks")
+        context_parts = []
+        if past_chunks:
+            context_parts.append(
+                "[ALREADY READ]\n" + "\n\n---\n\n".join(
+                    f"[Source {i + 1}]\n{r.chunk.text}"
+                    for i, r in enumerate(past_chunks)
+                )
+            )
+        if ahead_chunks:
+            context_parts.append(
+                "[COMING UP - guide only, do not spoil]\n" + "\n\n---\n\n".join(
+                    f"[Source {i + 1}]\n{r.chunk.text}"
+                    for i, r in enumerate(ahead_chunks)
+                )
+            )
+        context = "\n\n===\n\n".join(context_parts)
         print(f"[RAG] Context length: {len(context)} characters")
 
-        # STEP 4: Build the prompt
-        print("[RAG] STEP 4: Building prompt")
-        system_prompt = """You are a helpful reading assistant. Answer questions about the book using ONLY the provided context. If the answer isn't in the context, say so.
+        # STEP 5: Build the prompt
+        print("[RAG] STEP 5: Building prompt")
+        system_prompt = """You are a thoughtful reading companion helping a reader through a book.
 
-Be concise but thorough. Reference specific parts of the text when relevant."""
+You have two types of context:
+- [ALREADY READ]: Content the reader has already encountered. You can reference this freely and directly.
+- [COMING UP]: Content the reader hasn't reached yet. Use this ONLY to subtly guide their thinking, intuition, or attention — never quote it, reveal what happens, or spoil events.
+
+Your goal: give meaningful, helpful responses that enrich the reading experience. If a question touches on future content, guide the reader toward noticing the right things without revealing outcomes."""
 
         if selected_text:
             user_prompt = f"""The user selected this text: "{selected_text}"
@@ -247,8 +279,8 @@ Question: {question}"""
 
         print(f"[RAG] Prompt tokens (approx): {len(user_prompt) // 4}")
 
-        # STEP 5: Generate answer with Claude
-        print("[RAG] STEP 5: Generating answer with Claude")
+        # STEP 6: Generate answer with Claude
+        print("[RAG] STEP 6: Generating answer with Claude")
         response = self.anthropic.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=1024,

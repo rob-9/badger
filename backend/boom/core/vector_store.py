@@ -225,6 +225,11 @@ class VectorStore:
             file_path.unlink()
             print(f"[VectorStore] Deleted from disk: {book_id}")
 
+    async def get_total_chunks(self, book_id: str) -> int:
+        """Return total number of indexed chunks for a book."""
+        entries = self.entries.get(book_id) or await self.load_from_file(book_id)
+        return len(entries) if entries else 0
+
     def get_stats(self) -> dict:
         """Get statistics about the store."""
         total_chunks = sum(len(entries) for entries in self.entries.values())
