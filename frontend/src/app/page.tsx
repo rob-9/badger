@@ -7,6 +7,7 @@ import FileUploader from '@/components/FileUploader'
 import BookHistory from '@/components/BookHistory'
 import QuestionPopup from '@/components/QuestionPopup'
 import ChatPanel, { type ChatMessage } from '@/components/ChatPanel'
+import Toast from '@/components/Toast'
 import { addBook, getBookData, getBookHistory, type BookMetadata } from '@/lib/bookStorage'
 import { indexBook, queryBook } from '@/lib/api'
 
@@ -25,6 +26,9 @@ export default function Home() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [isChatLoading, setIsChatLoading] = useState(false)
+
+  // Toast state
+  const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
 
   // Load history on mount
   useEffect(() => {
@@ -47,11 +51,14 @@ export default function Home() {
       // Index the book for RAG
       console.log('[App] Starting RAG indexing for book')
       setIsIndexing(true)
+      setToast({ message: 'Preparing book for AI questions...', type: 'info' })
       try {
         await indexBook(id, content)
         console.log('[App] Book indexed successfully')
+        setToast({ message: 'Book ready! Highlight text to ask questions', type: 'success' })
       } catch (error) {
         console.error('[App] Failed to index book:', error)
+        setToast({ message: 'AI features unavailable. You can still read.', type: 'error' })
       } finally {
         setIsIndexing(false)
       }
@@ -211,6 +218,13 @@ export default function Home() {
           content={document}
           fileName={fileName}
           onClose={handleBack}
+        />
+      )}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
         />
       )}
     </main>
