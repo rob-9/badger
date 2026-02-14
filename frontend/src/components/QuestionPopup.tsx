@@ -66,11 +66,19 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
 
   const POPUP_WIDTH = 320
   const MARGIN_GAP = 20
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
 
   let left = pageRect.right + MARGIN_GAP
   if (left + POPUP_WIDTH > window.innerWidth - 16) {
     left = pageRect.left - POPUP_WIDTH - MARGIN_GAP
-    if (left < 16) left = window.innerWidth - POPUP_WIDTH - 16
+    if (left < 16) {
+      // On mobile, center the popup
+      if (isMobile) {
+        left = Math.max(16, (window.innerWidth - POPUP_WIDTH) / 2)
+      } else {
+        left = window.innerWidth - POPUP_WIDTH - 16
+      }
+    }
   }
 
   const top = Math.max(80, Math.min(position.y - 60, window.innerHeight - 380))
@@ -101,6 +109,7 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
               key={prompt}
               onClick={() => handleQuickPrompt(prompt)}
               className="text-xs px-2.5 py-1 bg-gray-100 dark:bg-[#2a2a2a] hover:bg-gray-200 dark:hover:bg-[#333] text-gray-600 dark:text-[#aaa] rounded-full transition-colors"
+              aria-label={`Ask: ${prompt}`}
             >
               {prompt}
             </button>
@@ -124,6 +133,7 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
             type="submit"
             disabled={!question.trim()}
             className="self-end p-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            aria-label="Submit question"
           >
             <Send className="w-4 h-4" />
           </button>

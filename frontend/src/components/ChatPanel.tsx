@@ -45,7 +45,7 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
   }
 
   return (
-    <div className="fixed right-0 top-0 h-full w-[400px] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
+    <div className="fixed right-0 top-0 h-full w-[400px] max-[768px]:w-full max-[768px]:max-w-[90vw] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-[#2a2a2a]">
         <div className="flex items-center gap-2.5">
@@ -55,13 +55,14 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
         <button
           onClick={onClose}
           className="p-1.5 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa]"
+          aria-label="Close chat panel"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6" role="region" aria-label="Chat messages">
         {messages.length === 0 && (
           <div className="text-center text-gray-400 mt-16">
             <BookOpen className="w-10 h-10 mx-auto mb-3 text-gray-200" />
@@ -123,6 +124,7 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
               type="submit"
               disabled={!input.trim() || isLoading}
               className="flex-shrink-0 p-1.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              aria-label="Send message"
             >
               <Send className="w-3.5 h-3.5" />
             </button>
