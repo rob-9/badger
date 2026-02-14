@@ -30,7 +30,7 @@ export default function BookHistory({ history, onOpenBook }: BookHistoryProps) {
     <div className="w-full max-w-2xl mx-auto px-8 mt-12 relative z-10">
       <div className="flex items-center gap-2 mb-4">
         <Clock className="w-5 h-5 text-gray-500" />
-        <h2 className="text-lg font-semibold text-gray-700">Recent Books</h2>
+        <h2 className="text-lg font-semibold text-gray-700 dark:text-[#ccc]">Recent Books</h2>
       </div>
 
       <div className="space-y-2">
@@ -38,14 +38,14 @@ export default function BookHistory({ history, onOpenBook }: BookHistoryProps) {
           <button
             key={book.id}
             onClick={() => onOpenBook(book)}
-            className="w-full flex items-center gap-4 p-4 bg-white rounded-lg border border-gray-200 hover:border-gray-300 hover:shadow-sm transition-all text-left cursor-pointer"
+            className="w-full flex items-center gap-4 p-4 bg-white dark:bg-[#1e1e1e] rounded-lg border border-gray-200 dark:border-[#2a2a2a] hover:border-gray-300 dark:hover:border-[#444] hover:shadow-sm transition-all text-left cursor-pointer animate-fade-up"
           >
             <div className="flex-shrink-0 w-10 h-12 bg-gray-100 rounded flex items-center justify-center">
               <Book className="w-5 h-5 text-gray-400" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-medium text-gray-900 truncate">{book.fileName}</p>
-              <p className="text-sm text-gray-500">{formatDate(book.lastReadAt)}</p>
+              <p className="font-medium text-gray-900 dark:text-[#e0e0e0] truncate">{book.fileName}</p>
+              <p className="text-sm text-gray-500 dark:text-[#666]">{formatDate(book.lastReadAt)}</p>
             </div>
           </button>
         ))}

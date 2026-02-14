@@ -126,15 +126,15 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
     <div className="w-full max-w-2xl mx-auto p-8">
       <div className="text-center mb-8">
         <Book className="w-16 h-16 mx-auto mb-4 text-accent" />
-        <h1 className="text-3xl font-bold mb-2">boom</h1>
-        <p className="text-gray-600">Read Better.</p>
+        <h1 className="text-3xl font-bold mb-2 dark:text-[#e0e0e0]">boom</h1>
+        <p className="text-gray-600 dark:text-[#888]">Read Better.</p>
       </div>
 
       <div
         className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${
           isDragging
-            ? 'border-accent bg-blue-50'
-            : 'border-gray-300 hover:border-gray-400'
+            ? 'border-accent bg-blue-50 dark:bg-blue-950/20'
+            : 'border-gray-300 dark:border-[#333] hover:border-gray-400 dark:hover:border-[#555]'
         }`}
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
@@ -149,8 +149,8 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
         ) : (
           <>
             <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-            <h3 className="text-xl font-semibold mb-2">Upload Document</h3>
-            <p className="text-gray-600 mb-6">
+            <h3 className="text-xl font-semibold mb-2 dark:text-[#e0e0e0]">Upload Document</h3>
+            <p className="text-gray-600 dark:text-[#888] mb-6">
               
             </p>
             <input
@@ -171,7 +171,7 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
         )}
       </div>
 
-      <div className="mt-8 grid grid-cols-3 gap-4 text-center text-sm text-gray-500">
+      <div className="mt-8 grid grid-cols-3 gap-4 text-center text-sm text-gray-500 dark:text-[#666]">
         <div className="flex flex-col items-center">
           <FileText className="w-6 h-6 mb-2" />
           <span>Text Files</span>

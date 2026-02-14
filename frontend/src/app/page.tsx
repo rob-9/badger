@@ -173,7 +173,7 @@ export default function Home() {
   return (
     <main className="min-h-screen">
       {!document ? (
-        <div className="min-h-screen bg-paper py-12">
+        <div className="min-h-screen bg-paper dark:bg-[#141414] py-12">
           <FileUploader onFileLoadAction={handleFileLoad} />
           {history.length > 0 && (
             <BookHistory history={history} onOpenBook={handleOpenFromHistory} />

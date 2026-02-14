@@ -1,13 +1,13 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { X, Send, MessageCircle, Loader2 } from 'lucide-react'
+import { X, Send, BookOpen, Loader2 } from 'lucide-react'
 
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
-  context?: string // The highlighted text for user messages
+  context?: string
 }
 
 interface ChatPanelProps {
@@ -20,11 +20,11 @@ interface ChatPanelProps {
 export default function ChatPanel({ messages, isLoading, onSendMessage, onClose }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, isLoading])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -34,57 +34,70 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
     }
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (input.trim() && !isLoading) {
+        onSendMessage(input.trim())
+        setInput('')
+      }
+    }
+  }
+
   return (
-    <div className="fixed right-0 top-0 h-full w-96 bg-white border-l border-gray-200 shadow-xl flex flex-col z-40">
+    <div className="fixed right-0 top-0 h-full w-[400px] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50">
-        <div className="flex items-center gap-2">
-          <MessageCircle className="w-5 h-5 text-blue-500" />
-          <h2 className="font-semibold text-gray-800">Book Chat</h2>
+      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-[#2a2a2a]">
+        <div className="flex items-center gap-2.5">
+          <BookOpen className="w-4 h-4 text-gray-400 dark:text-[#666]" />
+          <h2 className="font-medium text-gray-800 dark:text-[#e0e0e0] text-sm">Reading companion</h2>
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 hover:bg-gray-200 rounded-lg transition-colors"
+          className="p-1.5 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa]"
         >
-          <X className="w-5 h-5 text-gray-500" />
+          <X className="w-4 h-4" />
         </button>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
         {messages.length === 0 && (
-          <div className="text-center text-gray-500 mt-8">
-            <MessageCircle className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p className="text-sm">Highlight text in the book and ask a question</p>
+          <div className="text-center text-gray-400 mt-16">
+            <BookOpen className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+            <p className="text-sm">Highlight any text to ask a question</p>
           </div>
         )}
 
         {messages.map((msg) => (
-          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] ${msg.role === 'user' ? 'order-1' : ''}`}>
-              {msg.context && (
-                <div className="text-xs text-gray-400 mb-1 italic line-clamp-2">
-                  Re: &ldquo;{msg.context.slice(0, 80)}{msg.context.length > 80 ? '...' : ''}&rdquo;
+          <div key={msg.id} className="space-y-1.5">
+            {msg.role === 'user' ? (
+              <div className="flex flex-col items-end gap-1">
+                {msg.context && (
+                  <div className="max-w-[88%] px-3 py-2 bg-gray-50 dark:bg-[#252525] rounded-xl border-l-2 border-gray-200 dark:border-[#444]">
+                    <p className="text-xs text-gray-400 dark:text-[#666] italic line-clamp-2">
+                      &ldquo;{msg.context.slice(0, 100)}{msg.context.length > 100 ? '…' : ''}&rdquo;
+                    </p>
+                  </div>
+                )}
+                <div className="max-w-[88%] px-4 py-2.5 bg-blue-500 text-white rounded-2xl rounded-br-md">
+                  <p className="text-sm leading-relaxed">{msg.content}</p>
                 </div>
-              )}
-              <div
-                className={`px-4 py-2 rounded-2xl ${
-                  msg.role === 'user'
-                    ? 'bg-blue-500 text-white rounded-br-md'
-                    : 'bg-gray-100 text-gray-800 rounded-bl-md'
-                }`}
-              >
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
               </div>
-            </div>
+            ) : (
+              <div className="max-w-[92%]">
+                <div className="px-4 py-3 bg-gray-50 dark:bg-[#252525] rounded-2xl rounded-bl-md">
+                  <p className="text-sm text-gray-700 dark:text-[#d4d4d4] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                </div>
+              </div>
+            )}
           </div>
         ))}
 
         {isLoading && (
-          <div className="flex justify-start">
-            <div className="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
-              <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-            </div>
+          <div className="flex items-center gap-2 text-gray-400">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-xs">Thinking...</span>
           </div>
         )}
 
@@ -92,26 +105,31 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200 bg-gray-50">
-        <div className="flex gap-2">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a follow-up question..."
-            disabled={isLoading}
-            className="flex-1 px-4 py-2 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || isLoading}
-            className="p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </div>
-      </form>
+      <div className="px-4 py-4 border-t border-gray-100 dark:border-[#2a2a2a] bg-white dark:bg-[#1e1e1e]">
+        <form onSubmit={handleSubmit}>
+          <div className="flex items-end gap-2 bg-gray-50 dark:bg-[#252525] rounded-2xl px-4 py-3 border border-gray-200 dark:border-[#333] focus-within:border-blue-300 dark:focus-within:border-blue-700 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-900/30 transition-all">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask a follow-up..."
+              disabled={isLoading}
+              rows={1}
+              className="flex-1 bg-transparent text-sm text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#555] focus:outline-none resize-none disabled:opacity-50 max-h-32 overflow-y-auto"
+              style={{ lineHeight: '1.5' }}
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || isLoading}
+              className="flex-shrink-0 p-1.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <p className="text-xs text-gray-300 mt-1.5 text-center">Enter to send · Shift+Enter for new line</p>
+        </form>
+      </div>
     </div>
   )
 }
