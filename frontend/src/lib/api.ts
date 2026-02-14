@@ -24,6 +24,7 @@ export async function queryBook(params: {
   question: string
   selectedText?: string
   useRag?: boolean
+  readerPosition?: number
 }): Promise<{ answer: string; sources?: any[] }> {
   const response = await fetch(`${API_URL}/api/rag/query`, {
     method: 'POST',
@@ -32,7 +33,8 @@ export async function queryBook(params: {
       book_id: params.bookId,
       question: params.question,
       selected_text: params.selectedText,
-      use_rag: params.useRag ?? !!params.bookId
+      use_rag: params.useRag ?? !!params.bookId,
+      reader_position: params.readerPosition
     })
   })
 

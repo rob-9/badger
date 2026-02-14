@@ -18,6 +18,7 @@ export default function Home() {
   const [history, setHistory] = useState<BookMetadata[]>([])
   const [bookId, setBookId] = useState<string | null>(null)
   const [isIndexing, setIsIndexing] = useState(false)
+  const [readerPosition, setReaderPosition] = useState<number>(0)
 
   // Chat state
   const [selection, setSelection] = useState<TextSelection | null>(null)
@@ -106,7 +107,8 @@ export default function Home() {
         bookId: bookId || undefined,
         question,
         selectedText: context,
-        useRag: !!bookId
+        useRag: !!bookId,
+        readerPosition
       })
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -144,7 +146,8 @@ export default function Home() {
       const data = await queryBook({
         bookId: bookId || undefined,
         question: message,
-        useRag: !!bookId
+        useRag: !!bookId,
+        readerPosition
       })
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -183,6 +186,7 @@ export default function Home() {
             fileName={fileName}
             onCloseAction={handleBack}
             onTextSelect={handleTextSelect}
+            onLocationChange={setReaderPosition}
           />
           {selection && (
             <QuestionPopup
