@@ -81,6 +81,7 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
   }
 
   const handleFile = useCallback(async (file: File) => {
+    console.log('[FileUploader] Starting file upload:', file.name, file.type)
     setIsLoading(true)
 
     try {
@@ -88,20 +89,28 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
       let arrayBuffer: ArrayBuffer | undefined
 
       if (file.name.toLowerCase().endsWith('.epub')) {
+        console.log('[FileUploader] Processing EPUB file')
         // Get ArrayBuffer for EPUB file (needed by react-reader)
         arrayBuffer = await file.arrayBuffer()
+        console.log('[FileUploader] ArrayBuffer loaded, size:', arrayBuffer.byteLength)
         // Still parse for fallback/preview
         text = await parseEpub(file)
+        console.log('[FileUploader] EPUB parsed, text length:', text.length)
       } else {
+        console.log('[FileUploader] Processing text file')
         // Handle other file types as plain text
         text = await file.text()
       }
 
+      console.log('[FileUploader] Calling onFileLoadAction')
       onFileLoadAction(text, file.name, arrayBuffer)
+      console.log('[FileUploader] onFileLoadAction completed')
     } catch (error) {
-      console.error('Error reading file:', error)
+      console.error('[FileUploader] Error reading file:', error)
+      alert('Error loading file: ' + (error as Error).message)
     } finally {
       setIsLoading(false)
+      console.log('[FileUploader] Loading finished')
     }
   }, [onFileLoadAction])
 
