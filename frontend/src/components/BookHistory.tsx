@@ -26,10 +26,14 @@ function formatDate(timestamp: number): string {
 }
 
 export default function BookHistory({ history, onOpenBook }: BookHistoryProps) {
+  if (history.length === 0) {
+    return null
+  }
+
   return (
     <div className="w-full max-w-2xl mx-auto px-8 mt-12 relative z-10">
       <div className="flex items-center gap-2 mb-4">
-        <Clock className="w-5 h-5 text-gray-500" />
+        <Clock className="w-5 h-5 text-gray-500 dark:text-[#666]" />
         <h2 className="text-lg font-semibold text-gray-700 dark:text-[#ccc]">Recent Books</h2>
       </div>
 
@@ -38,10 +42,10 @@ export default function BookHistory({ history, onOpenBook }: BookHistoryProps) {
           <button
             key={book.id}
             onClick={() => onOpenBook(book)}
-            className="w-full flex items-center gap-4 p-4 bg-white dark:bg-[#1e1e1e] rounded-lg border border-gray-200 dark:border-[#2a2a2a] hover:border-gray-300 dark:hover:border-[#444] hover:shadow-sm transition-all text-left cursor-pointer animate-fade-up"
+            className="w-full flex items-center gap-4 p-4 bg-white dark:bg-[#1e1e1e] rounded-lg border border-gray-200 dark:border-[#2a2a2a] hover:border-gray-300 dark:hover:border-[#444] hover:shadow-sm transition-all text-left cursor-pointer animate-fade-up transition-shadow hover:scale-[1.01]"
           >
-            <div className="flex-shrink-0 w-10 h-12 bg-gray-100 rounded flex items-center justify-center">
-              <Book className="w-5 h-5 text-gray-400" />
+            <div className="flex-shrink-0 w-10 h-12 bg-gray-100 dark:bg-[#2a2a2a] rounded flex items-center justify-center">
+              <Book className="w-5 h-5 text-gray-400 dark:text-[#666]" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-medium text-gray-900 dark:text-[#e0e0e0] truncate">{book.fileName}</p>
