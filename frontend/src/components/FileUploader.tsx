@@ -142,9 +142,14 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
         onDragLeave={() => setIsDragging(false)}
       >
         {isLoading ? (
-          <div className="flex flex-col items-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent mb-4"></div>
-            <p>Loading document...</p>
+          <div className="flex flex-col items-center space-y-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent"></div>
+            <div className="space-y-3 w-full max-w-xs">
+              <div className="h-4 bg-gray-200 dark:bg-[#2a2a2a] rounded animate-pulse"></div>
+              <div className="h-4 bg-gray-200 dark:bg-[#2a2a2a] rounded animate-pulse w-5/6 mx-auto"></div>
+              <div className="h-4 bg-gray-200 dark:bg-[#2a2a2a] rounded animate-pulse w-4/6 mx-auto"></div>
+            </div>
+            <p className="text-gray-600 dark:text-[#888]">Loading document...</p>
           </div>
         ) : (
           <>
