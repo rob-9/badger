@@ -20,8 +20,21 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Prevent dark mode flash */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          try {
+            const theme = localStorage.getItem('boom-theme')
+            if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+              document.documentElement.classList.add('dark')
+            }
+          } catch(e) {}
+        ` }} />
+      </head>
+      <body className="bg-paper dark:bg-[#141414] text-ink dark:text-[#e0e0e0] transition-colors duration-200">
+        {children}
+      </body>
     </html>
   )
 }

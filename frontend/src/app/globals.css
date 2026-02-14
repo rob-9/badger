@@ -2,6 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Animations ─────────────────────────────────────────── */
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes fade-scale-in {
+  from { transform: scale(0.95) translateY(-4px); opacity: 0; }
+  to   { transform: scale(1)    translateY(0);    opacity: 1; }
+}
+
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+@keyframes fade-up {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+@layer utilities {
+  .animate-slide-in-right {
+    animation: slide-in-right 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .animate-fade-scale-in {
+    animation: fade-scale-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .animate-slide-in-left {
+    animation: slide-in-left 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .animate-fade-up {
+    animation: fade-up 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
 @font-face {
   font-family: 'Cooper BT';
   src: url('/fonts/cooper-bt-light.otf') format('opentype');
