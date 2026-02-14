@@ -6,16 +6,34 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+async function parseErrorResponse(response: Response, fallback: string): Promise<string> {
+  try {
+    const error = await response.json()
+    return error.detail || fallback
+  } catch {
+    return `${fallback} (${response.status})`
+  }
+}
+
+async function apiFetch(url: string, options: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, options)
+  } catch (error) {
+    throw new Error(
+      `Cannot reach backend at ${API_URL}. Is the server running?`
+    )
+  }
+}
+
 export async function indexBook(bookId: string, text: string): Promise<void> {
-  const response = await fetch(`${API_URL}/api/rag/index`, {
+  const response = await apiFetch(`${API_URL}/api/rag/index`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ book_id: bookId, text })
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || 'Failed to index book')
+    throw new Error(await parseErrorResponse(response, 'Failed to index book'))
   }
 }
 
@@ -26,7 +44,7 @@ export async function queryBook(params: {
   useRag?: boolean
   readerPosition?: number
 }): Promise<{ answer: string; sources?: any[] }> {
-  const response = await fetch(`${API_URL}/api/rag/query`, {
+  const response = await apiFetch(`${API_URL}/api/rag/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -39,8 +57,7 @@ export async function queryBook(params: {
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || 'Failed to query book')
+    throw new Error(await parseErrorResponse(response, 'Failed to query book'))
   }
 
   return response.json()
@@ -56,7 +73,7 @@ export async function getAgentAssistance(params: {
   relatedConcepts: string[]
   suggestions: string[]
 }> {
-  const response = await fetch(`${API_URL}/api/agent`, {
+  const response = await apiFetch(`${API_URL}/api/agent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -67,8 +84,7 @@ export async function getAgentAssistance(params: {
   })
 
   if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.detail || 'Failed to get agent assistance')
+    throw new Error(await parseErrorResponse(response, 'Failed to get agent assistance'))
   }
 
   return response.json()
