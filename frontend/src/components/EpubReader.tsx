@@ -15,12 +15,13 @@ interface EpubReaderProps {
   fileName: string
   onCloseAction: () => void
   onTextSelect?: (selection: TextSelection) => void
+  onLocationChange?: (percentage: number) => void
 }
 
 // Book page aspect ratio (width:height)
 const ASPECT_RATIO = 7 / 9
 
-export default function EpubReader({ epubData, fileName, onCloseAction, onTextSelect }: EpubReaderProps) {
+export default function EpubReader({ epubData, fileName, onCloseAction, onTextSelect, onLocationChange }: EpubReaderProps) {
   const [fontSize, setFontSize] = useState(100)
   const [isReady, setIsReady] = useState(false)
   const [toc, setToc] = useState<NavItem[]>([])
@@ -84,6 +85,9 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
         rendition.on('relocated', (location: any) => {
           if (location.start?.cfi) {
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
+          }
+          if (onLocationChange && location.start?.percentage != null) {
+            onLocationChange(location.start.percentage)
           }
         })
 
