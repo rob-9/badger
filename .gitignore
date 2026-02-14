@@ -49,6 +49,7 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+next-env.d.ts
 
 # Optional npm cache directory
 .npm
