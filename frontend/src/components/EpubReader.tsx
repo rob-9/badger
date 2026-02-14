@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import ePub, { Book, Rendition, NavItem } from 'epubjs'
-import { ChevronLeft, ChevronRight, Bookmark, Settings, ZoomIn, ZoomOut, List, Moon, Sun } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, ZoomIn, ZoomOut, List, Moon, Sun, Menu, RotateCcw } from 'lucide-react'
 
 export interface TextSelection {
   text: string
@@ -22,13 +22,42 @@ interface EpubReaderProps {
 const ASPECT_RATIO = 7 / 9
 
 export default function EpubReader({ epubData, fileName, onCloseAction, onTextSelect, onLocationChange }: EpubReaderProps) {
-  const [fontSize, setFontSize] = useState(100)
+  // Initialize font size from localStorage
+  const [fontSize, setFontSize] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('boom-font-size')
+      return saved ? parseInt(saved, 10) : 100
+    }
+    return 100
+  })
+
+  // Initialize zoom from localStorage
+  const [zoom, setZoom] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('boom-zoom-level')
+      return saved ? parseFloat(saved) : 1
+    }
+    return 1
+  })
+
   const [isReady, setIsReady] = useState(false)
   const [toc, setToc] = useState<NavItem[]>([])
   const [showToc, setShowToc] = useState(false)
+  const [showToolbar, setShowToolbar] = useState(() => {
+    // Default to hidden on mobile
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768
+    }
+    return true
+  })
   const [isDark, setIsDark] = useState(() =>
     typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
   )
+
+  // Pan state
+  const [isPanning, setIsPanning] = useState(false)
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 })
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 })
 
   // Inject dark mode CSS directly into the epub iframe
   const applyEpubTheme = useCallback((dark: boolean) => {
@@ -223,19 +252,74 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
     }
   }, [])
 
-  // Handle keyboard navigation
+  // Font size handler with persistence
+  const handleFontSizeChange = useCallback((newSize: number) => {
+    setFontSize(newSize)
+    localStorage.setItem('boom-font-size', newSize.toString())
+  }, [])
+
+  // Zoom handlers with persistence
+  const handleZoomIn = useCallback(() => {
+    const newZoom = Math.min(2.0, zoom + 0.1)
+    setZoom(newZoom)
+    localStorage.setItem('boom-zoom-level', newZoom.toString())
+  }, [zoom])
+
+  const handleZoomOut = useCallback(() => {
+    const newZoom = Math.max(0.5, zoom - 0.1)
+    setZoom(newZoom)
+    localStorage.setItem('boom-zoom-level', newZoom.toString())
+  }, [zoom])
+
+  const handleZoomReset = useCallback(() => {
+    setZoom(1)
+    setPanOffset({ x: 0, y: 0 })
+    localStorage.setItem('boom-zoom-level', '1')
+  }, [])
+
+  // Pan handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoom > 1) {
+      setIsPanning(true)
+      setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y })
+    }
+  }, [zoom, panOffset])
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isPanning && zoom > 1) {
+      setPanOffset({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y,
+      })
+    }
+  }, [isPanning, panStart, zoom])
+
+  const handleMouseUp = useCallback(() => {
+    setIsPanning(false)
+  }, [])
+
+  // Handle keyboard navigation and zoom shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight') {
         handleNext()
       } else if (e.key === 'ArrowLeft') {
         handlePrev()
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '+') {
+        e.preventDefault()
+        handleZoomIn()
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault()
+        handleZoomOut()
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+        e.preventDefault()
+        handleZoomReset()
       }
     }
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleNext, handlePrev])
+  }, [handleNext, handlePrev, handleZoomIn, handleZoomOut, handleZoomReset])
 
   return (
     <div className="min-h-screen bg-paper dark:bg-[#141414] flex flex-col">
@@ -245,6 +329,7 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
           <button
             onClick={onCloseAction}
             className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors"
+            aria-label="Close book"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
@@ -252,50 +337,93 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
         </div>
 
         <div className="flex items-center space-x-2">
+          {/* Zoom Controls */}
+          {showToolbar && (
+            <div className="flex items-center space-x-1 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg p-1 animate-fade-scale-in">
+              <button
+                onClick={handleZoomOut}
+                className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
+                aria-label="Zoom out"
+                title="Zoom out (Cmd/Ctrl + -)"
+              >
+                <ZoomOut className="w-4 h-4" />
+              </button>
+              <span className="px-2 py-1 text-sm dark:text-[#ccc] min-w-[3rem] text-center">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                onClick={handleZoomIn}
+                className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
+                aria-label="Zoom in"
+                title="Zoom in (Cmd/Ctrl + +)"
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+              {zoom !== 1 && (
+                <button
+                  onClick={handleZoomReset}
+                  className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
+                  aria-label="Reset zoom"
+                  title="Reset zoom (Cmd/Ctrl + 0)"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Font Size Controls */}
-          <div className="flex items-center space-x-1 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg p-1">
+          {showToolbar && (
+            <div className="flex items-center space-x-1 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg p-1 animate-fade-scale-in">
+              <button
+                onClick={() => handleFontSizeChange(Math.max(50, fontSize - 10))}
+                className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
+                aria-label="Decrease font size"
+                title="Decrease font size"
+              >
+                <span className="text-xs">A-</span>
+              </button>
+              <span className="px-2 py-1 text-sm dark:text-[#ccc]">{fontSize}%</span>
+              <button
+                onClick={() => handleFontSizeChange(Math.min(200, fontSize + 10))}
+                className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
+                aria-label="Increase font size"
+                title="Increase font size"
+              >
+                <span className="text-xs">A+</span>
+              </button>
+            </div>
+          )}
+
+          {showToolbar && (
             <button
-              onClick={() => setFontSize(Math.max(50, fontSize - 10))}
-              className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-              title="Decrease font size"
+              onClick={() => setShowToc(!showToc)}
+              className={`p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors animate-fade-scale-in ${showToc ? 'bg-gray-100 dark:bg-[#2a2a2a]' : ''}`}
+              aria-label="Table of contents"
+              title="Table of Contents"
             >
-              <ZoomOut className="w-4 h-4" />
+              <List className="w-5 h-5" />
             </button>
-            <span className="px-2 py-1 text-sm dark:text-[#ccc]">{fontSize}%</span>
+          )}
+
+          {showToolbar && (
             <button
-              onClick={() => setFontSize(Math.min(200, fontSize + 10))}
-              className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-              title="Increase font size"
+              onClick={toggleTheme}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors animate-fade-scale-in"
+              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={isDark ? 'Light mode' : 'Dark mode'}
             >
-              <ZoomIn className="w-4 h-4" />
+              {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
-          </div>
+          )}
 
           <button
-            onClick={() => setShowToc(!showToc)}
-            className={`p-2 hover:bg-gray-100 rounded-lg ${showToc ? 'bg-gray-100' : ''}`}
-            title="Table of Contents"
-          >
-            <List className="w-5 h-5" />
-          </button>
-          <button
-            className="p-2 hover:bg-gray-100 rounded-lg"
-            title="Bookmarks"
-          >
-            <Bookmark className="w-5 h-5" />
-          </button>
-          <button
-            onClick={toggleTheme}
+            onClick={() => setShowToolbar(!showToolbar)}
             className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors"
-            title={isDark ? 'Light mode' : 'Dark mode'}
+            aria-label={showToolbar ? 'Hide toolbar' : 'Show toolbar'}
+            title={showToolbar ? 'Hide toolbar' : 'Show toolbar'}
           >
-            {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </button>
-          <button
-            className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg"
-            title="Settings"
-          >
-            <Settings className="w-5 h-5" />
+            <Menu className="w-5 h-5" />
           </button>
         </div>
       </header>
@@ -315,15 +443,24 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
       )}
 
       {/* Reader */}
-      <div className="flex-1 relative bg-paper dark:bg-[#141414] p-8 flex items-center justify-center overflow-hidden">
+      <div
+        className="flex-1 relative bg-paper dark:bg-[#141414] p-8 flex items-center justify-center overflow-hidden"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{ cursor: zoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
+      >
         <div
           ref={viewerRef}
-          className="relative bg-white dark:bg-[#1a1a1a] rounded-lg shadow-lg"
+          className="relative bg-white dark:bg-[#1a1a1a] rounded-lg shadow-lg transition-transform"
           style={{
             aspectRatio: '7 / 9',
             height: 'calc(100vh - 140px)',
             maxWidth: 'calc((100vh - 140px) * 7 / 9)',
             fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+            transform: `scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px)`,
+            transformOrigin: 'center center',
           }}
         />
 
