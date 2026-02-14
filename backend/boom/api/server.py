@@ -9,6 +9,8 @@ Simple API with three endpoints:
 
 import os
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -63,6 +65,7 @@ class QueryBookRequest(BaseModel):
     question: str
     selected_text: Optional[str] = None
     use_rag: bool = True
+    reader_position: Optional[float] = None  # 0-1, where reader currently is
 
 
 class QueryResponse(BaseModel):
@@ -106,7 +109,8 @@ async def query_book(request: QueryBookRequest):
             response = await rag_service.query_book(
                 book_id=request.book_id,
                 question=request.question,
-                selected_text=request.selected_text
+                selected_text=request.selected_text,
+                reader_position=request.reader_position
             )
             return QueryResponse(
                 answer=response.answer,
