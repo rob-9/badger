@@ -108,17 +108,41 @@ class RAGService:
         """
         logger.info("Embedding %d texts in batch (%s)", len(texts), input_type)
 
-        response = self.voyage.embed(
-            texts=texts,
-            model=config.VOYAGE_MODEL,
-            input_type=input_type
-        )
+        # Voyage API limits batches to 320k tokens; split into smaller batches
+        # by estimating ~4 chars per token and staying well under the limit.
+        MAX_CHARS_PER_BATCH = 200_000  # ~50k tokens, safe margin
+        batches: list[list[str]] = []
+        current_batch: list[str] = []
+        current_chars = 0
 
-        if not response.embeddings:
-            raise ValueError("No embeddings returned from Voyage AI")
+        for text in texts:
+            text_len = len(text)
+            if current_batch and current_chars + text_len > MAX_CHARS_PER_BATCH:
+                batches.append(current_batch)
+                current_batch = []
+                current_chars = 0
+            current_batch.append(text)
+            current_chars += text_len
 
-        logger.info("Generated %d embeddings", len(response.embeddings))
-        return response.embeddings
+        if current_batch:
+            batches.append(current_batch)
+
+        logger.info("Split into %d batches", len(batches))
+
+        all_embeddings: list[list[float]] = []
+        for i, batch in enumerate(batches):
+            response = self.voyage.embed(
+                texts=batch,
+                model=config.VOYAGE_MODEL,
+                input_type=input_type
+            )
+            if not response.embeddings:
+                raise ValueError(f"No embeddings returned from Voyage AI (batch {i+1})")
+            all_embeddings.extend(response.embeddings)
+            logger.info("Batch %d/%d: %d embeddings", i + 1, len(batches), len(response.embeddings))
+
+        logger.info("Generated %d total embeddings", len(all_embeddings))
+        return all_embeddings
 
     async def index_book(self, book_id: str, text: str) -> None:
         """
