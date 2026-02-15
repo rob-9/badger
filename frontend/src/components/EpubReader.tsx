@@ -122,6 +122,7 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
           height: '100%',
           flow: 'paginated',
           spread: 'none',
+          allowScriptedContent: true,
         })
 
         renditionRef.current = rendition
@@ -166,9 +167,29 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
         })
 
         // Apply theme on every page render (epubjs recreates iframes)
-        rendition.hooks.content.register(() => {
+        rendition.hooks.content.register((contents: any) => {
           const dark = document.documentElement.classList.contains('dark')
           setTimeout(() => applyEpubTheme(dark), 0)
+        })
+
+        // Detect clicks inside the book to dismiss popup when text is deselected
+        rendition.on('click', () => {
+          // Check all iframes for active selection
+          setTimeout(() => {
+            const iframes = viewerRef.current?.querySelectorAll('iframe')
+            let hasSelection = false
+            iframes?.forEach((iframe) => {
+              try {
+                const sel = iframe.contentWindow?.getSelection()
+                if (sel && !sel.isCollapsed && sel.toString().trim()) {
+                  hasSelection = true
+                }
+              } catch (e) { /* ignore */ }
+            })
+            if (!hasSelection && onTextSelect) {
+              onTextSelect({ text: '', position: { x: 0, y: 0 }, pageRect: { left: 0, right: 0, top: 0, bottom: 0 } })
+            }
+          }, 50)
         })
 
         // Handle text selection
@@ -331,6 +352,20 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [handleNext, handlePrev, handleZoomIn, handleZoomOut, handleZoomReset])
 
+  // Handle clicks outside the book (on the reader background) to dismiss popup
+  useEffect(() => {
+    if (!onTextSelect) return
+
+    const handleClick = (e: MouseEvent) => {
+      if (e.target === viewerRef.current?.parentElement) {
+        onTextSelect({ text: '', position: { x: 0, y: 0 }, pageRect: { left: 0, right: 0, top: 0, bottom: 0 } })
+      }
+    }
+
+    document.addEventListener('click', handleClick)
+    return () => document.removeEventListener('click', handleClick)
+  }, [onTextSelect])
+
   return (
     <div className="min-h-screen bg-paper dark:bg-[#141414] flex flex-col">
       {/* Header */}
@@ -421,18 +456,18 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
       </header>
 
       {/* Table of Contents Sidebar */}
-      {showToc && (
-        <div className="fixed left-0 top-[73px] h-[calc(100vh-73px)] w-80 bg-white dark:bg-[#1e1e1e] border-r border-gray-200 dark:border-[#2a2a2a] shadow-lg z-30 overflow-y-auto animate-slide-in-left">
-          <div className="p-4">
-            <h2 className="text-lg font-semibold mb-4 dark:text-[#e0e0e0]">Table of Contents</h2>
-            <div className="space-y-1">
-              {toc.map((item, index) => (
-                <TocItem key={index} item={item} onNavigate={handleNavigate} />
-              ))}
-            </div>
+      <div className={`fixed left-0 top-[73px] h-[calc(100vh-73px)] w-80 bg-white dark:bg-[#1e1e1e] border-r border-gray-200 dark:border-[#2a2a2a] shadow-lg z-30 overflow-y-auto transition-transform duration-300 ${
+        showToc ? 'translate-x-0' : '-translate-x-full'
+      }`}>
+        <div className="p-4">
+          <h2 className="text-lg font-semibold mb-4 dark:text-[#e0e0e0]">Table of Contents</h2>
+          <div className="space-y-1">
+            {toc.map((item, index) => (
+              <TocItem key={index} item={item} onNavigate={handleNavigate} />
+            ))}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Reader */}
       <div

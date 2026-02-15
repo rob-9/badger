@@ -91,7 +91,12 @@ export default function Home() {
   }
 
   const handleTextSelect = useCallback((sel: TextSelection) => {
-    setSelection(sel)
+    // Only set selection if there's actual text selected
+    if (sel.text && sel.text.trim()) {
+      setSelection(sel)
+    } else {
+      setSelection(null)
+    }
   }, [])
 
   const handleQuestionSubmit = useCallback(async (question: string, context: string) => {
