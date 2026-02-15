@@ -8,6 +8,7 @@ dependencies = [
     # AI
     "anthropic>=0.65.0",
     "voyageai>=0.1.0",
+    "langgraph>=0.4.0",
 
     # Document processing
     "pypdf>=6.0.0",

@@ -65,7 +65,9 @@ temp/
 test-document.txt
 
 # Personal notes
-TY.md
+*.md
+!README.md
+!CLAUDE.md
 
 package-lock.json
 .claude/

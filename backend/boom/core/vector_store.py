@@ -17,6 +17,7 @@ Learn more:
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 import json
@@ -228,6 +229,52 @@ class VectorStore:
         """Return total number of indexed chunks for a book."""
         entries = self.entries.get(book_id) or await self.load_from_file(book_id)
         return len(entries) if entries else 0
+
+    async def get_chunks_by_range(
+        self, book_id: str, start_idx: int, end_idx: int
+    ) -> list[SearchResult]:
+        """Return chunks by index range (for proximity retrieval). No embedding needed."""
+        entries = self.entries.get(book_id) or await self.load_from_file(book_id)
+        if not entries:
+            return []
+        return [
+            SearchResult(chunk=e.chunk, score=1.0)
+            for e in entries
+            if start_idx <= e.chunk.metadata['chunk_index'] <= end_idx
+        ]
+
+    async def find_chunk_containing(self, book_id: str, text: str) -> int:
+        """Find the chunk index that contains the given text."""
+        entries = self.entries.get(book_id)
+        if not entries:
+            entries = await self.load_from_file(book_id)
+            if entries:
+                self.entries[book_id] = entries
+        if not entries or not text:
+            return 0
+        # Normalize whitespace to match chunker output
+        normalized = re.sub(r'\s+', ' ', text).strip()
+        snippet = normalized[:50]
+        for entry in entries:
+            if snippet in entry.chunk.text:
+                return entry.chunk.metadata['chunk_index']
+        return 0
+
+    async def keyword_search(self, book_id: str, text: str) -> list[SearchResult]:
+        """Find all chunks that contain the given text (case-insensitive)."""
+        entries = self.entries.get(book_id)
+        if not entries:
+            entries = await self.load_from_file(book_id)
+            if entries:
+                self.entries[book_id] = entries
+        if not entries or not text:
+            return []
+        needle = text.lower()
+        return [
+            SearchResult(chunk=e.chunk, score=1.0)
+            for e in entries
+            if needle in e.chunk.text.lower()
+        ]
 
     def get_stats(self) -> dict:
         """Get statistics about the store."""

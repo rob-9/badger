@@ -20,18 +20,20 @@ from anthropic import Anthropic
 
 from boom import config
 from boom.core.rag import RAGService
+from boom.core.graph import build_qa_graph
 
 logger = logging.getLogger(__name__)
 
 # Global services
 rag_service: Optional[RAGService] = None
 anthropic_client: Optional[Anthropic] = None
+qa_graph = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize services on startup."""
-    global rag_service, anthropic_client
+    global rag_service, anthropic_client, qa_graph
 
     logging.basicConfig(
         level=logging.INFO,
@@ -44,7 +46,12 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing services...")
     anthropic_client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
     rag_service = RAGService(storage_dir=config.VECTOR_STORAGE_DIR)
-    logger.info("Server ready")
+    qa_graph = build_qa_graph(
+        anthropic=anthropic_client,
+        vector_store=rag_service.vector_store,
+        voyage_client=rag_service.voyage,
+    )
+    logger.info("Server ready (LangGraph pipeline active)")
     yield
     logger.info("Shutting down")
 
@@ -120,16 +127,16 @@ async def query_book(request: QueryBookRequest):
 
     try:
         if request.use_rag and request.book_id:
-            # Use RAG (retrieval + generation)
-            response = await rag_service.query_book(
-                book_id=request.book_id,
-                question=request.question,
-                selected_text=request.selected_text,
-                reader_position=request.reader_position
-            )
+            # Use LangGraph pipeline (classify → retrieve → generate → log)
+            result = await qa_graph.ainvoke({
+                "question": request.question,
+                "selected_text": request.selected_text,
+                "reader_position": request.reader_position or 0.0,
+                "book_id": request.book_id,
+            })
             return QueryResponse(
-                answer=response.answer,
-                sources=response.sources
+                answer=result["answer"],
+                sources=result.get("sources", []),
             )
         elif request.selected_text:
             # Simple query with selected text only
