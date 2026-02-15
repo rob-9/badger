@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import ePub, { Book, Rendition, NavItem } from 'epubjs'
-import { ChevronLeft, ChevronRight, Settings, ZoomIn, ZoomOut, List, Moon, Sun, Menu, RotateCcw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, ZoomIn, ZoomOut, List, Moon, Sun, RotateCcw } from 'lucide-react'
 
 export interface TextSelection {
   text: string
@@ -50,9 +50,7 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
     }
     return true
   })
-  const [isDark, setIsDark] = useState(() =>
-    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
-  )
+  const [isDark, setIsDark] = useState(false)
 
   // Pan state
   const [isPanning, setIsPanning] = useState(false)
@@ -88,6 +86,18 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
+
+  // Initialize theme on mount
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('boom-theme')
+    if (savedTheme === 'dark') {
+      setIsDark(true)
+      document.documentElement.classList.add('dark')
+    } else {
+      setIsDark(false)
+      document.documentElement.classList.remove('dark')
+    }
+  }, [])
 
   // Initialize book
   useEffect(() => {
@@ -339,7 +349,7 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
         <div className="flex items-center space-x-2">
           {/* Zoom Controls */}
           {showToolbar && (
-            <div className="flex items-center space-x-1 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg p-1 animate-fade-scale-in">
+            <div className="flex items-center space-x-1 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg p-1 animate-slide-in-left">
               <button
                 onClick={handleZoomOut}
                 className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
@@ -372,33 +382,10 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
             </div>
           )}
 
-          {/* Font Size Controls */}
-          {showToolbar && (
-            <div className="flex items-center space-x-1 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg p-1 animate-fade-scale-in">
-              <button
-                onClick={() => handleFontSizeChange(Math.max(50, fontSize - 10))}
-                className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-                aria-label="Decrease font size"
-                title="Decrease font size"
-              >
-                <span className="text-xs">A-</span>
-              </button>
-              <span className="px-2 py-1 text-sm dark:text-[#ccc]">{fontSize}%</span>
-              <button
-                onClick={() => handleFontSizeChange(Math.min(200, fontSize + 10))}
-                className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-                aria-label="Increase font size"
-                title="Increase font size"
-              >
-                <span className="text-xs">A+</span>
-              </button>
-            </div>
-          )}
-
           {showToolbar && (
             <button
               onClick={() => setShowToc(!showToc)}
-              className={`p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors animate-fade-scale-in ${showToc ? 'bg-gray-100 dark:bg-[#2a2a2a]' : ''}`}
+              className={`p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors animate-slide-in-left ${showToc ? 'bg-gray-100 dark:bg-[#2a2a2a]' : ''}`}
               aria-label="Table of contents"
               title="Table of Contents"
             >
@@ -409,7 +396,7 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
           {showToolbar && (
             <button
               onClick={toggleTheme}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors animate-fade-scale-in"
+              className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors animate-slide-in-left"
               aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               title={isDark ? 'Light mode' : 'Dark mode'}
             >
@@ -423,7 +410,7 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
             aria-label={showToolbar ? 'Hide toolbar' : 'Show toolbar'}
             title={showToolbar ? 'Hide toolbar' : 'Show toolbar'}
           >
-            <Menu className="w-5 h-5" />
+            <Settings className="w-5 h-5" />
           </button>
         </div>
       </header>
