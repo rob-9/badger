@@ -10,7 +10,7 @@ import QuestionPopup from '@/components/QuestionPopup'
 import ChatPanel, { type ChatMessage } from '@/components/ChatPanel'
 import Toast from '@/components/Toast'
 import { addBook, getBookData, getBookHistory, removeBook, type BookMetadata } from '@/lib/bookStorage'
-import { indexBook, queryBook } from '@/lib/api'
+import { indexBook, isBookIndexed, queryBook } from '@/lib/api'
 import { extractCover, extractText } from '@/lib/parseEpub'
 
 export default function Home() {
@@ -57,14 +57,18 @@ export default function Home() {
             setBookId(book.id)
             setDocument('loaded')
 
-            setIsIndexing(true)
-            try {
-              const text = await extractText(data)
-              await indexBook(book.id, text)
-            } catch (error) {
-              console.error('[App] Failed to index book on restore:', error)
-            } finally {
-              setIsIndexing(false)
+            // Only extract text + index if not already indexed
+            const indexed = await isBookIndexed(book.id)
+            if (!indexed) {
+              setIsIndexing(true)
+              try {
+                const text = await extractText(data)
+                await indexBook(book.id, text)
+              } catch (error) {
+                console.error('[App] Failed to index book on restore:', error)
+              } finally {
+                setIsIndexing(false)
+              }
             }
           }
         }
@@ -115,15 +119,18 @@ export default function Home() {
       setDocument('loaded')
       localStorage.setItem('boom-active-book', book.id)
 
-      // Ensure book is indexed for RAG (idempotent — backend skips if already done)
-      setIsIndexing(true)
-      try {
-        const text = await extractText(data)
-        await indexBook(book.id, text)
-      } catch (error) {
-        console.error('[App] Failed to index book on reopen:', error)
-      } finally {
-        setIsIndexing(false)
+      // Only extract text + index if not already indexed
+      const indexed = await isBookIndexed(book.id)
+      if (!indexed) {
+        setIsIndexing(true)
+        try {
+          const text = await extractText(data)
+          await indexBook(book.id, text)
+        } catch (error) {
+          console.error('[App] Failed to index book on reopen:', error)
+        } finally {
+          setIsIndexing(false)
+        }
       }
     }
   }, [])

@@ -25,6 +25,17 @@ async function apiFetch(url: string, options: RequestInit): Promise<Response> {
   }
 }
 
+export async function isBookIndexed(bookId: string): Promise<boolean> {
+  try {
+    const response = await apiFetch(`${API_URL}/api/rag/indexed/${encodeURIComponent(bookId)}`, {})
+    if (!response.ok) return false
+    const data = await response.json()
+    return data.indexed
+  } catch {
+    return false
+  }
+}
+
 export async function indexBook(bookId: string, text: string): Promise<void> {
   const response = await apiFetch(`${API_URL}/api/rag/index`, {
     method: 'POST',

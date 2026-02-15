@@ -90,6 +90,8 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
+  const onTextSelectRef = useRef(onTextSelect)
+  useEffect(() => { onTextSelectRef.current = onTextSelect }, [onTextSelect])
 
   // Initialize theme on mount
   useEffect(() => {
@@ -200,15 +202,15 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
                 }
               } catch (e) { /* ignore */ }
             })
-            if (!hasSelection && onTextSelect) {
-              onTextSelect({ text: '', position: { x: 0, y: 0 }, pageRect: { left: 0, right: 0, top: 0, bottom: 0 } })
+            if (!hasSelection && onTextSelectRef.current) {
+              onTextSelectRef.current({ text: '', position: { x: 0, y: 0 }, pageRect: { left: 0, right: 0, top: 0, bottom: 0 } })
             }
           }, 50)
         })
 
         // Handle text selection
         rendition.on('selected', (_cfiRange: string, contents: any) => {
-          if (!onTextSelect) return
+          if (!onTextSelectRef.current) return
 
           const selection = contents.window.getSelection()
           if (!selection || selection.isCollapsed) return
@@ -225,7 +227,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
           const iframeRect = iframe?.getBoundingClientRect() || { left: 0, top: 0 }
           const viewerRect = viewerRef.current?.getBoundingClientRect() || { left: 0, top: 0, right: 0, bottom: 0 }
 
-          onTextSelect({
+          onTextSelectRef.current({
             text,
             position: {
               x: iframeRect.left + rect.left + rect.width / 2,
@@ -253,7 +255,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
         renditionRef.current = null
       }
     }
-  }, [epubData, fileName, onTextSelect, applyEpubTheme])
+  }, [epubData, fileName, applyEpubTheme])
 
   const navigate = useCallback(async (direction: 'next' | 'prev') => {
     if (!renditionRef.current || isFlipping) return
@@ -371,17 +373,15 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
 
   // Handle clicks outside the book (on the reader background) to dismiss popup
   useEffect(() => {
-    if (!onTextSelect) return
-
     const handleClick = (e: MouseEvent) => {
-      if (e.target === viewerRef.current?.parentElement) {
-        onTextSelect({ text: '', position: { x: 0, y: 0 }, pageRect: { left: 0, right: 0, top: 0, bottom: 0 } })
+      if (e.target === viewerRef.current?.parentElement && onTextSelectRef.current) {
+        onTextSelectRef.current({ text: '', position: { x: 0, y: 0 }, pageRect: { left: 0, right: 0, top: 0, bottom: 0 } })
       }
     }
 
     document.addEventListener('click', handleClick)
     return () => document.removeEventListener('click', handleClick)
-  }, [onTextSelect])
+  }, [])
 
   return (
     <div className="min-h-screen bg-paper dark:bg-[#141414] flex flex-col">

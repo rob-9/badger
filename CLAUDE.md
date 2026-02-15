@@ -53,3 +53,7 @@ VECTOR_STORAGE_DIR=.data/vectors        # optional override
 - Vectors stored at `.data/vectors/[bookId].json`, query logs at `.data/logs/queries.jsonl`
 - Books stored client-side only: IndexedDB `boom-books` (ArrayBuffer) + localStorage (metadata)
 - Path alias: `@/*` → `./src/*`
+
+## Git
+
+- Do NOT add `Co-Authored-By` lines to commit messages

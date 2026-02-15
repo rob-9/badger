@@ -233,6 +233,14 @@ Respond in JSON format with the following structure:
 
 # === Health Check ===
 
+@app.get("/api/rag/indexed/{book_id}")
+async def is_book_indexed(book_id: str):
+    """Check if a book is already indexed."""
+    if not rag_service:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+    return {"indexed": rag_service.vector_store.has_book(book_id)}
+
+
 @app.get("/")
 async def root():
     """Health check endpoint."""
