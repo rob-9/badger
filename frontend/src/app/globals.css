@@ -13,6 +13,11 @@
   to   { transform: scale(1)    translateY(0);    opacity: 1; }
 }
 
+@keyframes fade-scale-out {
+  from { transform: scale(1)    translateY(0);    opacity: 1; }
+  to   { transform: scale(0.95) translateY(-4px); opacity: 0; }
+}
+
 @keyframes slide-in-left {
   from { transform: translateX(-100%); opacity: 0; }
   to   { transform: translateX(0);     opacity: 1; }
@@ -29,6 +34,9 @@
   }
   .animate-fade-scale-in {
     animation: fade-scale-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .animate-fade-scale-out {
+    animation: fade-scale-out 0.15s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .animate-slide-in-left {
     animation: slide-in-left 0.25s cubic-bezier(0.22, 1, 0.36, 1);
@@ -88,5 +96,54 @@
   :global(.epub-view > button:hover) {
     background: rgba(255, 255, 255, 1) !important;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+  }
+
+  /* Chat markdown styling */
+  .prose {
+    @apply text-gray-700 dark:text-[#d4d4d4];
+  }
+
+  .prose p {
+    @apply my-2 leading-relaxed;
+  }
+
+  .prose p:first-child {
+    @apply mt-0;
+  }
+
+  .prose p:last-child {
+    @apply mb-0;
+  }
+
+  .prose strong {
+    @apply font-semibold text-gray-900 dark:text-white;
+  }
+
+  .prose em {
+    @apply italic;
+  }
+
+  .prose code {
+    @apply bg-gray-100 dark:bg-[#1a1a1a] px-1.5 py-0.5 rounded text-xs font-mono;
+  }
+
+  .prose pre {
+    @apply bg-gray-100 dark:bg-[#1a1a1a] p-3 rounded-lg overflow-x-auto my-3;
+  }
+
+  .prose pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .prose ul, .prose ol {
+    @apply my-2 pl-5;
+  }
+
+  .prose li {
+    @apply my-1;
+  }
+
+  .prose a {
+    @apply text-blue-500 hover:underline;
   }
 }

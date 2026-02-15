@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { X, Send, BookOpen, Loader2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 export interface ChatMessage {
   id: string
@@ -87,8 +89,8 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
               </div>
             ) : (
               <div className="max-w-[92%]">
-                <div className="px-4 py-3 bg-gray-50 dark:bg-[#252525] rounded-2xl rounded-bl-md">
-                  <p className="text-sm text-gray-700 dark:text-[#d4d4d4] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                <div className="px-4 py-3 bg-gray-50 dark:bg-[#252525] rounded-2xl rounded-bl-md prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                 </div>
               </div>
             )}

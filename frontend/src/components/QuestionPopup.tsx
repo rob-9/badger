@@ -9,6 +9,7 @@ interface QuestionPopupProps {
   pageRect: { left: number; right: number; top: number; bottom: number }
   onSubmit: (question: string, context: string) => void
   onClose: () => void
+  externalClosing?: boolean
 }
 
 const QUICK_PROMPTS = [
@@ -18,10 +19,20 @@ const QUICK_PROMPTS = [
   "How does this connect to earlier?",
 ]
 
-export default function QuestionPopup({ selectedText, position, pageRect, onSubmit, onClose }: QuestionPopupProps) {
+export default function QuestionPopup({ selectedText, position, pageRect, onSubmit, onClose, externalClosing = false }: QuestionPopupProps) {
   const [question, setQuestion] = useState('')
+  const [isClosing, setIsClosing] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
+
+  const shouldClose = isClosing || externalClosing
+
+  const handleClose = () => {
+    setIsClosing(true)
+    setTimeout(() => {
+      onClose()
+    }, 150) // Match animation duration
+  }
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -29,38 +40,49 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') handleClose()
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [])
 
   // Close on outside click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        onClose()
+        handleClose()
       }
     }
     setTimeout(() => document.addEventListener('mousedown', handleClick), 0)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [onClose])
+  }, [])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (question.trim()) {
-      onSubmit(question.trim(), selectedText)
+      setIsClosing(true)
+      setTimeout(() => {
+        onSubmit(question.trim(), selectedText)
+      }, 150)
     }
   }
 
   const handleQuickPrompt = (prompt: string) => {
-    onSubmit(prompt, selectedText)
+    setIsClosing(true)
+    setTimeout(() => {
+      onSubmit(prompt, selectedText)
+    }, 150)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (question.trim()) onSubmit(question.trim(), selectedText)
+      if (question.trim()) {
+        setIsClosing(true)
+        setTimeout(() => {
+          onSubmit(question.trim(), selectedText)
+        }, 150)
+      }
     }
   }
 
@@ -87,7 +109,7 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
     <div
       ref={popupRef}
       style={{ position: 'fixed', left, top, width: POPUP_WIDTH, zIndex: 50 }}
-      className="bg-white dark:bg-[#1e1e1e] rounded-2xl shadow-2xl border border-gray-100 dark:border-[#2a2a2a] overflow-hidden animate-fade-scale-in"
+      className={`bg-white dark:bg-[#1e1e1e] rounded-2xl shadow-2xl border border-gray-100 dark:border-[#2a2a2a] overflow-hidden ${shouldClose ? 'animate-fade-scale-out' : 'animate-fade-scale-in'}`}
     >
       {/* Selected text preview */}
       <div className="px-4 pt-4 pb-3 border-b border-gray-100 dark:border-[#2a2a2a]">

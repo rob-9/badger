@@ -23,6 +23,7 @@ export default function Home() {
 
   // Chat state
   const [selection, setSelection] = useState<TextSelection | null>(null)
+  const [isClosingPopup, setIsClosingPopup] = useState(false)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [isChatLoading, setIsChatLoading] = useState(false)
@@ -94,10 +95,18 @@ export default function Home() {
     // Only set selection if there's actual text selected
     if (sel.text && sel.text.trim()) {
       setSelection(sel)
+      setIsClosingPopup(false)
     } else {
-      setSelection(null)
+      // Trigger graceful close animation before clearing selection
+      if (selection) {
+        setIsClosingPopup(true)
+        setTimeout(() => {
+          setSelection(null)
+          setIsClosingPopup(false)
+        }, 150) // Match animation duration
+      }
     }
-  }, [])
+  }, [selection])
 
   const handleQuestionSubmit = useCallback(async (question: string, context: string) => {
     setSelection(null)
@@ -207,6 +216,7 @@ export default function Home() {
               pageRect={selection.pageRect}
               onSubmit={handleQuestionSubmit}
               onClose={() => setSelection(null)}
+              externalClosing={isClosingPopup}
             />
           )}
           {isChatOpen && (
