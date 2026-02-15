@@ -50,7 +50,7 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-[#2a2a2a]">
         <div className="flex items-center gap-2.5">
           <BookOpen className="w-4 h-4 text-gray-400 dark:text-[#666]" />
-          <h2 className="font-medium text-gray-800 dark:text-[#e0e0e0] text-sm">Reading companion</h2>
+          <h2 className="font-medium text-gray-800 dark:text-[#e0e0e0] text-sm">Agent</h2>
         </div>
         <button
           onClick={onClose}
