@@ -183,8 +183,13 @@ class RAGService:
         """
         logger.info("Query book=%s question=%r", book_id, question[:80])
 
-        # Embed the question
-        question_embedding = await self.get_embedding(question, input_type="query")
+        # Embed the question (with selected text for context if provided)
+        if selected_text:
+            query_text = f"{question}\n\nReferring to: {selected_text}"
+        else:
+            query_text = question
+
+        question_embedding = await self.get_embedding(query_text, input_type="query")
 
         # Find relevant chunks
         results = await self.vector_store.search(book_id, question_embedding, top_k=5)
@@ -294,9 +299,43 @@ Question: {question}"""
                 "stop_reason": response.stop_reason,
             },
         }
+        # Machine-readable log
         log_file = LOG_DIR / "queries.jsonl"
         with open(log_file, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
+
+        # Human-readable log
+        readable_log = LOG_DIR / "queries.log"
+        with open(readable_log, "a") as f:
+            f.write("\n" + "═" * 60 + "\n")
+            f.write(f"QUERY @ {log_entry['timestamp']}\n")
+            f.write("═" * 60 + "\n\n")
+
+            f.write(f"Book:     {book_id}\n")
+            f.write(f"Position: {reader_position:.1%} (chunk {reader_chunk_index}/{total_chunks})\n")
+            f.write(f"Selected: \"{selected_text[:80]}{'…' if selected_text and len(selected_text) > 80 else ''}\"\n")
+            f.write(f"Question: {question}\n\n")
+
+            f.write(f"── Retrieved Chunks ({len(results)}) " + "─" * 35 + "\n")
+            for i, r in enumerate(results):
+                idx = r.chunk.metadata["chunk_index"]
+                label = "PAST" if idx <= reader_chunk_index else "AHEAD"
+                f.write(f"  [{i+1}] score={r.score:.4f} | chunk {idx} | {label}\n")
+                f.write(f"      {r.chunk.text[:120]}…\n\n")
+
+            f.write("── LLM Input " + "─" * 46 + "\n")
+            f.write(f"  System: {system_prompt[:200]}…\n\n")
+            f.write(f"  User:   {user_prompt[:200]}…\n\n")
+
+            f.write("── LLM Output " + "─" * 45 + "\n")
+            f.write(f"  Model:  {response.model}\n")
+            f.write(f"  Tokens: {response.usage.input_tokens} in / {response.usage.output_tokens} out\n")
+            f.write(f"  Stop:   {response.stop_reason}\n\n")
+            f.write("  Answer:\n")
+            for line in answer.split("\n"):
+                f.write(f"    {line}\n")
+            f.write("\n" + "═" * 60 + "\n")
+
         logger.info("Query complete: %d in / %d out tokens", response.usage.input_tokens, response.usage.output_tokens)
 
         return RAGResponse(
