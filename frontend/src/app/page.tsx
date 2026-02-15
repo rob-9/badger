@@ -1,15 +1,17 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import DocumentViewer from '@/components/DocumentViewer'
 import EpubReader, { type TextSelection } from '@/components/EpubReader'
-import FileUploader from '@/components/FileUploader'
-import BookHistory from '@/components/BookHistory'
+import Sidebar from '@/components/Sidebar'
+import type { ViewType } from '@/components/Sidebar'
+import LibraryView from '@/components/LibraryView'
 import QuestionPopup from '@/components/QuestionPopup'
 import ChatPanel, { type ChatMessage } from '@/components/ChatPanel'
 import Toast from '@/components/Toast'
 import { addBook, getBookData, getBookHistory, type BookMetadata } from '@/lib/bookStorage'
 import { indexBook, queryBook } from '@/lib/api'
+import { extractCover } from '@/lib/parseEpub'
 
 export default function Home() {
   const [document, setDocument] = useState<string | null>(null)
@@ -17,9 +19,14 @@ export default function Home() {
   const [epubData, setEpubData] = useState<ArrayBuffer | null>(null)
   const [isEpub, setIsEpub] = useState(false)
   const [history, setHistory] = useState<BookMetadata[]>([])
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   const [bookId, setBookId] = useState<string | null>(null)
   const [isIndexing, setIsIndexing] = useState(false)
   const [readerPosition, setReaderPosition] = useState<number>(0)
+
+  // View state
+  const [currentView, setCurrentView] = useState<ViewType>('recent')
+  const uploadInputRef = useRef<HTMLInputElement>(null)
 
   // Chat state
   const [selection, setSelection] = useState<TextSelection | null>(null)
@@ -34,6 +41,7 @@ export default function Home() {
   // Load history on mount
   useEffect(() => {
     setHistory(getBookHistory())
+    setHistoryLoaded(true)
   }, [])
 
   const handleFileLoad = async (content: string, name: string, arrayBuffer?: ArrayBuffer) => {
@@ -45,7 +53,8 @@ export default function Home() {
     // For EPUB files, store the ArrayBuffer for the reader and save to history
     if (isEpubFile && arrayBuffer) {
       setEpubData(arrayBuffer)
-      const id = await addBook(name, arrayBuffer)
+      const coverUrl = await extractCover(arrayBuffer) ?? undefined
+      const id = await addBook(name, arrayBuffer, coverUrl)
       setBookId(id)
       setHistory(getBookHistory()) // Refresh history
 
@@ -191,50 +200,67 @@ export default function Home() {
     }
   }, [bookId])
 
+  if (!historyLoaded && !document) {
+    return <div className="h-screen bg-paper dark:bg-[#141414]" />
+  }
+
   return (
-    <main className="min-h-screen">
-      {!document ? (
-        <div className="min-h-screen bg-paper dark:bg-[#141414] py-12">
-          <FileUploader onFileLoadAction={handleFileLoad} />
-          {history.length > 0 && (
-            <BookHistory history={history} onOpenBook={handleOpenFromHistory} />
-          )}
-        </div>
-      ) : isEpub && epubData ? (
-        <>
-          <EpubReader
-            epubData={epubData}
-            fileName={fileName}
-            onCloseAction={handleBack}
-            onTextSelect={handleTextSelect}
-            onLocationChange={setReaderPosition}
-          />
-          {selection && (
-            <QuestionPopup
-              selectedText={selection.text}
-              position={selection.position}
-              pageRect={selection.pageRect}
-              onSubmit={handleQuestionSubmit}
-              onClose={() => setSelection(null)}
-              externalClosing={isClosingPopup}
-            />
-          )}
-          {isChatOpen && (
-            <ChatPanel
-              messages={chatMessages}
-              isLoading={isChatLoading}
-              onSendMessage={handleChatMessage}
-              onClose={() => setIsChatOpen(false)}
-            />
-          )}
-        </>
-      ) : (
-        <DocumentViewer
-          content={document}
-          fileName={fileName}
-          onClose={handleBack}
+    <div className="flex h-screen overflow-hidden">
+      {!document && (
+        <Sidebar
+          currentView={currentView}
+          onViewChange={setCurrentView}
+          onUploadClick={() => uploadInputRef.current?.click()}
+          bookCount={history.length}
         />
       )}
+
+      <main className="flex-1 overflow-auto">
+        {!document ? (
+          <LibraryView
+            books={history}
+            currentFilter={currentView}
+            onBookSelect={handleOpenFromHistory}
+            onUpload={handleFileLoad}
+            uploadInputRef={uploadInputRef}
+          />
+        ) : isEpub && epubData ? (
+          <>
+            <EpubReader
+              epubData={epubData}
+              fileName={fileName}
+              onCloseAction={handleBack}
+              onTextSelect={handleTextSelect}
+              onLocationChange={setReaderPosition}
+            />
+            {selection && (
+              <QuestionPopup
+                selectedText={selection.text}
+                position={selection.position}
+                pageRect={selection.pageRect}
+                onSubmit={handleQuestionSubmit}
+                onClose={() => setSelection(null)}
+                externalClosing={isClosingPopup}
+              />
+            )}
+            {isChatOpen && (
+              <ChatPanel
+                messages={chatMessages}
+                isLoading={isChatLoading}
+                onSendMessage={handleChatMessage}
+                onClose={() => setIsChatOpen(false)}
+              />
+            )}
+          </>
+        ) : (
+          <DocumentViewer
+            content={document}
+            fileName={fileName}
+            onClose={handleBack}
+          />
+        )}
+      </main>
+
       {toast && (
         <Toast
           message={toast.message}
@@ -242,6 +268,6 @@ export default function Home() {
           onClose={() => setToast(null)}
         />
       )}
-    </main>
+    </div>
   )
 }

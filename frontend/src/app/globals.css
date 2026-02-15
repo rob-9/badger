@@ -28,6 +28,11 @@
   to   { transform: translateY(0);   opacity: 1; }
 }
 
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 @layer utilities {
   .animate-slide-in-right {
     animation: slide-in-right 0.25s cubic-bezier(0.22, 1, 0.36, 1);
@@ -43,6 +48,9 @@
   }
   .animate-fade-up {
     animation: fade-up 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .animate-fade-in {
+    animation: fade-in 0.2s ease-out;
   }
 }
 
@@ -71,6 +79,15 @@
 
   .highlight {
     @apply bg-yellow-200 px-1 rounded;
+  }
+
+  /* Library card hover lift */
+  .library-card {
+    @apply transform transition-all duration-200;
+  }
+
+  .library-card:hover {
+    @apply -translate-y-1;
   }
 
   /* EPUB Reader Styles - Book-like appearance */

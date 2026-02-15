@@ -2,27 +2,11 @@
 
 import { Book, Clock } from 'lucide-react'
 import type { BookMetadata } from '@/lib/bookStorage'
+import { formatDate } from '@/lib/formatDate'
 
 interface BookHistoryProps {
   history: BookMetadata[]
   onOpenBook: (book: BookMetadata) => void
-}
-
-function formatDate(timestamp: number): string {
-  const date = new Date(timestamp)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-
-  if (diffDays === 0) {
-    return 'Today'
-  } else if (diffDays === 1) {
-    return 'Yesterday'
-  } else if (diffDays < 7) {
-    return `${diffDays} days ago`
-  } else {
-    return date.toLocaleDateString()
-  }
 }
 
 export default function BookHistory({ history, onOpenBook }: BookHistoryProps) {

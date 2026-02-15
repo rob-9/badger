@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { Upload, FileText, Book, File } from 'lucide-react'
-import JSZip from 'jszip'
+import { parseEpub } from '@/lib/parseEpub'
 
 interface FileUploaderProps {
   onFileLoadAction: (content: string, fileName: string, arrayBuffer?: ArrayBuffer) => void
@@ -12,76 +12,7 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
-  const parseEpub = async (file: File): Promise<string> => {
-    const arrayBuffer = await file.arrayBuffer()
-    const zip = await JSZip.loadAsync(arrayBuffer)
-
-    // Find the OPF file (contains manifest and spine)
-    const containerFile = await zip.file('META-INF/container.xml')?.async('text')
-    if (!containerFile) {
-      throw new Error('Invalid EPUB: container.xml not found')
-    }
-
-    // Parse container.xml to get OPF file path
-    const parser = new DOMParser()
-    const containerDoc = parser.parseFromString(containerFile, 'text/xml')
-    const opfPath = containerDoc.querySelector('rootfile')?.getAttribute('full-path')
-
-    if (!opfPath) {
-      throw new Error('Invalid EPUB: OPF file path not found')
-    }
-
-    // Get the OPF file
-    const opfFile = await zip.file(opfPath)?.async('text')
-    if (!opfFile) {
-      throw new Error('Invalid EPUB: OPF file not found')
-    }
-
-    const opfDoc = parser.parseFromString(opfFile, 'text/xml')
-    const opfDir = opfPath.substring(0, opfPath.lastIndexOf('/') + 1)
-
-    // Get spine items (reading order)
-    const spineItems = Array.from(opfDoc.querySelectorAll('spine itemref'))
-    const manifest = opfDoc.querySelector('manifest')
-
-    const textContent: string[] = []
-
-    // Process each spine item
-    for (const spineItem of spineItems) {
-      const idref = spineItem.getAttribute('idref')
-      if (!idref) continue
-
-      // Find corresponding manifest item
-      const manifestItem = manifest?.querySelector(`item[id="${idref}"]`)
-      const href = manifestItem?.getAttribute('href')
-
-      if (!href) continue
-
-      // Get the content file
-      const contentPath = opfDir + href
-      const contentFile = await zip.file(contentPath)?.async('text')
-
-      if (!contentFile) continue
-
-      // Parse HTML and extract text
-      try {
-        const contentDoc = parser.parseFromString(contentFile, 'text/html')
-        const body = contentDoc.querySelector('body')
-        const text = body?.textContent || contentDoc.documentElement.textContent || ''
-
-        if (text.trim()) {
-          textContent.push(text.trim())
-        }
-      } catch (err) {
-        console.warn('Failed to parse content file:', err)
-      }
-    }
-
-    return textContent.join('\n\n')
-  }
-
   const handleFile = useCallback(async (file: File) => {
-    console.log('[FileUploader] Starting file upload:', file.name, file.type)
     setIsLoading(true)
 
     try {
@@ -89,35 +20,25 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
       let arrayBuffer: ArrayBuffer | undefined
 
       if (file.name.toLowerCase().endsWith('.epub')) {
-        console.log('[FileUploader] Processing EPUB file')
-        // Get ArrayBuffer for EPUB file (needed by react-reader)
         arrayBuffer = await file.arrayBuffer()
-        console.log('[FileUploader] ArrayBuffer loaded, size:', arrayBuffer.byteLength)
-        // Still parse for fallback/preview
         text = await parseEpub(file)
-        console.log('[FileUploader] EPUB parsed, text length:', text.length)
       } else {
-        console.log('[FileUploader] Processing text file')
-        // Handle other file types as plain text
         text = await file.text()
       }
 
-      console.log('[FileUploader] Calling onFileLoadAction')
       onFileLoadAction(text, file.name, arrayBuffer)
-      console.log('[FileUploader] onFileLoadAction completed')
     } catch (error) {
-      console.error('[FileUploader] Error reading file:', error)
+      console.error('Error reading file:', error)
       alert('Error loading file: ' + (error as Error).message)
     } finally {
       setIsLoading(false)
-      console.log('[FileUploader] Loading finished')
     }
   }, [onFileLoadAction])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
-    
+
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
       handleFile(files[0])
@@ -164,8 +85,6 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
           <>
             <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
             <h3 className="text-xl font-semibold mb-2 dark:text-[#e0e0e0]">Upload Document</h3>
-            {/* <p className="text-gray-600 dark:text-[#888] mb-6">
-            </p> */}
             <input
               type="file"
               accept=".txt,.pdf,.epub"

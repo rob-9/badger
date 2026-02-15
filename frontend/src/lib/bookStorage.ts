@@ -6,6 +6,7 @@ export interface BookMetadata {
   addedAt: number
   lastReadAt: number
   lastPosition?: string // CFI location
+  coverUrl?: string // data URL of cover image
 }
 
 const DB_NAME = 'boom-books'
@@ -53,7 +54,7 @@ function saveBookHistory(history: BookMetadata[]): void {
 }
 
 // Add a new book to history
-export async function addBook(fileName: string, data: ArrayBuffer): Promise<string> {
+export async function addBook(fileName: string, data: ArrayBuffer, coverUrl?: string): Promise<string> {
   const id = generateId()
 
   // Store file in IndexedDB
@@ -73,6 +74,7 @@ export async function addBook(fileName: string, data: ArrayBuffer): Promise<stri
     fileName,
     addedAt: Date.now(),
     lastReadAt: Date.now(),
+    coverUrl,
   }
   history.unshift(metadata) // Add to beginning
   saveBookHistory(history)
