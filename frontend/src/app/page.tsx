@@ -11,7 +11,7 @@ import ChatPanel, { type ChatMessage } from '@/components/ChatPanel'
 import Toast from '@/components/Toast'
 import { addBook, getBookData, getBookHistory, removeBook, type BookMetadata } from '@/lib/bookStorage'
 import { indexBook, queryBook } from '@/lib/api'
-import { extractCover } from '@/lib/parseEpub'
+import { extractCover, extractText } from '@/lib/parseEpub'
 
 export default function Home() {
   const [document, setDocument] = useState<string | null>(null)
@@ -38,11 +38,37 @@ export default function Home() {
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
 
-  // Load history on mount
+  // Load history on mount + restore last open book
   useEffect(() => {
-    getBookHistory().then((books) => {
+    getBookHistory().then(async (books) => {
       setHistory(books)
       setHistoryLoaded(true)
+
+      // Restore last open book on reload
+      const lastBookId = localStorage.getItem('boom-active-book')
+      if (lastBookId) {
+        const book = books.find(b => b.id === lastBookId)
+        if (book) {
+          const data = await getBookData(book.id)
+          if (data) {
+            setEpubData(data)
+            setFileName(book.fileName)
+            setIsEpub(true)
+            setBookId(book.id)
+            setDocument('loaded')
+
+            setIsIndexing(true)
+            try {
+              const text = await extractText(data)
+              await indexBook(book.id, text)
+            } catch (error) {
+              console.error('[App] Failed to index book on restore:', error)
+            } finally {
+              setIsIndexing(false)
+            }
+          }
+        }
+      }
     })
   }, [])
 
@@ -59,6 +85,7 @@ export default function Home() {
       const coverUrl = await extractCover(arrayBuffer) ?? undefined
       const id = await addBook(name, arrayBuffer, coverUrl)
       setBookId(id)
+      localStorage.setItem('boom-active-book', id)
       setHistory(await getBookHistory()) // Refresh history
 
       // Index the book for RAG
@@ -85,7 +112,19 @@ export default function Home() {
       setFileName(book.fileName)
       setIsEpub(true)
       setBookId(book.id)
-      setDocument('loaded') // Set truthy value to trigger reader view
+      setDocument('loaded')
+      localStorage.setItem('boom-active-book', book.id)
+
+      // Ensure book is indexed for RAG (idempotent — backend skips if already done)
+      setIsIndexing(true)
+      try {
+        const text = await extractText(data)
+        await indexBook(book.id, text)
+      } catch (error) {
+        console.error('[App] Failed to index book on reopen:', error)
+      } finally {
+        setIsIndexing(false)
+      }
     }
   }, [])
 
@@ -99,6 +138,7 @@ export default function Home() {
     setFileName('')
     setEpubData(null)
     setIsEpub(false)
+    localStorage.removeItem('boom-active-book')
     setBookId(null)
     setIsIndexing(false)
     setHistory(await getBookHistory()) // Refresh history
@@ -238,6 +278,7 @@ export default function Home() {
             <EpubReader
               epubData={epubData}
               fileName={fileName}
+              isIndexing={isIndexing}
               onCloseAction={handleBack}
               onTextSelect={handleTextSelect}
               onLocationChange={setReaderPosition}

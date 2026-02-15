@@ -67,13 +67,15 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Mobile Menu Button */}
-      <button
-        onClick={() => setIsOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-[#1a1812] border border-[#f7f7f4]/10 rounded-lg shadow-lg hover:bg-[#f7f7f4]/5 transition-colors"
-      >
-        <Menu className="w-6 h-6 text-[#f7f7f4]/80" />
-      </button>
+      {/* Mobile Menu Button — hidden once sidebar is open */}
+      {!isOpen && (
+        <button
+          onClick={() => setIsOpen(true)}
+          className="lg:hidden fixed top-8 left-8 z-50 p-2 bg-[#1a1812] border border-[#f7f7f4]/10 rounded-lg shadow-lg hover:bg-[#f7f7f4]/5 transition-colors"
+        >
+          <Menu className="w-6 h-6 text-[#f7f7f4]/80" />
+        </button>
+      )}
 
       {/* Mobile Overlay */}
       {isOpen && (

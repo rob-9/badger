@@ -169,7 +169,7 @@ export default function LibraryView({
           </div>
         </div>
       ) : (
-        <div className="relative z-10 p-8">
+        <div className="relative z-10 p-8 pl-24 lg:pl-8">
           <div className="max-w-7xl mx-auto">
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-[#f7f7f4] mb-2">
@@ -208,7 +208,7 @@ export default function LibraryView({
                           <img
                             src={book.coverUrl}
                             alt={book.fileName}
-                            className="absolute inset-0 w-full h-full object-cover"
+                            className="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:opacity-90 transition-opacity duration-200"
                           />
                         ) : (
                           <Book className="w-10 h-10 text-[#f7f7f4]/15" />

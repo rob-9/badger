@@ -13,6 +13,7 @@ export interface TextSelection {
 interface EpubReaderProps {
   epubData: ArrayBuffer
   fileName: string
+  isIndexing?: boolean
   onCloseAction: () => void
   onTextSelect?: (selection: TextSelection) => void
   onLocationChange?: (percentage: number) => void
@@ -21,7 +22,7 @@ interface EpubReaderProps {
 // Book page aspect ratio (width:height)
 const ASPECT_RATIO = 7 / 9
 
-export default function EpubReader({ epubData, fileName, onCloseAction, onTextSelect, onLocationChange }: EpubReaderProps) {
+export default function EpubReader({ epubData, fileName, isIndexing, onCloseAction, onTextSelect, onLocationChange }: EpubReaderProps) {
   // Initialize font size from localStorage
   const [fontSize, setFontSize] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -51,6 +52,9 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
     return true
   })
   const [isDark, setIsDark] = useState(false)
+
+  // Page transition
+  const [isFlipping, setIsFlipping] = useState(false)
 
   // Pan state
   const [isPanning, setIsPanning] = useState(false)
@@ -161,12 +165,22 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
           }
         })
 
-        // Selection highlight style
-        rendition.themes.default({
-          '::selection': { 'background': 'rgba(59, 130, 246, 0.15)', 'color': 'inherit' }
+        // Register app font and styles via epubjs theme system (applied automatically per page)
+        rendition.themes.register('boom', {
+          '@font-face': {
+            'font-family': '"Cooper BT"',
+            'src': `url("${window.location.origin}/fonts/cooper-bt-light.otf") format("opentype")`,
+            'font-weight': '300',
+            'font-style': 'normal',
+          },
+          'body, p, div, span, li, td, th, blockquote': {
+            'font-family': '"Cooper BT", Inter, system-ui, sans-serif !important',
+          },
+          '::selection': { 'background': 'rgba(59, 130, 246, 0.15)', 'color': 'inherit' },
         })
+        rendition.themes.select('boom')
 
-        // Apply theme on every page render (epubjs recreates iframes)
+        // Apply dark/light theme on every page render (epubjs recreates iframes)
         rendition.hooks.content.register((contents: any) => {
           const dark = document.documentElement.classList.contains('dark')
           setTimeout(() => applyEpubTheme(dark), 0)
@@ -241,17 +255,20 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
     }
   }, [epubData, fileName, onTextSelect, applyEpubTheme])
 
-  const handleNext = useCallback(async () => {
-    if (renditionRef.current) {
-      await renditionRef.current.next()
-    }
-  }, [])
+  const navigate = useCallback(async (direction: 'next' | 'prev') => {
+    if (!renditionRef.current || isFlipping) return
+    setIsFlipping(true) // fade out current page
+    setTimeout(async () => {
+      // navigate while invisible
+      if (direction === 'next') await renditionRef.current?.next()
+      else await renditionRef.current?.prev()
+      // fade in new page
+      setIsFlipping(false)
+    }, 250)
+  }, [isFlipping])
 
-  const handlePrev = useCallback(async () => {
-    if (renditionRef.current) {
-      await renditionRef.current.prev()
-    }
-  }, [])
+  const handleNext = useCallback(() => navigate('next'), [navigate])
+  const handlePrev = useCallback(() => navigate('prev'), [navigate])
 
   const handleNavigate = useCallback(async (href: string) => {
     if (!renditionRef.current || !bookRef.current) return
@@ -379,6 +396,12 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
             <ChevronLeft className="w-5 h-5" />
           </button>
           <h1 className="text-lg font-semibold truncate max-w-md dark:text-[#e0e0e0]">{fileName}</h1>
+          {isIndexing && (
+            <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 rounded-full">
+              <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+              Indexing for AI...
+            </span>
+          )}
         </div>
 
         <div className="flex items-center space-x-2">
@@ -480,7 +503,7 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
       >
         <div
           ref={viewerRef}
-          className="relative bg-white dark:bg-[#1a1a1a] rounded-lg shadow-lg transition-transform"
+          className="relative bg-white dark:bg-[#1a1a1a] rounded-lg shadow-lg"
           style={{
             aspectRatio: '7 / 9',
             height: 'calc(100vh - 140px)',
@@ -488,28 +511,30 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
             fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
             transform: `scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px)`,
             transformOrigin: 'center center',
+            opacity: isFlipping ? 0 : 1,
+            transition: 'opacity 0.4s ease',
           }}
         />
 
-          {/* Navigation Arrows */}
-          {isReady && (
-            <>
-              <button
-                onClick={handlePrev}
-                className="fixed left-8 top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
-                aria-label="Previous page"
-              >
-                <ChevronLeft className="w-6 h-6" />
-              </button>
-              <button
-                onClick={handleNext}
-                className="fixed right-8 top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
-                aria-label="Next page"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            </>
-          )}
+        {/* Navigation Arrows */}
+        {isReady && (
+          <>
+            <button
+              onClick={handlePrev}
+              className="fixed left-8 top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+            <button
+              onClick={handleNext}
+              className="fixed right-8 top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
+              aria-label="Next page"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          </>
+        )}
       </div>
     </div>
   )
