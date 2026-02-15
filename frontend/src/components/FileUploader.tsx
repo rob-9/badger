@@ -19,14 +19,16 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
       let text: string
       let arrayBuffer: ArrayBuffer | undefined
 
-      if (file.name.toLowerCase().endsWith('.epub')) {
+      const lowerName = file.name.toLowerCase()
+      if (lowerName.endsWith('.epub') || lowerName.endsWith('.epub.zip')) {
         arrayBuffer = await file.arrayBuffer()
         text = await parseEpub(file)
       } else {
         text = await file.text()
       }
 
-      onFileLoadAction(text, file.name, arrayBuffer)
+      const cleanName = file.name.replace(/\.epub\.zip$/i, '.epub')
+      onFileLoadAction(text, cleanName, arrayBuffer)
     } catch (error) {
       console.error('Error reading file:', error)
       alert('Error loading file: ' + (error as Error).message)
@@ -87,7 +89,7 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
             <h3 className="text-xl font-semibold mb-2 dark:text-[#e0e0e0]">Upload Document</h3>
             <input
               type="file"
-              accept=".txt,.pdf,.epub"
+              accept=".txt,.pdf,.epub,.zip"
               onChange={handleFileInput}
               className="hidden"
               id="file-input"

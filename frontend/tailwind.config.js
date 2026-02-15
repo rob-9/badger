@@ -10,7 +10,8 @@ module.exports = {
       colors: {
         'paper': '#fefefe',
         'ink': '#1a1a1a',
-        'accent': '#3b82f6',
+        'accent': '#d9955f',
+        'accent-hover': '#cd7f47',
       },
       fontFamily: {
         'serif': ['Georgia', 'Times New Roman', 'serif'],

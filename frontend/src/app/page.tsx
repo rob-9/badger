@@ -47,7 +47,8 @@ export default function Home() {
   const handleFileLoad = async (content: string, name: string, arrayBuffer?: ArrayBuffer) => {
     setDocument(content)
     setFileName(name)
-    const isEpubFile = name.toLowerCase().endsWith('.epub')
+    const lowerName = name.toLowerCase()
+    const isEpubFile = lowerName.endsWith('.epub') || lowerName.endsWith('.epub.zip')
     setIsEpub(isEpubFile)
 
     // For EPUB files, store the ArrayBuffer for the reader and save to history
@@ -201,7 +202,7 @@ export default function Home() {
   }, [bookId])
 
   if (!historyLoaded && !document) {
-    return <div className="h-screen bg-paper dark:bg-[#141414]" />
+    return <div className="h-screen bg-[#14120b]" />
   }
 
   return (

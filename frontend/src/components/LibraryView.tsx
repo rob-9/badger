@@ -34,14 +34,17 @@ export default function LibraryView({
       let text: string
       let arrayBuffer: ArrayBuffer | undefined
 
-      if (file.name.toLowerCase().endsWith('.epub')) {
+      const lowerName = file.name.toLowerCase()
+      if (lowerName.endsWith('.epub') || lowerName.endsWith('.epub.zip')) {
         arrayBuffer = await file.arrayBuffer()
         text = await parseEpub(file)
       } else {
         text = await file.text()
       }
 
-      onUpload(text, file.name, arrayBuffer)
+      // Normalize .epub.zip → .epub for display
+      const cleanName = file.name.replace(/\.epub\.zip$/i, '.epub')
+      onUpload(text, cleanName, arrayBuffer)
     } catch (error) {
       console.error('Error reading file:', error)
       alert('Error loading file: ' + (error as Error).message)
@@ -74,24 +77,33 @@ export default function LibraryView({
   const showHero = books.length === 0
 
   return (
-    <div className="min-h-screen bg-paper dark:bg-[#141414]">
+    <div className="min-h-screen bg-[#14120b] text-[#f7f7f4] relative">
+      {/* Gradient Mesh Background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[5%] left-[10%] w-[250px] h-[250px] rounded-full bg-[#d9955f] opacity-[0.06] blur-[65px]"></div>
+        <div className="absolute top-[15%] right-[15%] w-[220px] h-[220px] rounded-full bg-[#cd7f47] opacity-[0.07] blur-[58px]"></div>
+        <div className="absolute bottom-[30%] left-[5%] w-[190px] h-[190px] rounded-full bg-[#e8a965] opacity-[0.05] blur-[54px]"></div>
+        <div className="absolute top-[50%] left-[50%] w-[280px] h-[280px] rounded-full bg-[#bc8555] opacity-[0.06] blur-[70px]"></div>
+        <div className="absolute bottom-[10%] right-[20%] w-[240px] h-[240px] rounded-full bg-[#d69658] opacity-[0.06] blur-[62px]"></div>
+      </div>
+
       {/* Hidden file input shared between hero and sidebar upload */}
       <input
         ref={fileInputRef}
         type="file"
-        accept=".txt,.pdf,.epub"
+        accept=".txt,.pdf,.epub,.zip"
         onChange={handleFileInput}
         className="hidden"
       />
 
       {showHero ? (
-        <div className="flex items-center justify-center min-h-screen p-8">
+        <div className="relative z-10 flex items-center justify-center min-h-screen p-8">
           <div className="w-full max-w-2xl">
             <div className="text-center mb-8">
               <Book className="w-20 h-20 mx-auto mb-6 text-accent" />
-              <h1 className="text-4xl font-bold mb-3 dark:text-[#e0e0e0]">boom</h1>
-              <p className="text-xl text-gray-600 dark:text-[#888] mb-2">Read Better.</p>
-              <p className="text-sm text-gray-500 dark:text-[#666]">
+              <h1 className="text-4xl font-bold mb-3 text-[#f7f7f4]">boom</h1>
+              <p className="text-xl text-[#f7f7f4]/80 mb-2">Read Better.</p>
+              <p className="text-sm text-[#f7f7f4]/40">
                 Upload your books and ask questions powered by AI
               </p>
             </div>
@@ -99,8 +111,8 @@ export default function LibraryView({
             <div
               className={`border-2 border-dashed rounded-xl p-16 text-center transition-all ${
                 isDragging
-                  ? 'border-accent bg-blue-50 dark:bg-blue-950/20 scale-105'
-                  : 'border-gray-300 dark:border-[#333] hover:border-gray-400 dark:hover:border-[#555]'
+                  ? 'border-accent bg-accent/10 scale-105'
+                  : 'border-[#f7f7f4]/15 hover:border-[#f7f7f4]/25'
               }`}
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
@@ -110,20 +122,20 @@ export default function LibraryView({
               {isLoading ? (
                 <div className="flex flex-col items-center space-y-4">
                   <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div>
-                  <p className="text-gray-600 dark:text-[#888] text-lg">Loading document...</p>
+                  <p className="text-[#f7f7f4]/60 text-lg">Loading document...</p>
                 </div>
               ) : (
                 <>
-                  <Upload className="w-16 h-16 mx-auto mb-6 text-gray-400" />
-                  <h3 className="text-2xl font-semibold mb-3 dark:text-[#e0e0e0]">
+                  <Upload className="w-16 h-16 mx-auto mb-6 text-[#f7f7f4]/30" />
+                  <h3 className="text-2xl font-semibold mb-3 text-[#f7f7f4]">
                     Drop your book here
                   </h3>
-                  <p className="text-gray-600 dark:text-[#888] mb-8">
+                  <p className="text-[#f7f7f4]/60 mb-8">
                     or click to browse your files
                   </p>
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center px-8 py-4 bg-accent text-white rounded-lg hover:bg-blue-600 cursor-pointer transition-all hover:scale-105 text-lg font-medium"
+                    className="inline-flex items-center px-8 py-4 bg-accent/90 text-[#14120b] rounded-lg hover:bg-accent cursor-pointer transition-all hover:scale-105 text-lg font-medium"
                   >
                     <FileText className="w-6 h-6 mr-3" />
                     Choose File
@@ -132,21 +144,21 @@ export default function LibraryView({
               )}
             </div>
 
-            <div className="mt-12 grid grid-cols-3 gap-6 text-center text-sm text-gray-500 dark:text-[#666]">
+            <div className="mt-12 grid grid-cols-3 gap-6 text-center text-sm text-[#f7f7f4]/40">
               <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-[#2a2a2a] flex items-center justify-center mb-3">
+                <div className="w-12 h-12 rounded-lg bg-[#f7f7f4]/5 flex items-center justify-center mb-3">
                   <FileText className="w-6 h-6" />
                 </div>
                 <span className="font-medium">Text Files</span>
               </div>
               <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-[#2a2a2a] flex items-center justify-center mb-3">
+                <div className="w-12 h-12 rounded-lg bg-[#f7f7f4]/5 flex items-center justify-center mb-3">
                   <File className="w-6 h-6" />
                 </div>
                 <span className="font-medium">PDF Files</span>
               </div>
               <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-[#2a2a2a] flex items-center justify-center mb-3">
+                <div className="w-12 h-12 rounded-lg bg-[#f7f7f4]/5 flex items-center justify-center mb-3">
                   <Book className="w-6 h-6" />
                 </div>
                 <span className="font-medium">EPUB Books</span>
@@ -155,13 +167,13 @@ export default function LibraryView({
           </div>
         </div>
       ) : (
-        <div className="p-8">
+        <div className="relative z-10 p-8">
           <div className="max-w-7xl mx-auto">
             <div className="mb-8">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              <h2 className="text-2xl font-bold text-[#f7f7f4] mb-2">
                 {currentFilter === 'recent' ? 'Recent Books' : 'All Books'}
               </h2>
-              <p className="text-gray-600 dark:text-[#888]">
+              <p className="text-[#f7f7f4]/60">
                 {filteredBooks.length} {filteredBooks.length === 1 ? 'book' : 'books'}
               </p>
             </div>
@@ -172,10 +184,10 @@ export default function LibraryView({
                   <button
                     key={book.id}
                     onClick={() => onBookSelect(book)}
-                    className="library-card group text-left bg-white dark:bg-[#1e1e1e] rounded-xl border border-gray-200 dark:border-[#2a2a2a] hover:border-gray-300 dark:hover:border-[#444] hover:shadow-lg transition-all overflow-hidden animate-fade-up cursor-pointer"
+                    className="library-card group text-left bg-[#1a1812] rounded-xl border border-[#f7f7f4]/10 hover:border-[#f7f7f4]/20 hover:shadow-lg hover:shadow-black/20 transition-all overflow-hidden animate-fade-up cursor-pointer"
                     style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    <div className="aspect-[3/4] bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center relative overflow-hidden">
+                    <div className={`aspect-[3/4] flex items-center justify-center relative overflow-hidden ${book.coverUrl ? '' : 'bg-gradient-to-br from-[#2a2a2a] to-[#1f1f1f]'}`}>
                       {book.coverUrl ? (
                         <img
                           src={book.coverUrl}
@@ -183,16 +195,16 @@ export default function LibraryView({
                           className="absolute inset-0 w-full h-full object-cover"
                         />
                       ) : (
-                        <Book className="w-16 h-16 text-white/90" />
+                        <Book className="w-16 h-16 text-[#f7f7f4]/15" />
                       )}
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
                     </div>
 
                     <div className="p-4">
-                      <h3 className="font-semibold text-gray-900 dark:text-[#e0e0e0] mb-2 line-clamp-2">
+                      <h3 className="font-semibold text-[#f7f7f4] mb-2 line-clamp-2">
                         {book.fileName.replace(/\.(epub|pdf|txt)$/i, '')}
                       </h3>
-                      <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-[#666]">
+                      <div className="flex items-center gap-2 text-sm text-[#f7f7f4]/40">
                         <Clock className="w-4 h-4" />
                         <span>{formatDate(book.lastReadAt)}</span>
                       </div>
@@ -202,8 +214,8 @@ export default function LibraryView({
               </div>
             ) : (
               <div className="text-center py-20">
-                <Book className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-[#444]" />
-                <p className="text-gray-500 dark:text-[#666]">
+                <Book className="w-16 h-16 mx-auto mb-4 text-[#f7f7f4]/20" />
+                <p className="text-[#f7f7f4]/40">
                   No books in this view
                 </p>
               </div>
