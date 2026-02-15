@@ -348,61 +348,66 @@ export default function EpubReader({ epubData, fileName, onCloseAction, onTextSe
 
         <div className="flex items-center space-x-2">
           {/* Zoom Controls */}
-          {showToolbar && (
-            <div className="flex items-center space-x-1 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg p-1 animate-slide-in-left">
-              <button
-                onClick={handleZoomOut}
-                className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-                aria-label="Zoom out"
-                title="Zoom out (Cmd/Ctrl + -)"
-              >
-                <ZoomOut className="w-4 h-4" />
-              </button>
-              <span className="px-2 py-1 text-sm dark:text-[#ccc] min-w-[3rem] text-center">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                onClick={handleZoomIn}
-                className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-                aria-label="Zoom in"
-                title="Zoom in (Cmd/Ctrl + +)"
-              >
-                <ZoomIn className="w-4 h-4" />
-              </button>
-              {zoom !== 1 && (
-                <button
-                  onClick={handleZoomReset}
-                  className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-                  aria-label="Reset zoom"
-                  title="Reset zoom (Cmd/Ctrl + 0)"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          )}
-
-          {showToolbar && (
+          <div className={`flex items-center space-x-1 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg p-1 transition-all duration-200 origin-right ${
+            showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+          }`}>
             <button
-              onClick={() => setShowToc(!showToc)}
-              className={`p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors animate-slide-in-left ${showToc ? 'bg-gray-100 dark:bg-[#2a2a2a]' : ''}`}
-              aria-label="Table of contents"
-              title="Table of Contents"
+              onClick={handleZoomOut}
+              className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
+              aria-label="Zoom out"
+              title="Zoom out (Cmd/Ctrl + -)"
+              disabled={!showToolbar}
             >
-              <List className="w-5 h-5" />
+              <ZoomOut className="w-4 h-4" />
             </button>
-          )}
-
-          {showToolbar && (
+            <span className="px-2 py-1 text-sm dark:text-[#ccc] min-w-[3rem] text-center">
+              {Math.round(zoom * 100)}%
+            </span>
             <button
-              onClick={toggleTheme}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors animate-slide-in-left"
-              aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-              title={isDark ? 'Light mode' : 'Dark mode'}
+              onClick={handleZoomIn}
+              className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
+              aria-label="Zoom in"
+              title="Zoom in (Cmd/Ctrl + +)"
+              disabled={!showToolbar}
             >
-              {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              <ZoomIn className="w-4 h-4" />
             </button>
-          )}
+            {zoom !== 1 && (
+              <button
+                onClick={handleZoomReset}
+                className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
+                aria-label="Reset zoom"
+                title="Reset zoom (Cmd/Ctrl + 0)"
+                disabled={!showToolbar}
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={() => setShowToc(!showToc)}
+            className={`p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-all duration-200 origin-right ${
+              showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+            } ${showToc ? 'bg-gray-100 dark:bg-[#2a2a2a]' : ''}`}
+            aria-label="Table of contents"
+            title="Table of Contents"
+            disabled={!showToolbar}
+          >
+            <List className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={toggleTheme}
+            className={`p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-all duration-200 origin-right ${
+              showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+            }`}
+            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={isDark ? 'Light mode' : 'Dark mode'}
+            disabled={!showToolbar}
+          >
+            {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
 
           <button
             onClick={() => setShowToolbar(!showToolbar)}
