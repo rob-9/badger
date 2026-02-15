@@ -1,6 +1,6 @@
 'use client'
 
-import { Book, Clock, Upload, FileText, File } from 'lucide-react'
+import { Book, Clock, Upload, FileText, File, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { BookMetadata } from '@/lib/bookStorage'
 import { formatDate } from '@/lib/formatDate'
@@ -11,6 +11,7 @@ interface LibraryViewProps {
   books: BookMetadata[]
   currentFilter: ViewType
   onBookSelect: (book: BookMetadata) => void
+  onDeleteBook: (bookId: string) => void
   onUpload: (content: string, fileName: string, arrayBuffer?: ArrayBuffer) => void
   uploadInputRef?: React.RefObject<HTMLInputElement | null>
 }
@@ -19,6 +20,7 @@ export default function LibraryView({
   books,
   currentFilter,
   onBookSelect,
+  onDeleteBook,
   onUpload,
   uploadInputRef,
 }: LibraryViewProps) {
@@ -181,35 +183,50 @@ export default function LibraryView({
             {filteredBooks.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {filteredBooks.map((book, index) => (
-                  <button
+                  <div
                     key={book.id}
-                    onClick={() => onBookSelect(book)}
-                    className="library-card group text-left bg-[#1a1812] rounded-xl border border-[#f7f7f4]/10 hover:border-[#f7f7f4]/20 hover:shadow-lg hover:shadow-black/20 transition-all overflow-hidden animate-fade-up cursor-pointer"
+                    className="library-card group relative text-left bg-[#1a1812] rounded-xl border border-[#f7f7f4]/10 hover:border-[#f7f7f4]/20 hover:shadow-lg hover:shadow-black/20 transition-all overflow-hidden animate-fade-up"
                     style={{ animationDelay: `${index * 50}ms` }}
                   >
-                    <div className={`aspect-[3/4] flex items-center justify-center relative overflow-hidden ${book.coverUrl ? '' : 'bg-gradient-to-br from-[#2a2a2a] to-[#1f1f1f]'}`}>
-                      {book.coverUrl ? (
-                        <img
-                          src={book.coverUrl}
-                          alt={book.fileName}
-                          className="absolute inset-0 w-full h-full object-cover"
-                        />
-                      ) : (
-                        <Book className="w-16 h-16 text-[#f7f7f4]/15" />
-                      )}
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
-                    </div>
+                    {/* Delete button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDeleteBook(book.id)
+                      }}
+                      className="absolute top-2 right-2 z-10 p-1.5 rounded-lg bg-black/40 text-[#f7f7f4]/60 opacity-0 group-hover:opacity-100 hover:bg-red-500/80 hover:text-white transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
 
-                    <div className="p-4">
-                      <h3 className="font-semibold text-[#f7f7f4] mb-2 line-clamp-2">
-                        {book.fileName.replace(/\.(epub|pdf|txt)$/i, '')}
-                      </h3>
-                      <div className="flex items-center gap-2 text-sm text-[#f7f7f4]/40">
-                        <Clock className="w-4 h-4" />
-                        <span>{formatDate(book.lastReadAt)}</span>
+                    <button
+                      onClick={() => onBookSelect(book)}
+                      className="w-full text-left cursor-pointer"
+                    >
+                      <div className={`aspect-[3/4] flex items-center justify-center relative overflow-hidden ${book.coverUrl ? '' : 'bg-gradient-to-br from-[#2a2a2a] to-[#1f1f1f]'}`}>
+                        {book.coverUrl ? (
+                          <img
+                            src={book.coverUrl}
+                            alt={book.fileName}
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                        ) : (
+                          <Book className="w-16 h-16 text-[#f7f7f4]/15" />
+                        )}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
                       </div>
-                    </div>
-                  </button>
+
+                      <div className="p-4">
+                        <h3 className="font-semibold text-[#f7f7f4] mb-2 line-clamp-2">
+                          {book.fileName.replace(/\.(epub|pdf|txt)$/i, '')}
+                        </h3>
+                        <div className="flex items-center gap-2 text-sm text-[#f7f7f4]/40">
+                          <Clock className="w-4 h-4" />
+                          <span>{formatDate(book.lastReadAt)}</span>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
                 ))}
               </div>
             ) : (

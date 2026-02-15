@@ -9,7 +9,7 @@ import LibraryView from '@/components/LibraryView'
 import QuestionPopup from '@/components/QuestionPopup'
 import ChatPanel, { type ChatMessage } from '@/components/ChatPanel'
 import Toast from '@/components/Toast'
-import { addBook, getBookData, getBookHistory, type BookMetadata } from '@/lib/bookStorage'
+import { addBook, getBookData, getBookHistory, removeBook, type BookMetadata } from '@/lib/bookStorage'
 import { indexBook, queryBook } from '@/lib/api'
 import { extractCover } from '@/lib/parseEpub'
 
@@ -40,8 +40,10 @@ export default function Home() {
 
   // Load history on mount
   useEffect(() => {
-    setHistory(getBookHistory())
-    setHistoryLoaded(true)
+    getBookHistory().then((books) => {
+      setHistory(books)
+      setHistoryLoaded(true)
+    })
   }, [])
 
   const handleFileLoad = async (content: string, name: string, arrayBuffer?: ArrayBuffer) => {
@@ -57,7 +59,7 @@ export default function Home() {
       const coverUrl = await extractCover(arrayBuffer) ?? undefined
       const id = await addBook(name, arrayBuffer, coverUrl)
       setBookId(id)
-      setHistory(getBookHistory()) // Refresh history
+      setHistory(await getBookHistory()) // Refresh history
 
       // Index the book for RAG
       console.log('[App] Starting RAG indexing for book')
@@ -87,14 +89,19 @@ export default function Home() {
     }
   }, [])
 
-  const handleBack = () => {
+  const handleDeleteBook = useCallback(async (bookId: string) => {
+    await removeBook(bookId)
+    setHistory(await getBookHistory())
+  }, [])
+
+  const handleBack = async () => {
     setDocument(null)
     setFileName('')
     setEpubData(null)
     setIsEpub(false)
     setBookId(null)
     setIsIndexing(false)
-    setHistory(getBookHistory()) // Refresh history
+    setHistory(await getBookHistory()) // Refresh history
     // Reset chat state
     setSelection(null)
     setChatMessages([])
@@ -222,6 +229,7 @@ export default function Home() {
             books={history}
             currentFilter={currentView}
             onBookSelect={handleOpenFromHistory}
+            onDeleteBook={handleDeleteBook}
             onUpload={handleFileLoad}
             uploadInputRef={uploadInputRef}
           />
