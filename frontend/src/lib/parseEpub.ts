@@ -83,8 +83,7 @@ export async function extractCover(arrayBuffer: ArrayBuffer): Promise<string | n
   }
 }
 
-export async function parseEpub(file: File): Promise<string> {
-  const arrayBuffer = await file.arrayBuffer()
+export async function extractText(arrayBuffer: ArrayBuffer): Promise<string> {
   const zip = await JSZip.loadAsync(arrayBuffer)
   const { opfDoc, opfDir } = await getOpf(zip)
 
@@ -122,4 +121,8 @@ export async function parseEpub(file: File): Promise<string> {
   }
 
   return textContent.join('\n\n')
+}
+
+export async function parseEpub(file: File): Promise<string> {
+  return extractText(await file.arrayBuffer())
 }
