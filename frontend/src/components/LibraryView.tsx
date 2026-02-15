@@ -181,7 +181,7 @@ export default function LibraryView({
             </div>
 
             {filteredBooks.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                 {filteredBooks.map((book, index) => (
                   <div
                     key={book.id}
@@ -203,7 +203,7 @@ export default function LibraryView({
                       onClick={() => onBookSelect(book)}
                       className="w-full text-left cursor-pointer"
                     >
-                      <div className={`aspect-[3/4] flex items-center justify-center relative overflow-hidden ${book.coverUrl ? '' : 'bg-gradient-to-br from-[#2a2a2a] to-[#1f1f1f]'}`}>
+                      <div className={`aspect-[2/3] flex items-center justify-center relative overflow-hidden ${book.coverUrl ? '' : 'bg-gradient-to-br from-[#2a2a2a] to-[#1f1f1f]'}`}>
                         {book.coverUrl ? (
                           <img
                             src={book.coverUrl}
@@ -211,17 +211,17 @@ export default function LibraryView({
                             className="absolute inset-0 w-full h-full object-cover"
                           />
                         ) : (
-                          <Book className="w-16 h-16 text-[#f7f7f4]/15" />
+                          <Book className="w-10 h-10 text-[#f7f7f4]/15" />
                         )}
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
                       </div>
 
-                      <div className="p-4">
-                        <h3 className="font-semibold text-[#f7f7f4] mb-2 line-clamp-2">
+                      <div className="p-2.5">
+                        <h3 className="font-medium text-sm text-[#f7f7f4] mb-1 line-clamp-2 leading-tight">
                           {book.fileName.replace(/\.(epub|pdf|txt)$/i, '')}
                         </h3>
-                        <div className="flex items-center gap-2 text-sm text-[#f7f7f4]/40">
-                          <Clock className="w-4 h-4" />
+                        <div className="flex items-center gap-1.5 text-xs text-[#f7f7f4]/40">
+                          <Clock className="w-3 h-3" />
                           <span>{formatDate(book.lastReadAt)}</span>
                         </div>
                       </div>
