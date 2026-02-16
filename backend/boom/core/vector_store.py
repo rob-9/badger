@@ -23,6 +23,7 @@ from pathlib import Path
 import json
 import math
 from typing import Optional
+from rank_bm25 import BM25Okapi
 from .chunker import TextChunk
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,70 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot_product / (magnitude_a * magnitude_b)
 
 
+def _tokenize(text: str) -> list[str]:
+    """Split text into lowercase words for BM25 matching (e.g. 'Hello World!' → ['hello', 'world'])."""
+    return re.findall(r'\w+', text.lower())
+
+
+class BM25Index:
+    """
+    BM25 (Best Match 25) keyword index over document chunks.
+
+    BM25 is a classical text retrieval algorithm that ranks documents by
+    term frequency (how often a word appears in a chunk) and inverse document
+    frequency (how rare a word is across all chunks). Unlike semantic/vector
+    search, BM25 excels at exact keyword matching — it will find "photosynthesis"
+    even if the embedding model doesn't place it near the query vector.
+
+    Used alongside vector search in hybrid retrieval for better recall.
+    """
+
+    def __init__(self, entries: list[VectorEntry]):
+        self.entries = entries
+        corpus = [_tokenize(e.chunk.text) for e in entries]
+        self.bm25 = BM25Okapi(corpus)
+
+    def search(self, query: str, top_k: int = 20) -> list[SearchResult]:
+        tokens = _tokenize(query)
+        scores = self.bm25.get_scores(tokens)
+        ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
+        return [
+            SearchResult(chunk=self.entries[idx].chunk, score=float(score))
+            for idx, score in ranked
+            if score > 0
+        ]
+
+
+def reciprocal_rank_fusion(*result_lists: list[SearchResult], k: int = 60) -> list[SearchResult]:
+    """
+    Merge multiple ranked result lists into one using Reciprocal Rank Fusion (RRF).
+
+    RRF is a simple, robust way to combine results from different retrieval methods
+    (e.g. semantic search + BM25). Each result gets a score of 1/(k + rank + 1) from
+    each list it appears in, and scores are summed. The constant k=60 dampens the
+    influence of high ranks so that a result appearing in multiple lists is boosted
+    more than one that ranks #1 in only one list.
+
+    Reference: Cormack, Clarke & Buettcher (2009) — "Reciprocal Rank Fusion
+    outperforms Condorcet and individual Rank Learning Methods"
+    """
+    scores: dict[str, float] = {}
+    chunks: dict[str, SearchResult] = {}
+
+    for results in result_lists:
+        for rank, result in enumerate(results):
+            chunk_id = result.chunk.id
+            scores[chunk_id] = scores.get(chunk_id, 0) + 1.0 / (k + rank + 1)
+            if chunk_id not in chunks:
+                chunks[chunk_id] = result
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [
+        SearchResult(chunk=chunks[cid].chunk, score=score)
+        for cid, score in ranked
+    ]
+
+
 class VectorStore:
     """
     Simple file-based vector store.
@@ -85,6 +150,7 @@ class VectorStore:
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.entries: dict[str, list[VectorEntry]] = {}
+        self.bm25_indices: dict[str, BM25Index] = {}
         logger.info("Initialized with storage: %s", self.storage_dir)
 
     def _get_file_path(self, book_id: str) -> Path:
@@ -153,7 +219,8 @@ class VectorStore:
             entries: List of VectorEntry objects
         """
         self.entries[book_id] = entries
-        logger.info("Added %d chunks for book %s", len(entries), book_id)
+        self.bm25_indices[book_id] = BM25Index(entries)
+        logger.info("Added %d chunks for book %s (BM25 index built)", len(entries), book_id)
 
         # Persist to file system
         await self.save_to_file(book_id, entries)
@@ -275,6 +342,65 @@ class VectorStore:
             for e in entries
             if needle in e.chunk.text.lower()
         ]
+
+    async def _get_bm25(self, book_id: str) -> Optional[BM25Index]:
+        """
+        Get or lazily build the BM25 index for a book.
+
+        The index is built on first access (e.g. when a book was loaded from disk
+        rather than freshly indexed) and cached in memory for subsequent queries.
+        """
+        if book_id in self.bm25_indices:
+            return self.bm25_indices[book_id]
+
+        entries = self.entries.get(book_id)
+        if not entries:
+            entries = await self.load_from_file(book_id)
+            if entries:
+                self.entries[book_id] = entries
+
+        if not entries:
+            return None
+
+        self.bm25_indices[book_id] = BM25Index(entries)
+        return self.bm25_indices[book_id]
+
+    async def hybrid_search(
+        self,
+        book_id: str,
+        query_embedding: list[float],
+        query_text: str,
+        top_k: int = 20,
+    ) -> list[SearchResult]:
+        """
+        Combine semantic (vector) search with BM25 (keyword) search using
+        Reciprocal Rank Fusion for better recall.
+
+        Semantic search finds chunks with similar meaning (good for paraphrases,
+        conceptual matches). BM25 finds chunks with matching keywords (good for
+        exact terms, names, technical vocabulary). Fusing both via RRF gives
+        better retrieval than either alone — chunks that score well in both
+        methods get boosted to the top.
+
+        Returns top_k results (typically 20) for downstream reranking to narrow
+        down to the final 5.
+        """
+        logger.debug("Hybrid search for book %s (top %d)", book_id, top_k)
+
+        # Semantic search (vector cosine similarity)
+        semantic_results = await self.search(book_id, query_embedding, top_k=top_k)
+
+        # BM25 keyword search
+        bm25 = await self._get_bm25(book_id)
+        bm25_results = bm25.search(query_text, top_k=top_k) if bm25 else []
+
+        logger.debug("Semantic: %d results, BM25: %d results", len(semantic_results), len(bm25_results))
+
+        # Fuse both ranked lists — chunks appearing in both get higher scores
+        fused = reciprocal_rank_fusion(semantic_results, bm25_results)[:top_k]
+
+        logger.debug("Fused: %d results", len(fused))
+        return fused
 
     def get_stats(self) -> dict:
         """Get statistics about the store."""

@@ -10,6 +10,8 @@ dependencies = [
     "voyageai>=0.1.0",
     "langgraph>=0.4.0",
 
+    "rank-bm25>=0.2.2",
+
     # Document processing
     "pypdf>=6.0.0",
     "ebooklib>=0.18",
