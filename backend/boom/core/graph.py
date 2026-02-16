@@ -418,7 +418,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     # --- Node factory: semantic retrieval (lookup & analysis) ---
 
     def _make_semantic_node(top_k: int, strategy: str):
-        """Create a semantic retrieval node with the given top_k and strategy name."""
+        """Create a pure semantic retrieval node (cosine similarity only)."""
         async def semantic_node(state: QAState) -> dict:
             logger.info("── RETRIEVE (%s) %s", strategy, "─" * (33 - len(strategy)))
             logger.info("  Strategy: semantic search, top_k=%d", top_k)
@@ -443,8 +443,81 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             }
         return semantic_node
 
-    lookup_node = _make_semantic_node(top_k=5, strategy="semantic")
-    analysis_node = _make_semantic_node(top_k=8, strategy="broad_semantic")
+    def _make_hybrid_node(top_k: int, strategy: str):
+        """Create a hybrid retrieval node (semantic + BM25 fused via RRF)."""
+        async def hybrid_node(state: QAState) -> dict:
+            logger.info("── RETRIEVE (%s) %s", strategy, "─" * (33 - len(strategy)))
+            logger.info("  Strategy: hybrid search (semantic + BM25), top_k=%d", top_k)
+
+            query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
+            logger.info("  Query: %s", query[:200])
+            logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_CONTEXT_MODEL)
+
+            embedding = _embed_query(query)
+            logger.info("  Embedding: %d dimensions", len(embedding))
+            logger.info("  Searching %d total chunks in book %s", state.get("total_chunks", 0), state["book_id"])
+
+            results = await vector_store.hybrid_search(
+                state["book_id"], embedding, query_text=query, top_k=top_k,
+            )
+            labeled = _label_and_log(results, state)
+
+            return {
+                "chunks": labeled,
+                "retrieval_strategy": strategy,
+                "retrieval_query": query,
+                "retrieval_top_k": top_k,
+                "retrieval_embedding_dims": len(embedding),
+            }
+        return hybrid_node
+
+    lookup_node = _make_semantic_node(top_k=20, strategy="semantic")
+    analysis_node = _make_hybrid_node(top_k=20, strategy="hybrid_broad")
+
+    # --- Node: rerank ---
+
+    async def rerank_node(state: QAState) -> dict:
+        """
+        Rerank retrieved chunks using Voyage's rerank-2.5 model.
+
+        Takes the 20 candidates from retrieval and narrows down to the
+        best 5 by relevance. Reranking uses a cross-encoder that scores
+        each (query, chunk) pair jointly — more accurate than embedding
+        similarity alone, but too slow to run on all chunks.
+        """
+        chunks = state.get("chunks", [])
+        if len(chunks) <= 5:
+            logger.info("── RERANK (skipped, %d chunks ≤ 5) %s", len(chunks), LOG_SEPARATOR[35:])
+            return {}
+
+        logger.info("── RERANK %s", LOG_SEPARATOR[10:])
+        logger.info("  Input: %d chunks → reranking to top 5", len(chunks))
+
+        query = state["question"]
+        if state.get("selected_text"):
+            query += f"\n\nReferring to: {state['selected_text']}"
+
+        reranking = voyage_client.rerank(
+            query=query,
+            documents=[c["text"] for c in chunks],
+            model=config.VOYAGE_RERANK_MODEL,
+            top_k=5,
+        )
+
+        reranked = [
+            {**chunks[r.index], "score": r.relevance_score}
+            for r in reranking.results
+        ]
+
+        logger.info("  Output: %d chunks", len(reranked))
+        for i, c in enumerate(reranked):
+            logger.info(
+                "    [%d] score=%.4f | chunk %d | %s…",
+                i + 1, c["score"], c["chunk_index"], c["text"][:80],
+            )
+        logger.info(LOG_SEPARATOR)
+
+        return {"chunks": reranked}
 
     # --- Node: generate ---
 
@@ -546,6 +619,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     graph.add_node("context", context_node)
     graph.add_node("lookup", lookup_node)
     graph.add_node("analysis", analysis_node)
+    graph.add_node("rerank", rerank_node)
     graph.add_node("generate", generate_node)
     graph.add_node("log", log_node)
 
@@ -559,8 +633,9 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     })
 
     for node in ["vocabulary", "context", "lookup", "analysis"]:
-        graph.add_edge(node, "generate")
+        graph.add_edge(node, "rerank")
 
+    graph.add_edge("rerank", "generate")
     graph.add_edge("generate", "log")
     graph.add_edge("log", END)
 
