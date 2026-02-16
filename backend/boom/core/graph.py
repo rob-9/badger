@@ -2,7 +2,7 @@
 LangGraph agent workflow for the RAG pipeline.
 
 Routes questions through type-specific retrieval strategies:
-- vocabulary: semantic top_k=5, concise definition
+- vocabulary: keyword/semantic top_k=5, concise definition
 - context: proximity ±3 chunks, passage explanation
 - lookup: semantic top_k=5, factual answer
 - analysis: broad semantic top_k=8, deeper analysis
@@ -28,6 +28,7 @@ LOG_DIR = Path(".data/logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 VALID_TYPES = {"vocabulary", "context", "lookup", "analysis"}
+LOG_SEPARATOR = "──────────────────────────────────────────────"
 
 
 # === State ===
@@ -73,18 +74,44 @@ class QAState(TypedDict, total=False):
 
 # === Helpers ===
 
+def strip_code_fences(text: str) -> str:
+    """Strip markdown code fences from LLM output."""
+    if not text.startswith("```"):
+        return text
+    text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
 def label_chunks(results: list[SearchResult], reader_position: float, total_chunks: int) -> list[dict]:
     """Tag chunks as PAST or AHEAD based on reader position."""
-    reader_chunk_index = int(reader_position * total_chunks) if total_chunks > 0 else 0
-    labeled = []
-    for r in results:
-        idx = r.chunk.metadata['chunk_index']
-        labeled.append({
+    reader_idx = int(reader_position * total_chunks) if total_chunks > 0 else 0
+    return [
+        {
             "text": r.chunk.text,
-            "chunk_index": idx,
+            "chunk_index": r.chunk.metadata["chunk_index"],
             "score": r.score,
-            "label": "PAST" if idx <= reader_chunk_index else "AHEAD",
-        })
+            "label": "PAST" if r.chunk.metadata["chunk_index"] <= reader_idx else "AHEAD",
+        }
+        for r in results
+    ]
+
+
+def _label_and_log(results: list[SearchResult], state: QAState) -> list[dict]:
+    """Label chunks with PAST/AHEAD and log retrieval results."""
+    position = state.get("reader_position", 0)
+    total = state.get("total_chunks", 0)
+    labeled = label_chunks(results, position, total)
+    reader_chunk = int(position * total) if total > 0 else 0
+    logger.info("  Reader at chunk %d — labeling PAST/AHEAD", reader_chunk)
+    logger.info("  Retrieved %d chunks:", len(labeled))
+    for i, c in enumerate(labeled):
+        logger.info(
+            "    [%d] score=%.4f | chunk %d | %s | %s…",
+            i + 1, c["score"], c["chunk_index"], c["label"], c["text"][:80],
+        )
+    logger.info(LOG_SEPARATOR)
     return labeled
 
 
@@ -100,22 +127,159 @@ def build_query(question: str, selected_text: Optional[str], entities: list[str]
 
 def build_context_string(chunks: list[dict]) -> str:
     """Build context string with PAST/AHEAD labels from labeled chunks."""
+    def format_group(group: list[dict]) -> str:
+        return "\n\n---\n\n".join(
+            f"[Source {i + 1}]\n{c['text']}" for i, c in enumerate(group)
+        )
+
     past = [c for c in chunks if c["label"] == "PAST"]
     ahead = [c for c in chunks if c["label"] == "AHEAD"]
 
     parts = []
     if past:
-        past_text = "\n\n---\n\n".join(
-            f"[Source {i + 1}]\n{c['text']}" for i, c in enumerate(past)
-        )
-        parts.append(f"[ALREADY READ]\n{past_text}")
+        parts.append(f"[ALREADY READ]\n{format_group(past)}")
     if ahead:
-        ahead_text = "\n\n---\n\n".join(
-            f"[Source {i + 1}]\n{c['text']}" for i, c in enumerate(ahead)
-        )
-        parts.append(f"[COMING UP - guide only, do not spoil]\n{ahead_text}")
+        parts.append(f"[COMING UP - guide only, do not spoil]\n{format_group(ahead)}")
 
     return "\n\n===\n\n".join(parts)
+
+
+# === Logging ===
+
+def _build_log_entry(state: QAState) -> dict:
+    """Build structured log entry from final pipeline state."""
+    chunks = state.get("chunks", [])
+    total = state.get("total_chunks", 0)
+    position = state.get("reader_position", 0)
+
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "book_id": state.get("book_id"),
+        "reader_position": position,
+        "reader_chunk_index": int(position * total) if total else 0,
+        "total_chunks": total,
+        "question": state["question"],
+        "selected_text": state.get("selected_text") or "",
+        # Classification
+        "question_type": state.get("question_type"),
+        "entities": state.get("entities", []),
+        "classify_raw_response": state.get("classify_raw_response"),
+        "classify_tokens": {
+            "in": state.get("classify_tokens_in"),
+            "out": state.get("classify_tokens_out"),
+        },
+        # Retrieval
+        "retrieval_strategy": state.get("retrieval_strategy"),
+        "retrieval_query": state.get("retrieval_query"),
+        "retrieval_top_k": state.get("retrieval_top_k"),
+        "retrieval_embedding_dims": state.get("retrieval_embedding_dims"),
+        "retrieval_center_chunk": state.get("retrieval_center_chunk"),
+        "retrieval_range": [state.get("retrieval_range_start"), state.get("retrieval_range_end")],
+        "retrieval_chunk_match": state.get("retrieval_chunk_match"),
+        "retrieved_chunks": [
+            {
+                "chunk_index": c["chunk_index"],
+                "score": round(c["score"], 4),
+                "label": c["label"],
+                "text": c["text"],
+            }
+            for c in chunks
+        ],
+        # Generation
+        "system_prompt": state.get("gen_system_prompt"),
+        "user_prompt": state.get("gen_user_prompt"),
+        "response": {
+            "answer": state.get("answer", ""),
+            "model": state.get("gen_model"),
+            "input_tokens": state.get("gen_tokens_in"),
+            "output_tokens": state.get("gen_tokens_out"),
+            "stop_reason": state.get("gen_stop_reason"),
+        },
+    }
+
+
+def _write_readable_log(state: QAState, log_entry: dict):
+    """Write human-readable log entry to queries.log."""
+    W = 80
+    chunks = state.get("chunks", [])
+    selected = state.get("selected_text") or ""
+    total = state.get("total_chunks", 0)
+    position = state.get("reader_position", 0)
+    reader_chunk = int(position * total) if total else 0
+
+    with open(LOG_DIR / "queries.log", "a") as f:
+        def section(title: str):
+            f.write(f"\n── {title} " + "─" * (W - 4 - len(title)) + "\n")
+
+        # Header
+        f.write("\n\n" + "═" * W + "\n")
+        f.write(f"QUERY @ {log_entry['timestamp']}\n")
+        f.write("═" * W + "\n\n")
+
+        f.write(f"Book:     {state.get('book_id')}\n")
+        f.write(f"Position: {position:.1%} (chunk {reader_chunk}/{total})\n")
+        f.write(f'Selected: "{selected[:200]}{"…" if len(selected) > 200 else ""}"\n')
+        f.write(f"Question: {state['question']}\n")
+
+        # Classification
+        section("Classification")
+        f.write("\n  Model:    claude-haiku-4-5-20251001\n")
+        f.write(f"  Tokens:   {state.get('classify_tokens_in')} in / {state.get('classify_tokens_out')} out\n")
+        f.write(f"  Raw:      {state.get('classify_raw_response')}\n")
+        f.write(f"  Type:     {state.get('question_type')}\n")
+        f.write(f"  Entities: {', '.join(state.get('entities', [])) or '(none)'}\n")
+
+        # Retrieval
+        strategy = state.get("retrieval_strategy")
+        section("Retrieval")
+        f.write(f"\n  Strategy: {strategy}\n")
+        if strategy == "proximity":
+            f.write(f"  Chunk match: {state.get('retrieval_chunk_match', 'unknown')}\n")
+            f.write(f"  Center:   chunk {state.get('retrieval_center_chunk')}\n")
+            f.write(f"  Range:    [{state.get('retrieval_range_start')}, {state.get('retrieval_range_end')}]\n")
+        elif strategy and "keyword" in strategy:
+            f.write(f'  Keyword:  "{state.get("retrieval_query", "")}"\n')
+        else:
+            f.write(f"  Query:    {(state.get('retrieval_query') or '')[:200]}\n")
+            f.write(f"  Top K:    {state.get('retrieval_top_k')}\n")
+            f.write(f"  Embedding: {state.get('retrieval_embedding_dims')} dimensions ({config.VOYAGE_MODEL})\n")
+
+        f.write(f"\n  Results: {len(chunks)} chunks\n")
+        for i, c in enumerate(chunks):
+            f.write(f"\n    [{i+1}] score={c['score']:.4f} | chunk {c['chunk_index']} | {c['label']}\n")
+            chunk_text = c["text"]
+            if selected and selected.lower() in chunk_text.lower():
+                idx = chunk_text.lower().find(selected.lower())
+                chunk_text = (
+                    chunk_text[:idx]
+                    + ">>>" + chunk_text[idx:idx + len(selected)] + "<<<"
+                    + chunk_text[idx + len(selected):]
+                )
+            for line in chunk_text.split("\n"):
+                f.write(f"        {line}\n")
+
+        # LLM Input
+        sys_prompt = state.get("gen_system_prompt") or ""
+        usr_prompt = state.get("gen_user_prompt") or ""
+        section("LLM Input")
+        f.write(f"\n  System ({len(sys_prompt)} chars):\n")
+        for line in sys_prompt.split("\n"):
+            f.write(f"    {line}\n")
+        f.write(f"\n  User ({len(usr_prompt)} chars):\n")
+        usr_display = usr_prompt if len(usr_prompt) <= 500 else usr_prompt[:500] + f"\n    … [{len(usr_prompt) - 500} more chars]"
+        for line in usr_display.split("\n"):
+            f.write(f"    {line}\n")
+
+        # LLM Output
+        section("LLM Output")
+        f.write(f"\n  Model:  {state.get('gen_model')}\n")
+        f.write(f"  Tokens: {state.get('gen_tokens_in')} in / {state.get('gen_tokens_out')} out\n")
+        f.write(f"  Stop:   {state.get('gen_stop_reason')}\n")
+        f.write("\n  Answer:\n")
+        for line in state.get("answer", "").split("\n"):
+            f.write(f"    {line}\n")
+
+        f.write("\n" + "═" * W + "\n\n")
 
 
 # === Graph builder ===
@@ -123,28 +287,27 @@ def build_context_string(chunks: list[dict]) -> str:
 def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_client) -> StateGraph:
     """Build and compile the QA LangGraph."""
 
-    # --- Nodes ---
+    # --- Node: classify ---
 
     async def classify_node(state: QAState) -> dict:
-        """Fast classification with Haiku."""
+        """Classify question type with Haiku."""
         selected = state.get("selected_text") or ""
         question = state["question"]
         book_id = state["book_id"]
 
-        logger.info("── CLASSIFY ──────────────────────────────────")
+        logger.info("── CLASSIFY %s", LOG_SEPARATOR[11:])
         logger.info("  Book:     %s", book_id)
         logger.info("  Question: %s", question[:100])
-        logger.info("  Selected: \"%s%s\"", selected[:80], "…" if len(selected) > 80 else "")
+        logger.info('  Selected: "%s%s"', selected[:80], "…" if len(selected) > 80 else "")
         logger.info("  Model:    claude-haiku-4-5-20251001")
 
-        classify_prompt = f"""Question: "{question}"
-Selected text: "{selected[:200]}"
-
-Classify as exactly one of: vocabulary, context, lookup, analysis
-Extract key entities (names, terms, concepts).
-
-Return: {{"type": "...", "entities": [...]}}"""
-
+        classify_prompt = (
+            f'Question: "{question}"\n'
+            f'Selected text: "{selected[:200]}"\n\n'
+            f"Classify as exactly one of: vocabulary, context, lookup, analysis\n"
+            f"Extract key entities (names, terms, concepts).\n\n"
+            f'Return: {{"type": "...", "entities": [...]}}'
+        )
         logger.info("  Prompt:   %s", classify_prompt.replace("\n", " ")[:200])
 
         response = anthropic.messages.create(
@@ -157,18 +320,10 @@ Return: {{"type": "...", "entities": [...]}}"""
         logger.info("  Raw response: %s", raw_text)
         logger.info("  Tokens: %d in / %d out", response.usage.input_tokens, response.usage.output_tokens)
 
-        # Strip markdown code fences if present
-        text = raw_text
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
-            text = text.strip()
-
         try:
-            parsed = json.loads(text)
+            parsed = json.loads(strip_code_fences(raw_text))
         except json.JSONDecodeError:
-            logger.warning("  FAILED to parse classification JSON, falling back to 'context': %s", text)
+            logger.warning("  FAILED to parse classification JSON, falling back to 'context': %s", raw_text)
             parsed = {"type": "context", "entities": []}
 
         q_type = parsed.get("type", "context")
@@ -177,57 +332,53 @@ Return: {{"type": "...", "entities": [...]}}"""
             q_type = "context"
 
         total = await vector_store.get_total_chunks(book_id)
+        entities = parsed.get("entities", [])
 
-        logger.info("  Result: type=%s, entities=%s, total_chunks=%d", q_type, parsed.get("entities", []), total)
-        logger.info("──────────────────────────────────────────────")
+        logger.info("  Result: type=%s, entities=%s, total_chunks=%d", q_type, entities, total)
+        logger.info(LOG_SEPARATOR)
 
         return {
             "question_type": q_type,
-            "entities": parsed.get("entities", []),
+            "entities": entities,
             "total_chunks": total,
             "classify_raw_response": raw_text,
             "classify_tokens_in": response.usage.input_tokens,
             "classify_tokens_out": response.usage.output_tokens,
         }
 
+    # --- Node: vocabulary retrieval ---
+
     async def vocabulary_node(state: QAState) -> dict:
-        """Keyword search for vocabulary — find chunks that contain the word."""
+        """Keyword search for vocabulary — find chunks containing the word."""
         selected = state.get("selected_text") or ""
         book_id = state["book_id"]
         logger.info("── RETRIEVE (vocabulary) ─────────────────────")
-        logger.info("  Strategy: keyword search for \"%s\"", selected[:100])
+        logger.info('  Strategy: keyword search for "%s"', selected[:100])
 
-        # Keyword search first — find chunks that literally contain the term
         results = await vector_store.keyword_search(book_id, selected)
         strategy = "keyword"
-        logger.info("  Keyword matches: %d chunks contain \"%s\"", len(results), selected[:50])
+        logger.info('  Keyword matches: %d chunks contain "%s"', len(results), selected[:50])
 
         if not results:
-            # Fall back to semantic search if the word isn't found literally
             logger.info("  No keyword matches — falling back to semantic search")
             strategy = "keyword→semantic_fallback"
             query = selected if selected else state["question"]
             embedding = voyage_client.embed(
                 texts=[query], model=config.VOYAGE_MODEL, input_type="query"
             ).embeddings[0]
-            logger.info("  Semantic query: \"%s\", %d dimensions", query[:100], len(embedding))
+            logger.info('  Semantic query: "%s", %d dimensions', query[:100], len(embedding))
             results = await vector_store.search(book_id, embedding, top_k=5)
 
-        # Cap at 5 for keyword results
         results = results[:5]
+        labeled = _label_and_log(results, state)
 
-        labeled = label_chunks(results, state.get("reader_position", 0), state.get("total_chunks", 0))
-        reader_chunk = int(state.get("reader_position", 0) * state.get("total_chunks", 0))
-        logger.info("  Reader at chunk %d — labeling PAST/AHEAD", reader_chunk)
-        logger.info("  Retrieved %d chunks:", len(labeled))
-        for i, c in enumerate(labeled):
-            logger.info("    [%d] score=%.4f | chunk %d | %s | %s…", i + 1, c["score"], c["chunk_index"], c["label"], c["text"][:80])
-        logger.info("──────────────────────────────────────────────")
         return {
             "chunks": labeled,
             "retrieval_strategy": strategy,
             "retrieval_query": selected,
         }
+
+    # --- Node: context (proximity) retrieval ---
 
     async def context_node(state: QAState) -> dict:
         """Proximity retrieval ±3 chunks for passage explanation."""
@@ -235,22 +386,20 @@ Return: {{"type": "...", "entities": [...]}}"""
         book_id = state["book_id"]
         logger.info("── RETRIEVE (context) ────────────────────────")
         logger.info("  Strategy: proximity ±3 chunks")
-        logger.info("  Looking for selected text in chunks: \"%s…\"", selected[:60])
+        logger.info('  Looking for selected text in chunks: "%s…"', selected[:60])
+
         center = await vector_store.find_chunk_containing(book_id, selected)
         chunk_match = "exact" if (center > 0 or not selected) else "fallback"
         start, end = max(0, center - 3), center + 3
+
         logger.info("  Chunk match: %s", chunk_match)
         logger.info("  Center chunk: %d, range: [%d, %d]", center, start, end)
         if chunk_match == "fallback" and selected:
             logger.warning("  find_chunk_containing fell back to 0 — selected text not found in any chunk")
+
         results = await vector_store.get_chunks_by_range(book_id, start, end)
-        labeled = label_chunks(results, state.get("reader_position", 0), state.get("total_chunks", 0))
-        reader_chunk = int(state.get("reader_position", 0) * state.get("total_chunks", 0))
-        logger.info("  Reader at chunk %d — labeling PAST/AHEAD", reader_chunk)
-        logger.info("  Retrieved %d chunks:", len(labeled))
-        for i, c in enumerate(labeled):
-            logger.info("    [%d] chunk %d | %s | score=%.4f | %s…", i + 1, c["chunk_index"], c["label"], c["score"], c["text"][:80])
-        logger.info("──────────────────────────────────────────────")
+        labeled = _label_and_log(results, state)
+
         return {
             "chunks": labeled,
             "retrieval_strategy": "proximity",
@@ -260,61 +409,40 @@ Return: {{"type": "...", "entities": [...]}}"""
             "retrieval_chunk_match": chunk_match,
         }
 
-    async def lookup_node(state: QAState) -> dict:
-        """Semantic search top_k=5 for factual lookups."""
-        logger.info("── RETRIEVE (lookup) ─────────────────────────")
-        logger.info("  Strategy: semantic search, top_k=5")
-        query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
-        logger.info("  Query: %s", query[:200])
-        logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_MODEL)
-        embedding = voyage_client.embed(
-            texts=[query], model=config.VOYAGE_MODEL, input_type="query"
-        ).embeddings[0]
-        logger.info("  Embedding: %d dimensions", len(embedding))
-        logger.info("  Searching %d total chunks in book %s", state.get("total_chunks", 0), state["book_id"])
-        results = await vector_store.search(state["book_id"], embedding, top_k=5)
-        labeled = label_chunks(results, state.get("reader_position", 0), state.get("total_chunks", 0))
-        reader_chunk = int(state.get("reader_position", 0) * state.get("total_chunks", 0))
-        logger.info("  Reader at chunk %d — labeling PAST/AHEAD", reader_chunk)
-        logger.info("  Retrieved %d chunks:", len(labeled))
-        for i, c in enumerate(labeled):
-            logger.info("    [%d] score=%.4f | chunk %d | %s | %s…", i + 1, c["score"], c["chunk_index"], c["label"], c["text"][:80])
-        logger.info("──────────────────────────────────────────────")
-        return {
-            "chunks": labeled,
-            "retrieval_strategy": "semantic",
-            "retrieval_query": query,
-            "retrieval_top_k": 5,
-            "retrieval_embedding_dims": len(embedding),
-        }
+    # --- Node factory: semantic retrieval (lookup & analysis) ---
 
-    async def analysis_node(state: QAState) -> dict:
-        """Broad semantic search top_k=8 for deeper analysis."""
-        logger.info("── RETRIEVE (analysis) ───────────────────────")
-        logger.info("  Strategy: broad semantic search, top_k=8")
-        query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
-        logger.info("  Query: %s", query[:200])
-        logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_MODEL)
-        embedding = voyage_client.embed(
-            texts=[query], model=config.VOYAGE_MODEL, input_type="query"
-        ).embeddings[0]
-        logger.info("  Embedding: %d dimensions", len(embedding))
-        logger.info("  Searching %d total chunks in book %s", state.get("total_chunks", 0), state["book_id"])
-        results = await vector_store.search(state["book_id"], embedding, top_k=8)
-        labeled = label_chunks(results, state.get("reader_position", 0), state.get("total_chunks", 0))
-        reader_chunk = int(state.get("reader_position", 0) * state.get("total_chunks", 0))
-        logger.info("  Reader at chunk %d — labeling PAST/AHEAD", reader_chunk)
-        logger.info("  Retrieved %d chunks:", len(labeled))
-        for i, c in enumerate(labeled):
-            logger.info("    [%d] score=%.4f | chunk %d | %s | %s…", i + 1, c["score"], c["chunk_index"], c["label"], c["text"][:80])
-        logger.info("──────────────────────────────────────────────")
-        return {
-            "chunks": labeled,
-            "retrieval_strategy": "broad_semantic",
-            "retrieval_query": query,
-            "retrieval_top_k": 8,
-            "retrieval_embedding_dims": len(embedding),
-        }
+    def _make_semantic_node(top_k: int, strategy: str):
+        """Create a semantic retrieval node with the given top_k and strategy name."""
+        async def semantic_node(state: QAState) -> dict:
+            logger.info("── RETRIEVE (%s) %s", strategy, "─" * (33 - len(strategy)))
+            logger.info("  Strategy: semantic search, top_k=%d", top_k)
+
+            query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
+            logger.info("  Query: %s", query[:200])
+            logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_MODEL)
+
+            embedding = voyage_client.embed(
+                texts=[query], model=config.VOYAGE_MODEL, input_type="query"
+            ).embeddings[0]
+            logger.info("  Embedding: %d dimensions", len(embedding))
+            logger.info("  Searching %d total chunks in book %s", state.get("total_chunks", 0), state["book_id"])
+
+            results = await vector_store.search(state["book_id"], embedding, top_k=top_k)
+            labeled = _label_and_log(results, state)
+
+            return {
+                "chunks": labeled,
+                "retrieval_strategy": strategy,
+                "retrieval_query": query,
+                "retrieval_top_k": top_k,
+                "retrieval_embedding_dims": len(embedding),
+            }
+        return semantic_node
+
+    lookup_node = _make_semantic_node(top_k=5, strategy="semantic")
+    analysis_node = _make_semantic_node(top_k=8, strategy="broad_semantic")
+
+    # --- Node: generate ---
 
     async def generate_node(state: QAState) -> dict:
         """Generate answer with type-specific system prompt."""
@@ -322,7 +450,7 @@ Return: {{"type": "...", "entities": [...]}}"""
         chunks = state.get("chunks", [])
         selected = state.get("selected_text") or ""
 
-        logger.info("── GENERATE ──────────────────────────────────")
+        logger.info("── GENERATE %s", LOG_SEPARATOR[11:])
         logger.info("  Type:   %s", q_type)
         logger.info("  Model:  %s", config.CLAUDE_MODEL)
         logger.info("  Chunks: %d", len(chunks))
@@ -332,12 +460,12 @@ Return: {{"type": "...", "entities": [...]}}"""
         if not chunks:
             user_prompt = f'The user selected: "{selected}"\n\nQuestion: {state["question"]}'
             logger.info("  No chunks — generating from selected text only")
+        elif selected:
+            context = build_context_string(chunks)
+            user_prompt = f'The user selected this text: "{selected}"\n\nContext from the book:\n{context}\n\nQuestion: {state["question"]}'
         else:
             context = build_context_string(chunks)
-            if selected:
-                user_prompt = f'The user selected this text: "{selected}"\n\nContext from the book:\n{context}\n\nQuestion: {state["question"]}'
-            else:
-                user_prompt = f'Context from the book:\n{context}\n\nQuestion: {state["question"]}'
+            user_prompt = f'Context from the book:\n{context}\n\nQuestion: {state["question"]}'
 
         logger.info("  System prompt (%d chars): %s…", len(system_prompt), system_prompt[:150])
         logger.info("  User prompt (%d chars):   %s…", len(user_prompt), user_prompt[:150])
@@ -354,7 +482,7 @@ Return: {{"type": "...", "entities": [...]}}"""
         logger.info("  Tokens: %d in / %d out", response.usage.input_tokens, response.usage.output_tokens)
         logger.info("  Stop:   %s", response.stop_reason)
         logger.info("  Answer (%d chars): %s…", len(answer), answer[:200])
-        logger.info("──────────────────────────────────────────────")
+        logger.info(LOG_SEPARATOR)
 
         sources = [
             {
@@ -377,152 +505,26 @@ Return: {{"type": "...", "entities": [...]}}"""
             "gen_user_prompt": user_prompt,
         }
 
+    # --- Node: log ---
+
     async def log_node(state: QAState) -> dict:
         """Log query to JSONL and human-readable log files."""
-        reader_position = state.get("reader_position", 0)
-        total_chunks = state.get("total_chunks", 0)
-        reader_chunk_index = int(reader_position * total_chunks) if total_chunks else 0
-        chunks = state.get("chunks", [])
-        selected = state.get("selected_text") or ""
-
-        logger.info("── LOG ───────────────────────────────────────")
+        logger.info("── LOG %s", LOG_SEPARATOR[6:])
         logger.info("  Writing to queries.jsonl + queries.log")
 
-        log_entry = {
-            "timestamp": datetime.now().isoformat(),
-            "book_id": state.get("book_id"),
-            "reader_position": reader_position,
-            "reader_chunk_index": reader_chunk_index,
-            "total_chunks": total_chunks,
-            "question": state["question"],
-            "selected_text": selected,
-            # Classification
-            "question_type": state.get("question_type"),
-            "entities": state.get("entities", []),
-            "classify_raw_response": state.get("classify_raw_response"),
-            "classify_tokens": {
-                "in": state.get("classify_tokens_in"),
-                "out": state.get("classify_tokens_out"),
-            },
-            # Retrieval
-            "retrieval_strategy": state.get("retrieval_strategy"),
-            "retrieval_query": state.get("retrieval_query"),
-            "retrieval_top_k": state.get("retrieval_top_k"),
-            "retrieval_embedding_dims": state.get("retrieval_embedding_dims"),
-            "retrieval_center_chunk": state.get("retrieval_center_chunk"),
-            "retrieval_range": [state.get("retrieval_range_start"), state.get("retrieval_range_end")],
-            "retrieval_chunk_match": state.get("retrieval_chunk_match"),
-            "retrieved_chunks": [
-                {
-                    "chunk_index": c["chunk_index"],
-                    "score": round(c["score"], 4),
-                    "label": c["label"],
-                    "text": c["text"],
-                }
-                for c in chunks
-            ],
-            # Generation
-            "system_prompt": state.get("gen_system_prompt"),
-            "user_prompt": state.get("gen_user_prompt"),
-            "response": {
-                "answer": state.get("answer", ""),
-                "model": state.get("gen_model"),
-                "input_tokens": state.get("gen_tokens_in"),
-                "output_tokens": state.get("gen_tokens_out"),
-                "stop_reason": state.get("gen_stop_reason"),
-            },
-        }
+        log_entry = _build_log_entry(state)
 
-        # JSONL log
-        log_file = LOG_DIR / "queries.jsonl"
-        with open(log_file, "a") as f:
+        with open(LOG_DIR / "queries.jsonl", "a") as f:
             f.write(json.dumps(log_entry) + "\n")
 
-        # Human-readable log
-        readable_log = LOG_DIR / "queries.log"
-        with open(readable_log, "a") as f:
-            W = 80
+        _write_readable_log(state, log_entry)
 
-            f.write("\n\n" + "═" * W + "\n")
-            f.write(f"QUERY @ {log_entry['timestamp']}\n")
-            f.write("═" * W + "\n\n")
-
-            f.write(f"Book:     {state.get('book_id')}\n")
-            f.write(f"Position: {reader_position:.1%} (chunk {reader_chunk_index}/{total_chunks})\n")
-            f.write(f"Selected: \"{selected[:200]}{'…' if len(selected) > 200 else ''}\"\n")
-            f.write(f"Question: {state['question']}\n")
-
-            # Classification section
-            f.write("\n" + "── Classification " + "─" * (W - 18) + "\n\n")
-            f.write(f"  Model:    claude-haiku-4-5-20251001\n")
-            f.write(f"  Tokens:   {state.get('classify_tokens_in')} in / {state.get('classify_tokens_out')} out\n")
-            f.write(f"  Raw:      {state.get('classify_raw_response')}\n")
-            f.write(f"  Type:     {state.get('question_type')}\n")
-            f.write(f"  Entities: {', '.join(state.get('entities', [])) or '(none)'}\n")
-
-            # Retrieval section
-            strategy = state.get("retrieval_strategy")
-            f.write("\n" + "── Retrieval " + "─" * (W - 13) + "\n\n")
-            f.write(f"  Strategy: {strategy}\n")
-            if strategy == "proximity":
-                f.write(f"  Chunk match: {state.get('retrieval_chunk_match', 'unknown')}\n")
-                f.write(f"  Center:   chunk {state.get('retrieval_center_chunk')}\n")
-                f.write(f"  Range:    [{state.get('retrieval_range_start')}, {state.get('retrieval_range_end')}]\n")
-            elif strategy and "keyword" in strategy:
-                f.write(f"  Keyword:  \"{state.get('retrieval_query', '')}\"\n")
-            else:
-                f.write(f"  Query:    {(state.get('retrieval_query') or '')[:200]}\n")
-                f.write(f"  Top K:    {state.get('retrieval_top_k')}\n")
-                f.write(f"  Embedding: {state.get('retrieval_embedding_dims')} dimensions ({config.VOYAGE_MODEL})\n")
-
-            f.write(f"\n  Results: {len(chunks)} chunks\n")
-            for i, c in enumerate(chunks):
-                f.write(f"\n    [{i+1}] score={c['score']:.4f} | chunk {c['chunk_index']} | {c['label']}\n")
-                # Show full chunk text, with selected text highlighted via >>>markers<<<
-                chunk_text = c["text"]
-                if selected and selected.lower() in chunk_text.lower():
-                    # Find and highlight the match
-                    lower_text = chunk_text.lower()
-                    lower_sel = selected.lower()
-                    idx = lower_text.find(lower_sel)
-                    highlighted = (
-                        chunk_text[:idx]
-                        + ">>>" + chunk_text[idx:idx + len(selected)] + "<<<"
-                        + chunk_text[idx + len(selected):]
-                    )
-                    for line in highlighted.split("\n"):
-                        f.write(f"        {line}\n")
-                else:
-                    for line in chunk_text.split("\n"):
-                        f.write(f"        {line}\n")
-
-            # LLM Input section
-            sys_prompt = state.get("gen_system_prompt") or ""
-            usr_prompt = state.get("gen_user_prompt") or ""
-            f.write("\n" + "── LLM Input " + "─" * (W - 13) + "\n\n")
-            f.write(f"  System ({len(sys_prompt)} chars):\n")
-            for line in sys_prompt.split("\n"):
-                f.write(f"    {line}\n")
-            f.write(f"\n  User ({len(usr_prompt)} chars):\n")
-            usr_display = usr_prompt if len(usr_prompt) <= 500 else usr_prompt[:500] + f"\n    … [{len(usr_prompt) - 500} more chars]"
-            for line in usr_display.split("\n"):
-                f.write(f"    {line}\n")
-
-            # LLM Output section
-            f.write("\n" + "── LLM Output " + "─" * (W - 14) + "\n\n")
-            f.write(f"  Model:  {state.get('gen_model')}\n")
-            f.write(f"  Tokens: {state.get('gen_tokens_in')} in / {state.get('gen_tokens_out')} out\n")
-            f.write(f"  Stop:   {state.get('gen_stop_reason')}\n")
-            f.write(f"\n  Answer:\n")
-            for line in state.get("answer", "").split("\n"):
-                f.write(f"    {line}\n")
-
-            f.write("\n" + "═" * W + "\n\n")
-
-        logger.info("  Done — classify: %d/%d tokens, generate: %d/%d tokens",
-                     state.get("classify_tokens_in", 0), state.get("classify_tokens_out", 0),
-                     state.get("gen_tokens_in", 0), state.get("gen_tokens_out", 0))
-        logger.info("──────────────────────────────────────────────")
+        logger.info(
+            "  Done — classify: %d/%d tokens, generate: %d/%d tokens",
+            state.get("classify_tokens_in", 0), state.get("classify_tokens_out", 0),
+            state.get("gen_tokens_in", 0), state.get("gen_tokens_out", 0),
+        )
+        logger.info(LOG_SEPARATOR)
 
         return {}
 
