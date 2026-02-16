@@ -24,7 +24,7 @@ import voyageai
 from anthropic import Anthropic
 
 from boom import config
-from .chunker import chunk_text, chunk_structured
+from .chunker import chunk_text, chunk_structured, TextChunk
 from .vector_store import VectorStore, VectorEntry
 
 logger = logging.getLogger(__name__)
@@ -249,6 +249,65 @@ class RAGService:
             for chunk, embedding in zip(chunks, embeddings)
         ]
         await self.vector_store.add_book(book_id, entries)
+
+        # Generate chapter-level index entries using Haiku (fast + cheap).
+        # These aren't narrative summaries — they're retrieval targets optimized
+        # for matching broad thematic questions to the right chapter.
+        CHAPTER_INDEX_PROMPT = (
+            "For this chapter, extract:\n"
+            "1. The main themes and arguments\n"
+            "2. Key names, terms, and concepts introduced or discussed\n"
+            "3. What is established or changes\n\n"
+            "Keep it to 3-4 sentences. Optimize for searchability — "
+            "someone will be searching for these topics later.\n\n"
+        )
+
+        chapters = structured_content.get("chapters", [])
+        summary_chunks: list[TextChunk] = []
+        for i, chapter in enumerate(chapters):
+            chapter_title = chapter.get("title", f"Chapter {i + 1}")
+            chapter_text = "\n\n".join(
+                para
+                for section in chapter.get("sections", [])
+                for para in section.get("paragraphs", [])
+            )[:8000]
+
+            if len(chapter_text) < 50:
+                continue
+
+            response = self.anthropic.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=200,
+                messages=[{
+                    "role": "user",
+                    "content": f"{CHAPTER_INDEX_PROMPT}Chapter: {chapter_title}\n\n{chapter_text}",
+                }],
+            )
+            summary_text = response.content[0].text if response.content else ""
+            if not summary_text:
+                continue
+
+            summary_chunks.append(TextChunk(
+                id=f"{book_id}-summary-{i}",
+                text=summary_text,
+                metadata={
+                    "book_id": book_id,
+                    "chunk_index": i,
+                    "chapter_title": chapter_title,
+                    "chapter_index": i,
+                    "tier": "chapter_summary",
+                },
+            ))
+
+        if summary_chunks:
+            summary_texts = [c.text for c in summary_chunks]
+            summary_embeddings = await self.get_contextualized_embeddings(summary_texts)
+            summary_entries = [
+                VectorEntry(chunk=chunk, embedding=emb)
+                for chunk, emb in zip(summary_chunks, summary_embeddings)
+            ]
+            await self.vector_store.save_summaries(book_id, summary_entries)
+            logger.info("Generated %d chapter summaries for %s", len(summary_chunks), book_id)
 
         logger.info("Structured indexing complete for %s", book_id)
 

@@ -443,36 +443,45 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             }
         return semantic_node
 
-    def _make_hybrid_node(top_k: int, strategy: str):
-        """Create a hybrid retrieval node (semantic + BM25 fused via RRF)."""
-        async def hybrid_node(state: QAState) -> dict:
-            logger.info("── RETRIEVE (%s) %s", strategy, "─" * (33 - len(strategy)))
-            logger.info("  Strategy: hybrid search (semantic + BM25), top_k=%d", top_k)
-
-            query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
-            logger.info("  Query: %s", query[:200])
-            logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_CONTEXT_MODEL)
-
-            embedding = _embed_query(query)
-            logger.info("  Embedding: %d dimensions", len(embedding))
-            logger.info("  Searching %d total chunks in book %s", state.get("total_chunks", 0), state["book_id"])
-
-            results = await vector_store.hybrid_search(
-                state["book_id"], embedding, query_text=query, top_k=top_k,
-            )
-            labeled = _label_and_log(results, state)
-
-            return {
-                "chunks": labeled,
-                "retrieval_strategy": strategy,
-                "retrieval_query": query,
-                "retrieval_top_k": top_k,
-                "retrieval_embedding_dims": len(embedding),
-            }
-        return hybrid_node
-
     lookup_node = _make_semantic_node(top_k=20, strategy="semantic")
-    analysis_node = _make_hybrid_node(top_k=20, strategy="hybrid_broad")
+
+    # Analysis uses hybrid search + chapter summaries for broad thematic questions.
+    # Summaries act as chapter-level index entries that help match questions like
+    # "what does the book say about X" to the right chapter, even when no single
+    # passage chunk would score well on its own.
+    async def analysis_node(state: QAState) -> dict:
+        logger.info("── RETRIEVE (analysis) ───────────────────────")
+        logger.info("  Strategy: hybrid + chapter summaries")
+
+        query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
+        logger.info("  Query: %s", query[:200])
+
+        embedding = _embed_query(query)
+        logger.info("  Embedding: %d dimensions", len(embedding))
+
+        # Passage-level: hybrid (semantic + BM25), top 20
+        passage_results = await vector_store.hybrid_search(
+            state["book_id"], embedding, query_text=query, top_k=20,
+        )
+        logger.info("  Passage results: %d", len(passage_results))
+
+        # Chapter-level: summary vectors, top 3
+        summary_results = await vector_store.search_summaries(
+            state["book_id"], embedding, top_k=3,
+        )
+        logger.info("  Summary results: %d", len(summary_results))
+
+        # Merge both tiers — reranker will pick the best 5-8
+        all_results = passage_results + summary_results
+        labeled = _label_and_log(all_results, state)
+
+        return {
+            "chunks": labeled,
+            "retrieval_strategy": "hybrid_broad+summaries",
+            "retrieval_query": query,
+            "retrieval_top_k": 20,
+            "retrieval_embedding_dims": len(embedding),
+        }
 
     # --- Node: rerank ---
 
