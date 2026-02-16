@@ -1,5 +1,22 @@
 import JSZip from 'jszip'
 
+// --- Structured content types for RAG indexing ---
+
+export interface StructuredSection {
+  heading?: string
+  paragraphs: string[]
+}
+
+export interface StructuredChapter {
+  index: number
+  title: string
+  sections: StructuredSection[]
+}
+
+export interface StructuredBook {
+  chapters: StructuredChapter[]
+}
+
 /** Resolve the OPF document and its directory from a loaded EPUB zip. */
 async function getOpf(zip: JSZip) {
   const containerFile = await zip.file('META-INF/container.xml')?.async('text')
@@ -121,6 +138,93 @@ export async function extractText(arrayBuffer: ArrayBuffer): Promise<string> {
   }
 
   return textContent.join('\n\n')
+}
+
+/**
+ * Extract structured content from an EPUB, preserving chapter/section/paragraph hierarchy.
+ * Used for structure-aware RAG indexing.
+ */
+export async function extractStructuredText(arrayBuffer: ArrayBuffer): Promise<StructuredBook> {
+  const zip = await JSZip.loadAsync(arrayBuffer)
+  const { opfDoc, opfDir } = await getOpf(zip)
+
+  const spineItems = Array.from(opfDoc.querySelectorAll('spine itemref'))
+  const manifest = opfDoc.querySelector('manifest')
+  const parser = new DOMParser()
+
+  const chapters: StructuredChapter[] = []
+  let chapterIndex = 0
+
+  for (const spineItem of spineItems) {
+    const idref = spineItem.getAttribute('idref')
+    if (!idref) continue
+
+    const manifestItem = manifest?.querySelector(`item[id="${idref}"]`)
+    const href = manifestItem?.getAttribute('href')
+    if (!href) continue
+
+    const contentPath = opfDir + href
+    const contentFile = await zip.file(contentPath)?.async('text')
+    if (!contentFile) continue
+
+    try {
+      const contentDoc = parser.parseFromString(contentFile, 'text/html')
+      const body = contentDoc.querySelector('body')
+      if (!body) continue
+
+      // Extract chapter title from first h1/h2 in this spine item
+      const titleEl = body.querySelector('h1, h2')
+      const chapterTitle = titleEl?.textContent?.trim()
+        || href.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ')
+
+      // Walk block-level elements to build sections
+      const sections: StructuredSection[] = []
+      let currentSection: StructuredSection = { paragraphs: [] }
+
+      const blockEls = body.querySelectorAll('h1, h2, h3, h4, p, blockquote, li, div')
+      for (const el of blockEls) {
+        const tag = el.tagName.toLowerCase()
+        const text = el.textContent?.trim()
+        if (!text) continue
+
+        // Skip the title element we already captured
+        if (el === titleEl) continue
+
+        if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4') {
+          // Start a new section if current has content
+          if (currentSection.paragraphs.length > 0) {
+            sections.push(currentSection)
+          }
+          currentSection = { heading: text, paragraphs: [] }
+        } else {
+          // Skip div containers that have block children (avoid duplicate text)
+          const hasBlockChild = el.querySelector('p, blockquote, li')
+          if (hasBlockChild && tag === 'div') continue
+
+          currentSection.paragraphs.push(text)
+        }
+      }
+
+      // Push final section
+      if (currentSection.paragraphs.length > 0) {
+        sections.push(currentSection)
+      }
+
+      // Only add chapter if it has content
+      if (sections.length > 0) {
+        chapters.push({
+          index: chapterIndex,
+          title: chapterTitle,
+          sections,
+        })
+        chapterIndex++
+      }
+    } catch (err) {
+      console.warn('Failed to parse content file:', href, err)
+    }
+  }
+
+  return { chapters }
 }
 
 export async function parseEpub(file: File): Promise<string> {

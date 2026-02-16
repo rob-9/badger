@@ -11,7 +11,7 @@ import ChatPanel, { type ChatMessage } from '@/components/ChatPanel'
 import Toast from '@/components/Toast'
 import { addBook, getBookData, getBookHistory, removeBook, type BookMetadata } from '@/lib/bookStorage'
 import { indexBook, isBookIndexed, queryBook } from '@/lib/api'
-import { extractCover, extractText } from '@/lib/parseEpub'
+import { extractCover, extractText, extractStructuredText } from '@/lib/parseEpub'
 
 export default function Home() {
   const [document, setDocument] = useState<string | null>(null)
@@ -66,8 +66,8 @@ export default function Home() {
             if (!indexed) {
               setIsIndexing(true)
               try {
-                const text = await extractText(data)
-                await indexBook(book.id, text)
+                const structured = await extractStructuredText(data)
+                await indexBook(book.id, structured)
               } catch (error) {
                 console.error('[App] Failed to index book on restore:', error)
               } finally {
@@ -101,7 +101,8 @@ export default function Home() {
       setIsIndexing(true)
       setToast({ message: 'Preparing book for AI questions...', type: 'info' })
       try {
-        await indexBook(id, content)
+        const structured = await extractStructuredText(arrayBuffer)
+        await indexBook(id, structured)
         console.log('[App] Book indexed successfully')
         setToast({ message: 'Book ready! Highlight text to ask questions', type: 'success' })
       } catch (error) {
@@ -139,8 +140,8 @@ export default function Home() {
       if (!indexed) {
         setIsIndexing(true)
         try {
-          const text = await extractText(data)
-          await indexBook(book.id, text)
+          const structured = await extractStructuredText(data)
+          await indexBook(book.id, structured)
         } catch (error) {
           console.error('[App] Failed to index book on reopen:', error)
         } finally {
