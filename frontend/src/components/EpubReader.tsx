@@ -75,8 +75,8 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
         doc.head.appendChild(style)
       }
       style.textContent = dark
-        ? 'html, body { background: #1a1a1a !important; color: #d4d4d4 !important; } * { color: inherit !important; border-color: #333 !important; }'
-        : 'html, body { background: #ffffff !important; color: #1a1a1a !important; } * { color: inherit !important; }'
+        ? '*, html, body { background: #1a1a1a !important; color: #d4d4d4 !important; border-color: #333 !important; } a { color: #8ab4f8 !important; }'
+        : '*, html, body { background: #ffffff !important; color: #1a1a1a !important; } a { color: inherit !important; }'
     })
   }, [])
 
@@ -133,7 +133,38 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
 
         renditionRef.current = rendition
 
-        // Clear any invalid saved location first
+        // Register font, styles, and dark/light theme BEFORE first display
+        rendition.themes.register('boom', {
+          '@font-face': {
+            'font-family': '"Cooper BT"',
+            'src': `url("${window.location.origin}/fonts/cooper-bt-light.otf") format("opentype")`,
+            'font-weight': '300',
+            'font-style': 'normal',
+          },
+          'body, p, div, span, li, td, th, blockquote': {
+            'font-family': '"Cooper BT", Inter, system-ui, sans-serif !important',
+          },
+          '::selection': { 'background': 'rgba(59, 130, 246, 0.15)', 'color': 'inherit' },
+        })
+        rendition.themes.select('boom')
+
+        rendition.hooks.content.register((contents: any) => {
+          const dark = document.documentElement.classList.contains('dark')
+          const doc = contents.document
+          if (doc) {
+            let style = doc.getElementById('boom-theme')
+            if (!style) {
+              style = doc.createElement('style')
+              style.id = 'boom-theme'
+              doc.head.appendChild(style)
+            }
+            style.textContent = dark
+              ? '*, html, body { background: #1a1a1a !important; color: #d4d4d4 !important; border-color: #333 !important; }'
+              : '*, html, body { background: #ffffff !important; color: #1a1a1a !important; }'
+          }
+        })
+
+        // Now display the first page
         const savedLocation = localStorage.getItem(`epub-location-${fileName}`)
 
         try {
@@ -144,9 +175,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
           }
         } catch (error) {
           console.error('Error displaying, clearing saved location and restarting:', error)
-          // Clear invalid saved location
           localStorage.removeItem(`epub-location-${fileName}`)
-          // Start from beginning
           await rendition.display()
         }
 
@@ -165,27 +194,6 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
           if (onLocationChange && location.start?.percentage != null) {
             onLocationChange(location.start.percentage)
           }
-        })
-
-        // Register app font and styles via epubjs theme system (applied automatically per page)
-        rendition.themes.register('boom', {
-          '@font-face': {
-            'font-family': '"Cooper BT"',
-            'src': `url("${window.location.origin}/fonts/cooper-bt-light.otf") format("opentype")`,
-            'font-weight': '300',
-            'font-style': 'normal',
-          },
-          'body, p, div, span, li, td, th, blockquote': {
-            'font-family': '"Cooper BT", Inter, system-ui, sans-serif !important',
-          },
-          '::selection': { 'background': 'rgba(59, 130, 246, 0.15)', 'color': 'inherit' },
-        })
-        rendition.themes.select('boom')
-
-        // Apply dark/light theme on every page render (epubjs recreates iframes)
-        rendition.hooks.content.register((contents: any) => {
-          const dark = document.documentElement.classList.contains('dark')
-          setTimeout(() => applyEpubTheme(dark), 0)
         })
 
         // Detect clicks inside the book to dismiss popup when text is deselected
@@ -549,7 +557,7 @@ function TocItem({ item, onNavigate, level = 0 }: { item: NavItem; onNavigate: (
         className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-sm dark:text-[#d4d4d4]"
         style={{ paddingLeft: `${12 + level * 16}px` }}
       >
-        <span className="text-gray-800">{item.label}</span>
+        <span className="text-gray-800 dark:text-[#d4d4d4]">{item.label}</span>
       </button>
       {item.subitems && item.subitems.length > 0 && (
         <div>

@@ -66,6 +66,7 @@
 @layer base {
   html {
     font-family: 'Cooper BT', Inter, system-ui, sans-serif;
+    background: #14120b;
   }
 
   body {

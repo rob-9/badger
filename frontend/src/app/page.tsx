@@ -35,6 +35,10 @@ export default function Home() {
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [isChatLoading, setIsChatLoading] = useState(false)
 
+  // Loading transition state
+  const [isLoadingBook, setIsLoadingBook] = useState(false)
+  const [loadingBook, setLoadingBook] = useState<BookMetadata | null>(null)
+
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
 
@@ -110,14 +114,25 @@ export default function Home() {
   }
 
   const handleOpenFromHistory = useCallback(async (book: BookMetadata) => {
+    // Show loading screen immediately
+    setLoadingBook(book)
+    setIsLoadingBook(true)
+
     const data = await getBookData(book.id)
     if (data) {
       setEpubData(data)
       setFileName(book.fileName)
       setIsEpub(true)
       setBookId(book.id)
-      setDocument('loaded')
       localStorage.setItem('boom-active-book', book.id)
+
+      // Keep loading screen up, then mount the reader behind it
+      await new Promise(r => setTimeout(r, 300))
+      setDocument('loaded')
+      // Let the reader mount and initialize behind the overlay
+      await new Promise(r => setTimeout(r, 200))
+      setIsLoadingBook(false)
+      setLoadingBook(null)
 
       // Only extract text + index if not already indexed
       const indexed = await isBookIndexed(book.id)
@@ -132,6 +147,9 @@ export default function Home() {
           setIsIndexing(false)
         }
       }
+    } else {
+      setIsLoadingBook(false)
+      setLoadingBook(null)
     }
   }, [])
 
@@ -317,6 +335,29 @@ export default function Home() {
           />
         )}
       </main>
+
+      {/* Book loading transition */}
+      {isLoadingBook && loadingBook && (
+        <div className="fixed inset-0 z-50 bg-[#14120b] flex flex-col items-center justify-center animate-fade-in">
+          <div className="w-32 h-48 rounded-lg overflow-hidden shadow-2xl mb-6">
+            {loadingBook.coverUrl ? (
+              <img
+                src={loadingBook.coverUrl}
+                alt={loadingBook.fileName}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-[#2a2a2a] to-[#1f1f1f] flex items-center justify-center">
+                <span className="text-[#f7f7f4]/20 text-4xl">📖</span>
+              </div>
+            )}
+          </div>
+          <h2 className="text-[#f7f7f4] text-lg font-medium mb-3 max-w-xs text-center">
+            {loadingBook.fileName.replace(/\.(epub|pdf|txt)$/i, '')}
+          </h2>
+          <div className="w-8 h-0.5 bg-accent/60 rounded-full animate-pulse" />
+        </div>
+      )}
 
       {toast && (
         <Toast
