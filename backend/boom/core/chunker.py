@@ -24,8 +24,7 @@ class TextChunk:
 
     def __post_init__(self):
         """Ensure metadata has required fields."""
-        required_fields = ['book_id', 'chunk_index', 'start_char', 'end_char']
-        for field in required_fields:
+        for field in ('book_id', 'chunk_index'):
             if field not in self.metadata:
                 raise ValueError(f"Missing required metadata field: {field}")
 
@@ -109,6 +108,102 @@ def chunk_text(
         # Prevent infinite loop
         if start_index >= len(cleaned_text) - chunk_overlap:
             break
+
+    return chunks
+
+
+def _split_paragraph_at_sentences(text: str, chunk_size: int) -> list[str]:
+    """Split a large paragraph at sentence boundaries."""
+    pieces: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        if end < len(text):
+            search_start = max(start + chunk_size - 200, start)
+            search_text = text[search_start:end]
+            sentence_end = max(
+                search_text.rfind('. '),
+                search_text.rfind('! '),
+                search_text.rfind('? '),
+            )
+            if sentence_end > 0:
+                end = search_start + sentence_end + 1
+        piece = text[start:end].strip()
+        if piece:
+            pieces.append(piece)
+        start = end
+    return pieces
+
+
+def chunk_structured(
+    structured_content: dict,
+    book_id: str,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> list[TextChunk]:
+    """
+    Chunk structured EPUB content respecting chapter/section boundaries.
+
+    - Never crosses chapter boundaries
+    - Accumulates paragraphs within a chapter until exceeding chunk_size
+    - Splits oversized paragraphs at sentence boundaries
+    - No overlap (voyage-context-3 captures sibling context)
+    """
+    chunks: list[TextChunk] = []
+    chunk_index = 0
+
+    for chapter in structured_content.get("chapters", []):
+        chapter_title = chapter.get("title", "")
+        chapter_idx = chapter.get("index", 0)
+
+        current_paragraphs: list[str] = []
+        current_len = 0
+        current_section_heading: str | None = None
+
+        def emit_chunk():
+            nonlocal chunk_index, current_paragraphs, current_len, current_section_heading
+            if not current_paragraphs:
+                return
+            text = "\n\n".join(current_paragraphs)
+            chunks.append(TextChunk(
+                id=f"{book_id}-chunk-{chunk_index}",
+                text=text,
+                metadata={
+                    "book_id": book_id,
+                    "chunk_index": chunk_index,
+                    "chapter_title": chapter_title,
+                    "chapter_index": chapter_idx,
+                    "section_heading": current_section_heading,
+                },
+            ))
+            chunk_index += 1
+            current_paragraphs = []
+            current_len = 0
+
+        for section in chapter.get("sections", []):
+            heading = section.get("heading")
+            if heading:
+                current_section_heading = heading
+
+            for para in section.get("paragraphs", []):
+                para = para.strip()
+                if not para:
+                    continue
+
+                if len(para) > chunk_size:
+                    emit_chunk()
+                    for piece in _split_paragraph_at_sentences(para, chunk_size):
+                        current_paragraphs = [piece]
+                        current_len = len(piece)
+                        emit_chunk()
+                    continue
+
+                if current_len + len(para) + 2 > chunk_size and current_paragraphs:
+                    emit_chunk()
+
+                current_paragraphs.append(para)
+                current_len += len(para) + 2
+
+        emit_chunk()
 
     return chunks
 

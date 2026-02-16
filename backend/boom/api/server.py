@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional
 from anthropic import Anthropic
 
@@ -78,7 +78,14 @@ app.add_middleware(
 class IndexBookRequest(BaseModel):
     """Request to index a book."""
     book_id: str
-    text: str
+    text: Optional[str] = None
+    structured_content: Optional[dict] = None
+
+    @model_validator(mode="after")
+    def check_content(self):
+        if not self.text and not self.structured_content:
+            raise ValueError("Must provide either 'text' or 'structured_content'")
+        return self
 
 
 class QueryBookRequest(BaseModel):
@@ -107,7 +114,10 @@ async def index_book(request: IndexBookRequest):
         raise HTTPException(status_code=503, detail="RAG service not initialized")
 
     try:
-        await rag_service.index_book(request.book_id, request.text)
+        if request.structured_content:
+            await rag_service.index_book_structured(request.book_id, request.structured_content)
+        else:
+            await rag_service.index_book(request.book_id, request.text)
         return {"success": True, "book_id": request.book_id}
     except Exception as e:
         logger.error("Error indexing book: %s", e)
