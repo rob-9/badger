@@ -233,7 +233,7 @@ export default function Home() {
     } finally {
       setIsChatLoading(false)
     }
-  }, [bookId])
+  }, [bookId, readerPosition])
 
   const handleChatMessage = useCallback(async (message: string) => {
     const userMessage: ChatMessage = {
@@ -272,7 +272,7 @@ export default function Home() {
     } finally {
       setIsChatLoading(false)
     }
-  }, [bookId])
+  }, [bookId, readerPosition])
 
   if (!historyLoaded && !document) {
     return <div className="h-screen bg-[#14120b]" />

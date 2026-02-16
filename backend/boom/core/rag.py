@@ -14,6 +14,7 @@ Learn more:
 - https://github.com/anthropics/claude-cookbooks
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -78,10 +79,9 @@ class RAGService:
         """
         logger.debug("Embedding text (%s), %d chars", input_type, len(text))
 
-        model = config.VOYAGE_CONTEXT_MODEL if input_type == "query" else config.VOYAGE_MODEL
         response = self.voyage.embed(
             texts=[text],
-            model=model,
+            model=config.VOYAGE_CONTEXT_MODEL,
             input_type=input_type
         )
 
@@ -134,7 +134,7 @@ class RAGService:
         for i, batch in enumerate(batches):
             response = self.voyage.embed(
                 texts=batch,
-                model=config.VOYAGE_MODEL,
+                model=config.VOYAGE_CONTEXT_MODEL,
                 input_type=input_type
             )
             if not response.embeddings:
@@ -239,6 +239,10 @@ class RAGService:
             return
 
         chunks = chunk_structured(structured_content, book_id)
+        if not chunks:
+            logger.warning("No chunks produced for %s — structured content may be empty", book_id)
+            return
+
         logger.info("Created %d structured chunks", len(chunks))
 
         texts = [chunk.text for chunk in chunks]
@@ -275,7 +279,8 @@ class RAGService:
             if len(chapter_text) < 50:
                 continue
 
-            response = self.anthropic.messages.create(
+            response = await asyncio.to_thread(
+                self.anthropic.messages.create,
                 model="claude-haiku-4-5-20251001",
                 max_tokens=200,
                 messages=[{

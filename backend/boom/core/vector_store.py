@@ -156,6 +156,7 @@ class VectorStore:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.entries: dict[str, list[VectorEntry]] = {}
         self.bm25_indices: dict[str, BM25Index] = {}
+        self.summary_entries: dict[str, list[VectorEntry]] = {}
         logger.info("Initialized with storage: %s", self.storage_dir)
 
     def _get_file_path(self, book_id: str) -> Path:
@@ -300,24 +301,31 @@ class VectorStore:
         if not file_path.exists():
             return False
         try:
+            # Read only the first 200 bytes to extract version without parsing
+            # the entire file (which can be 50-100MB of embeddings).
             with open(file_path, 'r') as f:
-                data = json.load(f)
-            return data.get('version', 1) >= CURRENT_INDEX_VERSION
+                head = f.read(200)
+            import re as _re
+            match = _re.search(r'"version"\s*:\s*(\d+)', head)
+            version = int(match.group(1)) if match else 1
+            return version >= CURRENT_INDEX_VERSION
         except Exception as e:
             logger.error("Error checking book version: %s", e)
             return False
 
     async def remove_book(self, book_id: str) -> None:
-        """Remove a book from the store."""
-        # Remove from memory
+        """Remove a book from the store (entries, summaries, BM25 cache, files)."""
         if book_id in self.entries:
             del self.entries[book_id]
+        if book_id in self.bm25_indices:
+            del self.bm25_indices[book_id]
+        if book_id in self.summary_entries:
+            del self.summary_entries[book_id]
 
-        # Remove from file system
-        file_path = self._get_file_path(book_id)
-        if file_path.exists():
-            file_path.unlink()
-            logger.info("Deleted from disk: %s", book_id)
+        for path in [self._get_file_path(book_id), self._get_summaries_path(book_id)]:
+            if path.exists():
+                path.unlink()
+                logger.info("Deleted from disk: %s", path)
 
     async def get_total_chunks(self, book_id: str) -> int:
         """Return total number of indexed chunks for a book."""
@@ -430,7 +438,8 @@ class VectorStore:
         return fused
 
     async def save_summaries(self, book_id: str, entries: list[VectorEntry]) -> None:
-        """Save chapter summary vectors to a separate file."""
+        """Save chapter summary vectors to a separate file and cache in memory."""
+        self.summary_entries[book_id] = entries
         file_path = self._get_summaries_path(book_id)
         data = {
             'version': CURRENT_INDEX_VERSION,
@@ -469,7 +478,11 @@ class VectorStore:
         Chapter summaries provide high-level context that passage-level chunks
         miss — useful for "what is the book's stance on X" type questions.
         """
-        summaries = await self.load_summaries(book_id)
+        summaries = self.summary_entries.get(book_id)
+        if not summaries:
+            summaries = await self.load_summaries(book_id)
+            if summaries:
+                self.summary_entries[book_id] = summaries
         if not summaries:
             return []
 
