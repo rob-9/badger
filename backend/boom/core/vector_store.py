@@ -135,6 +135,11 @@ def reciprocal_rank_fusion(*result_lists: list[SearchResult], k: int = 60) -> li
     ]
 
 
+# Bump this when the indexing pipeline changes (chunking strategy, embedding model, etc.)
+# so that books indexed with an older version get automatically re-indexed.
+CURRENT_INDEX_VERSION = 2
+
+
 class VectorStore:
     """
     Simple file-based vector store.
@@ -156,6 +161,10 @@ class VectorStore:
     def _get_file_path(self, book_id: str) -> Path:
         """Get file path for a book's vectors."""
         return self.storage_dir / f"{book_id}.json"
+
+    def _get_summaries_path(self, book_id: str) -> Path:
+        """Get file path for a book's chapter summary vectors."""
+        return self.storage_dir / f"{book_id}_summaries.json"
 
     def _serialize_entry(self, entry: VectorEntry) -> dict:
         """Serialize VectorEntry to JSON-compatible dict."""
@@ -182,6 +191,7 @@ class VectorStore:
         file_path = self._get_file_path(book_id)
 
         data = {
+            'version': CURRENT_INDEX_VERSION,
             'book_id': book_id,
             'entry_count': len(entries),
             'entries': [self._serialize_entry(e) for e in entries]
@@ -203,8 +213,14 @@ class VectorStore:
             with open(file_path, 'r') as f:
                 data = json.load(f)
 
+            file_version = data.get('version', 1)
+            if file_version < CURRENT_INDEX_VERSION:
+                logger.info("Outdated index v%d (current v%d), needs re-indexing: %s",
+                            file_version, CURRENT_INDEX_VERSION, file_path)
+                return None
+
             entries = [self._deserialize_entry(e) for e in data['entries']]
-            logger.info("Loaded %d entries from %s", len(entries), file_path)
+            logger.info("Loaded %d entries (v%d) from %s", len(entries), file_version, file_path)
             return entries
         except Exception as e:
             logger.error("Error loading from file: %s", e)
@@ -277,8 +293,19 @@ class VectorStore:
         return top_results
 
     def has_book(self, book_id: str) -> bool:
-        """Check if a book has been indexed."""
-        return book_id in self.entries or self._get_file_path(book_id).exists()
+        """Check if a book has been indexed with the current version."""
+        if book_id in self.entries:
+            return True
+        file_path = self._get_file_path(book_id)
+        if not file_path.exists():
+            return False
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+            return data.get('version', 1) >= CURRENT_INDEX_VERSION
+        except Exception as e:
+            logger.error("Error checking book version: %s", e)
+            return False
 
     async def remove_book(self, book_id: str) -> None:
         """Remove a book from the store."""
@@ -401,6 +428,56 @@ class VectorStore:
 
         logger.debug("Fused: %d results", len(fused))
         return fused
+
+    async def save_summaries(self, book_id: str, entries: list[VectorEntry]) -> None:
+        """Save chapter summary vectors to a separate file."""
+        file_path = self._get_summaries_path(book_id)
+        data = {
+            'version': CURRENT_INDEX_VERSION,
+            'book_id': book_id,
+            'entry_count': len(entries),
+            'entries': [self._serialize_entry(e) for e in entries]
+        }
+        with open(file_path, 'w') as f:
+            json.dump(data, f)
+        logger.info("Saved %d chapter summaries to %s", len(entries), file_path)
+
+    async def load_summaries(self, book_id: str) -> Optional[list[VectorEntry]]:
+        """Load chapter summary vectors from file."""
+        file_path = self._get_summaries_path(book_id)
+        if not file_path.exists():
+            return None
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+            entries = [self._deserialize_entry(e) for e in data['entries']]
+            logger.info("Loaded %d chapter summaries from %s", len(entries), file_path)
+            return entries
+        except Exception as e:
+            logger.error("Error loading summaries: %s", e)
+            return None
+
+    async def search_summaries(
+        self,
+        book_id: str,
+        query_embedding: list[float],
+        top_k: int = 3,
+    ) -> list[SearchResult]:
+        """
+        Search chapter-level summaries for broad thematic matches.
+
+        Chapter summaries provide high-level context that passage-level chunks
+        miss — useful for "what is the book's stance on X" type questions.
+        """
+        summaries = await self.load_summaries(book_id)
+        if not summaries:
+            return []
+
+        results = [
+            SearchResult(chunk=entry.chunk, score=cosine_similarity(query_embedding, entry.embedding))
+            for entry in summaries
+        ]
+        return sorted(results, key=lambda r: r.score, reverse=True)[:top_k]
 
     def get_stats(self) -> dict:
         """Get statistics about the store."""
