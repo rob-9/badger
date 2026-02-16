@@ -15,6 +15,8 @@ VOYAGE_API_KEY: str = os.getenv("VOYAGE_API_KEY", "")
 # Model defaults
 CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 VOYAGE_MODEL: str = os.getenv("VOYAGE_MODEL", "voyage-3")
+VOYAGE_CONTEXT_MODEL: str = os.getenv("VOYAGE_CONTEXT_MODEL", "voyage-context-3")
+VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")
 
 # Infrastructure
 CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")

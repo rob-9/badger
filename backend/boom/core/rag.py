@@ -24,7 +24,7 @@ import voyageai
 from anthropic import Anthropic
 
 from boom import config
-from .chunker import chunk_text
+from .chunker import chunk_text, chunk_structured
 from .vector_store import VectorStore, VectorEntry
 
 logger = logging.getLogger(__name__)
@@ -78,9 +78,10 @@ class RAGService:
         """
         logger.debug("Embedding text (%s), %d chars", input_type, len(text))
 
+        model = config.VOYAGE_CONTEXT_MODEL if input_type == "query" else config.VOYAGE_MODEL
         response = self.voyage.embed(
             texts=[text],
-            model=config.VOYAGE_MODEL,
+            model=model,
             input_type=input_type
         )
 
@@ -180,6 +181,76 @@ class RAGService:
         await self.vector_store.add_book(book_id, entries)
 
         logger.info("Indexing complete for %s", book_id)
+
+    async def get_contextualized_embeddings(
+        self,
+        chunk_texts: list[str],
+    ) -> list[list[float]]:
+        """
+        Get contextualized embeddings using voyage-context-3.
+
+        voyage-context-3 takes a list of texts (chunks from the same document)
+        and embeds each one with awareness of surrounding chunks.
+        """
+        logger.info("Contextualized embedding for %d chunks", len(chunk_texts))
+
+        # Batch by ~480K chars (~120K tokens) to stay under API limits
+        MAX_CHARS_PER_BATCH = 480_000
+        batches: list[list[str]] = []
+        current_batch: list[str] = []
+        current_chars = 0
+
+        for text in chunk_texts:
+            text_len = len(text)
+            if current_batch and current_chars + text_len > MAX_CHARS_PER_BATCH:
+                batches.append(current_batch)
+                current_batch = []
+                current_chars = 0
+            current_batch.append(text)
+            current_chars += text_len
+
+        if current_batch:
+            batches.append(current_batch)
+
+        logger.info("Split into %d contextualized batches", len(batches))
+
+        all_embeddings: list[list[float]] = []
+        for i, batch in enumerate(batches):
+            result = self.voyage.contextualized_embed(
+                inputs=[batch],
+                model=config.VOYAGE_CONTEXT_MODEL,
+                input_type="document",
+            )
+            embeddings = result.results[0].embeddings
+            all_embeddings.extend(embeddings)
+            logger.info("Batch %d/%d: %d embeddings", i + 1, len(batches), len(embeddings))
+
+        logger.info("Generated %d contextualized embeddings", len(all_embeddings))
+        return all_embeddings
+
+    async def index_book_structured(self, book_id: str, structured_content: dict) -> None:
+        """
+        Index a book using structure-aware chunking + voyage-context-3.
+        """
+        logger.info("Indexing structured book %s", book_id)
+
+        if self.vector_store.has_book(book_id):
+            logger.info("Book %s already indexed, skipping", book_id)
+            return
+
+        chunks = chunk_structured(structured_content, book_id)
+        logger.info("Created %d structured chunks", len(chunks))
+
+        texts = [chunk.text for chunk in chunks]
+        embeddings = await self.get_contextualized_embeddings(texts)
+
+        entries = [
+            VectorEntry(chunk=chunk, embedding=embedding)
+            for chunk, embedding in zip(chunks, embeddings)
+        ]
+        await self.vector_store.add_book(book_id, entries)
+
+        logger.info("Structured indexing complete for %s", book_id)
 
     async def query_book(
         self,

@@ -287,6 +287,14 @@ def _write_readable_log(state: QAState, log_entry: dict):
 def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_client) -> StateGraph:
     """Build and compile the QA LangGraph."""
 
+    def _embed_query(text: str) -> list[float]:
+        """Embed a query using voyage-context-3."""
+        return voyage_client.contextualized_embed(
+            inputs=[[text]],
+            model=config.VOYAGE_CONTEXT_MODEL,
+            input_type="query",
+        ).results[0].embeddings[0]
+
     # --- Node: classify ---
 
     async def classify_node(state: QAState) -> dict:
@@ -363,9 +371,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             logger.info("  No keyword matches — falling back to semantic search")
             strategy = "keyword→semantic_fallback"
             query = selected if selected else state["question"]
-            embedding = voyage_client.embed(
-                texts=[query], model=config.VOYAGE_MODEL, input_type="query"
-            ).embeddings[0]
+            embedding = _embed_query(query)
             logger.info('  Semantic query: "%s", %d dimensions', query[:100], len(embedding))
             results = await vector_store.search(book_id, embedding, top_k=5)
 
@@ -419,11 +425,9 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
 
             query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
             logger.info("  Query: %s", query[:200])
-            logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_MODEL)
+            logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_CONTEXT_MODEL)
 
-            embedding = voyage_client.embed(
-                texts=[query], model=config.VOYAGE_MODEL, input_type="query"
-            ).embeddings[0]
+            embedding = _embed_query(query)
             logger.info("  Embedding: %d dimensions", len(embedding))
             logger.info("  Searching %d total chunks in book %s", state.get("total_chunks", 0), state["book_id"])
 
