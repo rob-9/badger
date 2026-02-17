@@ -332,16 +332,20 @@ class RAGService:
             if len(chapter_text) >= 50:
                 chapter_inputs.append((i, chapter_title, chapter_text))
 
+        # Limit concurrent Haiku calls to avoid 429 rate limits
+        sem = asyncio.Semaphore(5)
+
         async def _summarize(idx: int, title: str, text: str) -> TextChunk | None:
-            response = await asyncio.to_thread(
-                self.anthropic.messages.create,
-                model=config.CLAUDE_HAIKU_MODEL,
-                max_tokens=200,
-                messages=[{
-                    "role": "user",
-                    "content": f"{CHAPTER_INDEX_PROMPT}Chapter: {title}\n\n{text}",
-                }],
-            )
+            async with sem:
+                response = await asyncio.to_thread(
+                    self.anthropic.messages.create,
+                    model=config.CLAUDE_HAIKU_MODEL,
+                    max_tokens=200,
+                    messages=[{
+                        "role": "user",
+                        "content": f"{CHAPTER_INDEX_PROMPT}Chapter: {title}\n\n{text}",
+                    }],
+                )
             summary_text = response.content[0].text if response.content else ""
             if not summary_text:
                 return None
