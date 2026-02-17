@@ -42,7 +42,7 @@
     animation: fade-scale-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   }
   .animate-fade-scale-out {
-    animation: fade-scale-out 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+    animation: fade-scale-out 0.15s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   }
   .animate-slide-in-left {
     animation: slide-in-left 0.25s cubic-bezier(0.22, 1, 0.36, 1);

@@ -14,6 +14,7 @@ interface EpubReaderProps {
   epubData: ArrayBuffer
   fileName: string
   isIndexing?: boolean
+  isChatOpen?: boolean
   onCloseAction: () => void
   onTextSelect?: (selection: TextSelection) => void
   onLocationChange?: (percentage: number) => void
@@ -22,7 +23,7 @@ interface EpubReaderProps {
 // Book page aspect ratio (width:height)
 const ASPECT_RATIO = 7 / 9
 
-export default function EpubReader({ epubData, fileName, isIndexing, onCloseAction, onTextSelect, onLocationChange }: EpubReaderProps) {
+export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen, onCloseAction, onTextSelect, onLocationChange }: EpubReaderProps) {
   // Initialize font size from localStorage
   const [fontSize, setFontSize] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -43,7 +44,18 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
 
   const [isReady, setIsReady] = useState(false)
   const [toc, setToc] = useState<NavItem[]>([])
-  const [showToc, setShowToc] = useState(false)
+  const [showToc, setShowToc] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1280
+    }
+    return false
+  })
+  const [isWideScreen, setIsWideScreen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1280
+    }
+    return false
+  })
   const [showToolbar, setShowToolbar] = useState(() => {
     // Default to hidden on mobile
     if (typeof window !== 'undefined') {
@@ -103,6 +115,15 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
       setIsDark(false)
       document.documentElement.classList.remove('dark')
     }
+  }, [])
+
+  // Track wide screen for persistent TOC layout
+  useEffect(() => {
+    const handleResize = () => {
+      setIsWideScreen(window.innerWidth >= 1280)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
   // Initialize book
@@ -304,7 +325,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
           await renditionRef.current.display(href)
         }
       }
-      setShowToc(false)
+      if (window.innerWidth < 1280) setShowToc(false)
     } catch (error) {
       console.error('Error navigating to section:', error)
     }
@@ -392,7 +413,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
   }, [])
 
   return (
-    <div className="min-h-screen bg-paper dark:bg-[#141414] flex flex-col">
+    <div className={`min-h-screen bg-paper dark:bg-[#141414] flex flex-col transition-[margin] duration-300 ${isChatOpen ? 'min-[769px]:mr-[400px]' : ''}`}>
       {/* Header */}
       <header className="bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur border-b border-gray-200 dark:border-[#2a2a2a] px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-4">
@@ -502,7 +523,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
 
       {/* Reader */}
       <div
-        className="flex-1 relative bg-paper dark:bg-[#141414] p-8 flex items-center justify-center overflow-hidden"
+        className={`flex-1 relative bg-paper dark:bg-[#141414] p-8 flex items-center justify-center overflow-hidden transition-[margin] duration-300 ${isWideScreen && showToc ? 'ml-80' : ''}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -529,14 +550,16 @@ export default function EpubReader({ epubData, fileName, isIndexing, onCloseActi
           <>
             <button
               onClick={handlePrev}
-              className="fixed left-8 top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
+              className="fixed top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
+              style={{ left: isWideScreen && showToc ? '22rem' : '2rem' }}
               aria-label="Previous page"
             >
               <ChevronLeft className="w-6 h-6" />
             </button>
             <button
               onClick={handleNext}
-              className="fixed right-8 top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
+              className="fixed top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
+              style={{ right: isChatOpen ? 'calc(400px + 2rem)' : '2rem' }}
               aria-label="Next page"
             >
               <ChevronRight className="w-6 h-6" />

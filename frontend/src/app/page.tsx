@@ -304,6 +304,7 @@ export default function Home() {
               epubData={epubData}
               fileName={fileName}
               isIndexing={isIndexing}
+              isChatOpen={isChatOpen}
               onCloseAction={handleBack}
               onTextSelect={handleTextSelect}
               onLocationChange={setReaderPosition}
