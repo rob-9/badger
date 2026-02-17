@@ -67,7 +67,7 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6" role="region" aria-label="Chat messages">
         {messages.length === 0 && (
           <div className="text-center text-gray-400 mt-16">
-            <BookOpen className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+            <BookOpen className="w-10 h-10 mx-auto mb-3 text-gray-200 dark:text-[#f7f7f4]/15" />
             <p className="text-sm">Highlight any text to ask a question</p>
           </div>
         )}
@@ -83,7 +83,7 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
                     </p>
                   </div>
                 )}
-                <div className="max-w-[88%] px-4 py-2.5 bg-blue-500 text-white rounded-2xl rounded-br-md">
+                <div className="max-w-[88%] px-4 py-2.5 bg-accent text-[#14120b] rounded-2xl rounded-br-md">
                   <p className="text-sm leading-relaxed">{msg.content}</p>
                 </div>
               </div>
@@ -110,7 +110,7 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
       {/* Input */}
       <div className="px-4 py-4 border-t border-gray-100 dark:border-[#2a2a2a] bg-white dark:bg-[#1e1e1e]">
         <form onSubmit={handleSubmit}>
-          <div className="flex items-end gap-2 bg-gray-50 dark:bg-[#252525] rounded-2xl px-4 py-3 border border-gray-200 dark:border-[#333] focus-within:border-blue-300 dark:focus-within:border-blue-700 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-900/30 transition-all">
+          <div className="flex items-end gap-2 bg-gray-50 dark:bg-[#252525] rounded-2xl px-4 py-3 border border-gray-200 dark:border-[#333] focus-within:border-accent/50 dark:focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/20 dark:focus-within:ring-accent/10 transition-all">
             <textarea
               ref={inputRef}
               value={input}
@@ -125,7 +125,7 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
             <button
               type="submit"
               disabled={!input.trim() || isLoading}
-              className="flex-shrink-0 p-1.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="flex-shrink-0 p-1.5 bg-accent text-[#14120b] rounded-xl hover:bg-accent-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               aria-label="Send message"
             >
               <Send className="w-3.5 h-3.5" />

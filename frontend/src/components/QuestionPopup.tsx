@@ -149,12 +149,12 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
             onKeyDown={handleKeyDown}
             placeholder="Ask anything..."
             rows={2}
-            className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-[#333] dark:bg-[#141414] dark:text-[#e0e0e0] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none placeholder-gray-400 dark:placeholder-[#555]"
+            className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-[#333] dark:bg-[#141414] dark:text-[#e0e0e0] rounded-xl focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent resize-none placeholder-gray-400 dark:placeholder-[#555]"
           />
           <button
             type="submit"
             disabled={!question.trim()}
-            className="self-end p-2 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="self-end p-2 bg-accent text-[#14120b] rounded-xl hover:bg-accent-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             aria-label="Submit question"
           >
             <Send className="w-4 h-4" />
