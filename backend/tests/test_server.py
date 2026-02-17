@@ -283,6 +283,58 @@ class TestAgentEndpoint:
 # ── Service not initialized ───────────────────────────────────────────
 
 
+# ── Import local EPUB ────────────────────────────────────────────────
+
+
+class TestImportLocalEpub:
+    def test_import_epub_file(self, client, mock_services, tmp_path):
+        epub_path = tmp_path / "test.epub"
+        epub_path.write_bytes(b"PK\x03\x04fake epub content")
+        resp = client.post("/api/epub/import-local", json={"path": str(epub_path)})
+        assert resp.status_code == 200
+        assert resp.headers["x-filename"] == "test.epub"
+        assert resp.content == b"PK\x03\x04fake epub content"
+
+    def test_import_exploded_directory(self, client, mock_services, tmp_path):
+        epub_dir = tmp_path / "MyBook.epub"
+        epub_dir.mkdir()
+        (epub_dir / "mimetype").write_text("application/epub+zip")
+        meta_inf = epub_dir / "META-INF"
+        meta_inf.mkdir()
+        (meta_inf / "container.xml").write_text("<container/>")
+        (epub_dir / "content.opf").write_text("<package/>")
+
+        resp = client.post("/api/epub/import-local", json={"path": str(epub_dir)})
+        assert resp.status_code == 200
+        assert resp.headers["x-filename"] == "MyBook.epub"
+        # Should be a valid zip
+        import zipfile, io
+        zf = zipfile.ZipFile(io.BytesIO(resp.content))
+        names = zf.namelist()
+        assert "mimetype" in names
+        assert "META-INF/container.xml" in names
+
+    def test_import_nonexistent_path(self, client, mock_services):
+        resp = client.post("/api/epub/import-local", json={"path": "/nonexistent/path.epub"})
+        assert resp.status_code == 404
+
+    def test_import_non_epub_file(self, client, mock_services, tmp_path):
+        txt = tmp_path / "readme.txt"
+        txt.write_text("not an epub")
+        resp = client.post("/api/epub/import-local", json={"path": str(txt)})
+        assert resp.status_code == 400
+
+    def test_import_directory_without_container(self, client, mock_services, tmp_path):
+        plain_dir = tmp_path / "not_epub"
+        plain_dir.mkdir()
+        (plain_dir / "random.txt").write_text("hello")
+        resp = client.post("/api/epub/import-local", json={"path": str(plain_dir)})
+        assert resp.status_code == 400
+
+
+# ── Service not initialized ───────────────────────────────────────────
+
+
 class TestServiceNotInitialized:
     def test_index_503(self):
         import boom.api.server as server_mod

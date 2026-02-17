@@ -197,6 +197,34 @@ class TestContextualizedEmbeddings:
             or mock_voyage.contextualized_embed.call_args[0][0]
         assert len(call_inputs) == 2  # 2 chapter docs
 
+    @pytest.mark.asyncio
+    async def test_oversized_chapter_split(self, rag_service, mock_voyage):
+        """A chapter exceeding MAX_CHARS_PER_DOC should be split into sub-groups."""
+        # Create chunks that exceed the per-doc limit when combined
+        big_text = "x" * 70_000  # Each chunk is 70K chars
+        chunks = [
+            TextChunk(
+                id=f"test-chunk-{i}",
+                text=big_text,
+                metadata={"book_id": "test", "chunk_index": i, "chapter_index": 0},
+            )
+            for i in range(3)  # 3 × 70K = 210K chars, well over 120K limit
+        ]
+        # Each sub-doc gets its own result
+        mock_voyage.contextualized_embed.return_value = FakeContextEmbedResponse(
+            results=[
+                FakeContextResult(embeddings=[[0.1] * 1024]),
+                FakeContextResult(embeddings=[[0.2] * 1024]),
+                FakeContextResult(embeddings=[[0.3] * 1024]),
+            ]
+        )
+        result = await rag_service.get_contextualized_embeddings(chunks)
+        assert len(result) == 3
+        # Should split the single chapter into multiple documents
+        call_inputs = mock_voyage.contextualized_embed.call_args.kwargs.get("inputs") \
+            or mock_voyage.contextualized_embed.call_args[0][0]
+        assert len(call_inputs) == 3  # Each chunk too big to pair with another
+
 
 # ── RAGService.index_book ─────────────────────────────────────────────
 

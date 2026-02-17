@@ -14,6 +14,7 @@ VOYAGE_API_KEY: str = os.getenv("VOYAGE_API_KEY", "")
 
 # Model defaults
 CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+CLAUDE_HAIKU_MODEL: str = os.getenv("CLAUDE_HAIKU_MODEL", "claude-haiku-4-5-20251001")
 VOYAGE_MODEL: str = os.getenv("VOYAGE_MODEL", "voyage-3")
 VOYAGE_CONTEXT_MODEL: str = os.getenv("VOYAGE_CONTEXT_MODEL", "voyage-context-3")
 VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")

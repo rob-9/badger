@@ -305,8 +305,7 @@ class VectorStore:
             # the entire file (which can be 50-100MB of embeddings).
             with open(file_path, 'r') as f:
                 head = f.read(200)
-            import re as _re
-            match = _re.search(r'"version"\s*:\s*(\d+)', head)
+            match = re.search(r'"version"\s*:\s*(\d+)', head)
             version = int(match.group(1)) if match else 1
             return version >= CURRENT_INDEX_VERSION
         except Exception as e:

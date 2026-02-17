@@ -213,3 +213,68 @@ class TestValidTypes:
 
         for t in VALID_TYPES:
             assert t in SYSTEM_PROMPTS, f"Missing system prompt for type: {t}"
+
+
+# ── _label_and_log ───────────────────────────────────────────────────
+
+
+class TestLabelAndLog:
+    def test_returns_labeled_chunks(self):
+        from boom.core.graph import _label_and_log
+
+        results = [
+            SearchResult(chunk=make_chunk("b", 2, "Text"), score=0.8),
+            SearchResult(chunk=make_chunk("b", 8, "More"), score=0.7),
+        ]
+        state = {"reader_position": 0.5, "total_chunks": 10}
+        labeled = _label_and_log(results, state)
+        assert len(labeled) == 2
+        labels = {c["chunk_index"]: c["label"] for c in labeled}
+        assert labels[2] == "PAST"
+        assert labels[8] == "AHEAD"
+
+
+# ── _write_readable_log ─────────────────────────────────────────────
+
+
+class TestWriteReadableLog:
+    def test_writes_log_file(self, tmp_path):
+        """Readable log should be written without errors."""
+        import boom.core.graph as graph_mod
+        from boom.core.graph import _write_readable_log
+
+        original_dir = graph_mod.LOG_DIR
+        graph_mod.LOG_DIR = tmp_path
+        try:
+            state = {
+                "book_id": "b1",
+                "reader_position": 0.5,
+                "total_chunks": 100,
+                "selected_text": "test text",
+                "question": "What?",
+                "question_type": "vocabulary",
+                "entities": ["word"],
+                "classify_raw_response": '{"type":"vocabulary"}',
+                "classify_tokens_in": 50,
+                "classify_tokens_out": 10,
+                "chunks": [
+                    {"text": "chunk text", "chunk_index": 5, "score": 0.9, "label": "PAST"},
+                ],
+                "retrieval_strategy": "keyword",
+                "retrieval_query": "test text",
+                "gen_system_prompt": "You are a reading companion.",
+                "gen_user_prompt": "Question: What?",
+                "gen_model": "claude-sonnet-4-20250514",
+                "gen_tokens_in": 200,
+                "gen_tokens_out": 50,
+                "gen_stop_reason": "end_turn",
+                "answer": "The answer.",
+            }
+            log_entry = _build_log_entry(state)
+            _write_readable_log(state, log_entry)
+
+            log_content = (tmp_path / "queries.log").read_text()
+            assert "QUERY @" in log_content
+            assert "vocabulary" in log_content
+        finally:
+            graph_mod.LOG_DIR = original_dir

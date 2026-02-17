@@ -223,7 +223,7 @@ def _write_readable_log(state: QAState, log_entry: dict):
 
         # Classification
         section("Classification")
-        f.write("\n  Model:    claude-haiku-4-5-20251001\n")
+        f.write(f"\n  Model:    {config.CLAUDE_HAIKU_MODEL}\n")
         f.write(f"  Tokens:   {state.get('classify_tokens_in')} in / {state.get('classify_tokens_out')} out\n")
         f.write(f"  Raw:      {state.get('classify_raw_response')}\n")
         f.write(f"  Type:     {state.get('question_type')}\n")
@@ -242,7 +242,7 @@ def _write_readable_log(state: QAState, log_entry: dict):
         else:
             f.write(f"  Query:    {(state.get('retrieval_query') or '')[:200]}\n")
             f.write(f"  Top K:    {state.get('retrieval_top_k')}\n")
-            f.write(f"  Embedding: {state.get('retrieval_embedding_dims')} dimensions ({config.VOYAGE_MODEL})\n")
+            f.write(f"  Embedding: {state.get('retrieval_embedding_dims')} dimensions ({config.VOYAGE_CONTEXT_MODEL})\n")
 
         f.write(f"\n  Results: {len(chunks)} chunks\n")
         for i, c in enumerate(chunks):
@@ -307,7 +307,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info("  Book:     %s", book_id)
         logger.info("  Question: %s", question[:100])
         logger.info('  Selected: "%s%s"', selected[:80], "…" if len(selected) > 80 else "")
-        logger.info("  Model:    claude-haiku-4-5-20251001")
+        logger.info("  Model:    %s", config.CLAUDE_HAIKU_MODEL)
 
         classify_prompt = (
             f'Question: "{question}"\n'
@@ -319,7 +319,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info("  Prompt:   %s", classify_prompt.replace("\n", " ")[:200])
 
         response = anthropic.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=config.CLAUDE_HAIKU_MODEL,
             max_tokens=150,
             system="Classify the reading question. Return JSON only, no markdown.",
             messages=[{"role": "user", "content": classify_prompt}],

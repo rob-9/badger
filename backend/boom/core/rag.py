@@ -335,7 +335,7 @@ class RAGService:
         async def _summarize(idx: int, title: str, text: str) -> TextChunk | None:
             response = await asyncio.to_thread(
                 self.anthropic.messages.create,
-                model="claude-haiku-4-5-20251001",
+                model=config.CLAUDE_HAIKU_MODEL,
                 max_tokens=200,
                 messages=[{
                     "role": "user",
