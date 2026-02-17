@@ -184,46 +184,99 @@ class RAGService:
 
     async def get_contextualized_embeddings(
         self,
-        chunk_texts: list[str],
+        chunks: list[TextChunk],
     ) -> list[list[float]]:
         """
         Get contextualized embeddings using voyage-context-3.
 
-        voyage-context-3 takes a list of texts (chunks from the same document)
-        and embeds each one with awareness of surrounding chunks.
+        Groups chunks by chapter so each chapter is a separate "document" in the
+        API call, preserving within-chapter context. Multiple chapters are packed
+        per request up to API limits (32K tokens/document, 120K tokens/request).
         """
-        logger.info("Contextualized embedding for %d chunks", len(chunk_texts))
+        logger.info("Contextualized embedding for %d chunks", len(chunks))
 
-        # Batch by ~480K chars (~120K tokens) to stay under API limits
-        MAX_CHARS_PER_BATCH = 480_000
-        batches: list[list[str]] = []
-        current_batch: list[str] = []
-        current_chars = 0
+        # voyage-context-3 limits
+        MAX_CHARS_PER_DOC = 120_000    # ~30K tokens, safe margin under 32K limit
+        MAX_CHARS_PER_REQUEST = 460_000  # ~115K tokens, safe margin under 120K limit
 
-        for text in chunk_texts:
-            text_len = len(text)
-            if current_batch and current_chars + text_len > MAX_CHARS_PER_BATCH:
-                batches.append(current_batch)
-                current_batch = []
-                current_chars = 0
-            current_batch.append(text)
-            current_chars += text_len
+        # Group chunks by chapter, preserving order
+        chapter_groups: list[list[str]] = []
+        current_chapter_idx = None
+        for chunk in chunks:
+            ch_idx = chunk.metadata.get("chapter_index")
+            if ch_idx != current_chapter_idx:
+                chapter_groups.append([])
+                current_chapter_idx = ch_idx
+            chapter_groups[- 1].append(chunk.text)
 
-        if current_batch:
-            batches.append(current_batch)
+        # Warn about oversized chapters
+        for i, group in enumerate(chapter_groups):
+            group_chars = sum(len(t) for t in group)
+            if group_chars > MAX_CHARS_PER_DOC:
+                logger.warning(
+                    "Chapter %d has %d chars (~%d tokens) — exceeds per-document limit, "
+                    "context at split boundaries will be reduced",
+                    i, group_chars, group_chars // 4,
+                )
 
-        logger.info("Split into %d contextualized batches", len(batches))
+        # Split oversized chapters into sub-groups that fit the per-doc limit
+        documents: list[list[str]] = []
+        for group in chapter_groups:
+            group_chars = sum(len(t) for t in group)
+            if group_chars <= MAX_CHARS_PER_DOC:
+                documents.append(group)
+            else:
+                sub: list[str] = []
+                sub_chars = 0
+                for text in group:
+                    if sub and sub_chars + len(text) > MAX_CHARS_PER_DOC:
+                        documents.append(sub)
+                        sub = []
+                        sub_chars = 0
+                    sub.append(text)
+                    sub_chars += len(text)
+                if sub:
+                    documents.append(sub)
+
+        # Pack documents into requests respecting the per-request limit
+        requests: list[list[list[str]]] = []
+        current_request: list[list[str]] = []
+        current_request_chars = 0
+
+        for doc in documents:
+            doc_chars = sum(len(t) for t in doc)
+            if current_request and current_request_chars + doc_chars > MAX_CHARS_PER_REQUEST:
+                requests.append(current_request)
+                current_request = []
+                current_request_chars = 0
+            current_request.append(doc)
+            current_request_chars += doc_chars
+
+        if current_request:
+            requests.append(current_request)
+
+        logger.info(
+            "Split %d chapters into %d documents across %d API requests",
+            len(chapter_groups), len(documents), len(requests),
+        )
 
         all_embeddings: list[list[float]] = []
-        for i, batch in enumerate(batches):
-            result = self.voyage.contextualized_embed(
-                inputs=[batch],
+        for i, req_docs in enumerate(requests):
+            req_chunks = sum(len(d) for d in req_docs)
+            req_chars = sum(sum(len(t) for t in d) for d in req_docs)
+            logger.info(
+                "Embedding request %d/%d: %d docs, %d chunks, ~%dK tokens",
+                i + 1, len(requests), len(req_docs), req_chunks, req_chars // 4000,
+            )
+            result = await asyncio.to_thread(
+                self.voyage.contextualized_embed,
+                inputs=req_docs,
                 model=config.VOYAGE_CONTEXT_MODEL,
                 input_type="document",
             )
-            embeddings = result.results[0].embeddings
-            all_embeddings.extend(embeddings)
-            logger.info("Batch %d/%d: %d embeddings", i + 1, len(batches), len(embeddings))
+            for doc_result in result.results:
+                all_embeddings.extend(doc_result.embeddings)
+            logger.info("Embedding request %d/%d complete", i + 1, len(requests))
 
         logger.info("Generated %d contextualized embeddings", len(all_embeddings))
         return all_embeddings
@@ -245,8 +298,7 @@ class RAGService:
 
         logger.info("Created %d structured chunks", len(chunks))
 
-        texts = [chunk.text for chunk in chunks]
-        embeddings = await self.get_contextualized_embeddings(texts)
+        embeddings = await self.get_contextualized_embeddings(chunks)
 
         entries = [
             VectorEntry(chunk=chunk, embedding=embedding)
@@ -267,7 +319,9 @@ class RAGService:
         )
 
         chapters = structured_content.get("chapters", [])
-        summary_chunks: list[TextChunk] = []
+
+        # Build (index, title, text) for chapters with enough content
+        chapter_inputs: list[tuple[int, str, str]] = []
         for i, chapter in enumerate(chapters):
             chapter_title = chapter.get("title", f"Chapter {i + 1}")
             chapter_text = "\n\n".join(
@@ -275,38 +329,41 @@ class RAGService:
                 for section in chapter.get("sections", [])
                 for para in section.get("paragraphs", [])
             )[:8000]
+            if len(chapter_text) >= 50:
+                chapter_inputs.append((i, chapter_title, chapter_text))
 
-            if len(chapter_text) < 50:
-                continue
-
+        async def _summarize(idx: int, title: str, text: str) -> TextChunk | None:
             response = await asyncio.to_thread(
                 self.anthropic.messages.create,
                 model="claude-haiku-4-5-20251001",
                 max_tokens=200,
                 messages=[{
                     "role": "user",
-                    "content": f"{CHAPTER_INDEX_PROMPT}Chapter: {chapter_title}\n\n{chapter_text}",
+                    "content": f"{CHAPTER_INDEX_PROMPT}Chapter: {title}\n\n{text}",
                 }],
             )
             summary_text = response.content[0].text if response.content else ""
             if not summary_text:
-                continue
-
-            summary_chunks.append(TextChunk(
-                id=f"{book_id}-summary-{i}",
+                return None
+            return TextChunk(
+                id=f"{book_id}-summary-{idx}",
                 text=summary_text,
                 metadata={
                     "book_id": book_id,
-                    "chunk_index": i,
-                    "chapter_title": chapter_title,
-                    "chapter_index": i,
+                    "chunk_index": idx,
+                    "chapter_title": title,
+                    "chapter_index": idx,
                     "tier": "chapter_summary",
                 },
-            ))
+            )
+
+        results = await asyncio.gather(
+            *(_summarize(i, t, txt) for i, t, txt in chapter_inputs)
+        )
+        summary_chunks: list[TextChunk] = [c for c in results if c is not None]
 
         if summary_chunks:
-            summary_texts = [c.text for c in summary_chunks]
-            summary_embeddings = await self.get_contextualized_embeddings(summary_texts)
+            summary_embeddings = await self.get_contextualized_embeddings(summary_chunks)
             summary_entries = [
                 VectorEntry(chunk=chunk, embedding=emb)
                 for chunk, emb in zip(summary_chunks, summary_embeddings)

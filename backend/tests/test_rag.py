@@ -145,20 +145,57 @@ class TestGetEmbeddings:
 # ── RAGService.get_contextualized_embeddings ──────────────────────────
 
 
+def _make_chunks(texts: list[str], chapter_index: int = 0) -> list[TextChunk]:
+    return [
+        TextChunk(
+            id=f"test-chunk-{i}",
+            text=t,
+            metadata={"book_id": "test", "chunk_index": i, "chapter_index": chapter_index},
+        )
+        for i, t in enumerate(texts)
+    ]
+
+
 class TestContextualizedEmbeddings:
     @pytest.mark.asyncio
-    async def test_single_batch(self, rag_service, mock_voyage):
+    async def test_single_chapter(self, rag_service, mock_voyage):
         mock_voyage.contextualized_embed.return_value = FakeContextEmbedResponse(
             results=[FakeContextResult(embeddings=[[0.1] * 1024, [0.2] * 1024])]
         )
-        result = await rag_service.get_contextualized_embeddings(["chunk1", "chunk2"])
+        result = await rag_service.get_contextualized_embeddings(
+            _make_chunks(["chunk1", "chunk2"], chapter_index=0)
+        )
         assert len(result) == 2
 
     @pytest.mark.asyncio
     async def test_uses_document_input_type(self, rag_service, mock_voyage):
-        await rag_service.get_contextualized_embeddings(["text"])
+        mock_voyage.contextualized_embed.return_value = FakeContextEmbedResponse(
+            results=[FakeContextResult(embeddings=[[0.1] * 1024])]
+        )
+        await rag_service.get_contextualized_embeddings(_make_chunks(["text"]))
         call_kwargs = mock_voyage.contextualized_embed.call_args
         assert call_kwargs.kwargs.get("input_type") == "document" or call_kwargs[1].get("input_type") == "document"
+
+    @pytest.mark.asyncio
+    async def test_groups_by_chapter(self, rag_service, mock_voyage):
+        """Chunks from different chapters become separate documents in one request."""
+        chunks = (
+            _make_chunks(["ch0a", "ch0b"], chapter_index=0)
+            + _make_chunks(["ch1a"], chapter_index=1)
+        )
+        mock_voyage.contextualized_embed.return_value = FakeContextEmbedResponse(
+            results=[
+                FakeContextResult(embeddings=[[0.1] * 1024, [0.2] * 1024]),
+                FakeContextResult(embeddings=[[0.3] * 1024]),
+            ]
+        )
+        result = await rag_service.get_contextualized_embeddings(chunks)
+        assert len(result) == 3
+        # Should send 2 documents (one per chapter) in a single call
+        assert mock_voyage.contextualized_embed.call_count == 1
+        call_inputs = mock_voyage.contextualized_embed.call_args.kwargs.get("inputs") \
+            or mock_voyage.contextualized_embed.call_args[0][0]
+        assert len(call_inputs) == 2  # 2 chapter docs
 
 
 # ── RAGService.index_book ─────────────────────────────────────────────
