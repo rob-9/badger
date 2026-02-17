@@ -80,6 +80,22 @@ export async function queryBook(params: {
   return response.json()
 }
 
+export async function importLocalEpub(path: string): Promise<{ arrayBuffer: ArrayBuffer; filename: string }> {
+  const response = await apiFetch(`${API_URL}/api/epub/import-local`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response, 'Failed to import EPUB'))
+  }
+
+  const arrayBuffer = await response.arrayBuffer()
+  const filename = response.headers.get('X-Filename') || 'imported.epub'
+  return { arrayBuffer, filename }
+}
+
 export async function getAgentAssistance(params: {
   selectedText: string
   surroundingText?: string

@@ -91,7 +91,7 @@ export default function LibraryView({
 
       {/* Hidden file input shared between hero and sidebar upload */}
       <input
-        ref={fileInputRef}
+        ref={fileInputRef as React.RefObject<HTMLInputElement>}
         type="file"
         accept=".txt,.pdf,.epub,.zip"
         onChange={handleFileInput}

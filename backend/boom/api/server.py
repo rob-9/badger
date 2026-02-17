@@ -7,13 +7,17 @@ Simple API with three endpoints:
 3. POST /api/agent - Get AI assistance for selected text
 """
 
+import io
 import json
 import logging
+import zipfile
 from contextlib import asynccontextmanager
+from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, model_validator
 from typing import Optional
 from anthropic import Anthropic
@@ -239,6 +243,52 @@ Respond in JSON format with the following structure:
     except Exception as e:
         logger.error("Error in agent assist: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# === Local EPUB Import ===
+
+class ImportLocalRequest(BaseModel):
+    """Request to import an EPUB from a local filesystem path."""
+    path: str
+
+
+@app.post("/api/epub/import-local")
+async def import_local_epub(request: ImportLocalRequest):
+    """
+    Read an EPUB from a local path, re-zipping if it's an exploded directory
+    (common with Apple Books). Returns the raw EPUB bytes.
+    """
+    p = Path(request.path).expanduser().resolve()
+    if not p.exists():
+        raise HTTPException(status_code=404, detail=f"Path not found: {request.path}")
+
+    if p.is_file() and p.suffix.lower() == ".epub":
+        data = p.read_bytes()
+        filename = p.name
+    elif p.is_dir() and (p / "META-INF" / "container.xml").exists():
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            # mimetype must be first and uncompressed per EPUB spec
+            mimetype_path = p / "mimetype"
+            if mimetype_path.exists():
+                zf.writestr("mimetype", mimetype_path.read_text(), compress_type=zipfile.ZIP_STORED)
+            for file in sorted(p.rglob("*")):
+                if file.is_file() and file.name != "mimetype":
+                    arcname = str(file.relative_to(p))
+                    zf.write(file, arcname)
+        data = buf.getvalue()
+        filename = p.name if p.suffix.lower() == ".epub" else p.name + ".epub"
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Path must be an .epub file or an exploded EPUB directory"
+        )
+
+    return Response(
+        content=data,
+        media_type="application/epub+zip",
+        headers={"X-Filename": filename},
+    )
 
 
 # === Health Check ===

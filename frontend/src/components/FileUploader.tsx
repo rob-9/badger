@@ -2,7 +2,8 @@
 
 import { useState, useCallback } from 'react'
 import { Upload, FileText, Book, File } from 'lucide-react'
-import { parseEpub } from '@/lib/parseEpub'
+import { parseEpub, extractText } from '@/lib/parseEpub'
+import { importLocalEpub } from '@/lib/api'
 
 interface FileUploaderProps {
   onFileLoadAction: (content: string, fileName: string, arrayBuffer?: ArrayBuffer) => void
@@ -11,6 +12,7 @@ interface FileUploaderProps {
 export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [localPath, setLocalPath] = useState('')
 
   const handleFile = useCallback(async (file: File) => {
     setIsLoading(true)
@@ -36,6 +38,23 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
       setIsLoading(false)
     }
   }, [onFileLoadAction])
+
+  const handleLocalImport = useCallback(async () => {
+    const path = localPath.trim()
+    if (!path) return
+
+    setIsLoading(true)
+    try {
+      const { arrayBuffer, filename } = await importLocalEpub(path)
+      const text = await extractText(arrayBuffer)
+      onFileLoadAction(text, filename, arrayBuffer)
+    } catch (error) {
+      console.error('Error importing local EPUB:', error)
+      alert('Error importing EPUB: ' + (error as Error).message)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [localPath, onFileLoadAction])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -105,7 +124,25 @@ export default function FileUploader({ onFileLoadAction }: FileUploaderProps) {
         )}
       </div>
 
-      <div className="mt-8 grid grid-cols-3 gap-4 text-center text-sm text-gray-500 dark:text-[#666]">
+      <div className="mt-6 flex items-center gap-2">
+        <input
+          type="text"
+          value={localPath}
+          onChange={(e) => setLocalPath(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleLocalImport()}
+          placeholder="Or paste a local EPUB path..."
+          className="flex-1 px-3 py-2 text-sm border rounded-lg bg-white dark:bg-[#1a1a1a] border-gray-300 dark:border-[#333] text-gray-900 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#555] focus:outline-none focus:border-accent"
+        />
+        <button
+          onClick={handleLocalImport}
+          disabled={!localPath.trim() || isLoading}
+          className="px-4 py-2 text-sm bg-accent text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          Import
+        </button>
+      </div>
+
+      <div className="mt-6 grid grid-cols-3 gap-4 text-center text-sm text-gray-500 dark:text-[#666]">
         <div className="flex flex-col items-center">
           <FileText className="w-6 h-6 mb-2" />
           <span>Text Files</span>
