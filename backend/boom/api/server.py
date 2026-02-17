@@ -164,6 +164,8 @@ async def query_book(request: QueryBookRequest):
                 status_code=400,
                 detail="Must provide either book_id (for RAG) or selected_text (for simple query)"
             )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Error querying book: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

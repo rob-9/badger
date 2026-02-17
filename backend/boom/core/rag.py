@@ -471,8 +471,9 @@ Question: {question}"""
             f.write("═" * 60 + "\n\n")
 
             f.write(f"Book:     {book_id}\n")
-            f.write(f"Position: {reader_position:.1%} (chunk {reader_chunk_index}/{total_chunks})\n")
-            f.write(f"Selected: \"{selected_text[:80]}{'…' if selected_text and len(selected_text) > 80 else ''}\"\n")
+            f.write(f"Position: {(reader_position or 0):.1%} (chunk {reader_chunk_index}/{total_chunks})\n")
+            selected_display = (selected_text or "")[:80]
+            f.write(f"Selected: \"{selected_display}{'…' if selected_text and len(selected_text) > 80 else ''}\"\n")
             f.write(f"Question: {question}\n\n")
 
             f.write(f"── Retrieved Chunks ({len(results)}) " + "─" * 35 + "\n")
