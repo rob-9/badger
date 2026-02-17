@@ -14,6 +14,7 @@ Learn more:
 - https://github.com/anthropics/claude-cookbooks
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -24,7 +25,7 @@ import voyageai
 from anthropic import Anthropic
 
 from boom import config
-from .chunker import chunk_text
+from .chunker import chunk_text, chunk_structured, TextChunk
 from .vector_store import VectorStore, VectorEntry
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,7 @@ class RAGService:
 
         response = self.voyage.embed(
             texts=[text],
-            model=config.VOYAGE_MODEL,
+            model=config.VOYAGE_CONTEXT_MODEL,
             input_type=input_type
         )
 
@@ -133,7 +134,7 @@ class RAGService:
         for i, batch in enumerate(batches):
             response = self.voyage.embed(
                 texts=batch,
-                model=config.VOYAGE_MODEL,
+                model=config.VOYAGE_CONTEXT_MODEL,
                 input_type=input_type
             )
             if not response.embeddings:
@@ -180,6 +181,201 @@ class RAGService:
         await self.vector_store.add_book(book_id, entries)
 
         logger.info("Indexing complete for %s", book_id)
+
+    async def get_contextualized_embeddings(
+        self,
+        chunks: list[TextChunk],
+    ) -> list[list[float]]:
+        """
+        Get contextualized embeddings using voyage-context-3.
+
+        Groups chunks by chapter so each chapter is a separate "document" in the
+        API call, preserving within-chapter context. Multiple chapters are packed
+        per request up to API limits (32K tokens/document, 120K tokens/request).
+        """
+        logger.info("Contextualized embedding for %d chunks", len(chunks))
+
+        # voyage-context-3 limits
+        MAX_CHARS_PER_DOC = 120_000    # ~30K tokens, safe margin under 32K limit
+        MAX_CHARS_PER_REQUEST = 460_000  # ~115K tokens, safe margin under 120K limit
+
+        # Group chunks by chapter, preserving order
+        chapter_groups: list[list[str]] = []
+        current_chapter_idx = None
+        for chunk in chunks:
+            ch_idx = chunk.metadata.get("chapter_index")
+            if ch_idx != current_chapter_idx:
+                chapter_groups.append([])
+                current_chapter_idx = ch_idx
+            chapter_groups[- 1].append(chunk.text)
+
+        # Warn about oversized chapters
+        for i, group in enumerate(chapter_groups):
+            group_chars = sum(len(t) for t in group)
+            if group_chars > MAX_CHARS_PER_DOC:
+                logger.warning(
+                    "Chapter %d has %d chars (~%d tokens) — exceeds per-document limit, "
+                    "context at split boundaries will be reduced",
+                    i, group_chars, group_chars // 4,
+                )
+
+        # Split oversized chapters into sub-groups that fit the per-doc limit
+        documents: list[list[str]] = []
+        for group in chapter_groups:
+            group_chars = sum(len(t) for t in group)
+            if group_chars <= MAX_CHARS_PER_DOC:
+                documents.append(group)
+            else:
+                sub: list[str] = []
+                sub_chars = 0
+                for text in group:
+                    if sub and sub_chars + len(text) > MAX_CHARS_PER_DOC:
+                        documents.append(sub)
+                        sub = []
+                        sub_chars = 0
+                    sub.append(text)
+                    sub_chars += len(text)
+                if sub:
+                    documents.append(sub)
+
+        # Pack documents into requests respecting the per-request limit
+        requests: list[list[list[str]]] = []
+        current_request: list[list[str]] = []
+        current_request_chars = 0
+
+        for doc in documents:
+            doc_chars = sum(len(t) for t in doc)
+            if current_request and current_request_chars + doc_chars > MAX_CHARS_PER_REQUEST:
+                requests.append(current_request)
+                current_request = []
+                current_request_chars = 0
+            current_request.append(doc)
+            current_request_chars += doc_chars
+
+        if current_request:
+            requests.append(current_request)
+
+        logger.info(
+            "Split %d chapters into %d documents across %d API requests",
+            len(chapter_groups), len(documents), len(requests),
+        )
+
+        all_embeddings: list[list[float]] = []
+        for i, req_docs in enumerate(requests):
+            req_chunks = sum(len(d) for d in req_docs)
+            req_chars = sum(sum(len(t) for t in d) for d in req_docs)
+            logger.info(
+                "Embedding request %d/%d: %d docs, %d chunks, ~%dK tokens",
+                i + 1, len(requests), len(req_docs), req_chunks, req_chars // 4000,
+            )
+            result = await asyncio.to_thread(
+                self.voyage.contextualized_embed,
+                inputs=req_docs,
+                model=config.VOYAGE_CONTEXT_MODEL,
+                input_type="document",
+            )
+            for doc_result in result.results:
+                all_embeddings.extend(doc_result.embeddings)
+            logger.info("Embedding request %d/%d complete", i + 1, len(requests))
+
+        logger.info("Generated %d contextualized embeddings", len(all_embeddings))
+        return all_embeddings
+
+    async def index_book_structured(self, book_id: str, structured_content: dict) -> None:
+        """
+        Index a book using structure-aware chunking + voyage-context-3.
+        """
+        logger.info("Indexing structured book %s", book_id)
+
+        if self.vector_store.has_book(book_id):
+            logger.info("Book %s already indexed, skipping", book_id)
+            return
+
+        chunks = chunk_structured(structured_content, book_id)
+        if not chunks:
+            logger.warning("No chunks produced for %s — structured content may be empty", book_id)
+            return
+
+        logger.info("Created %d structured chunks", len(chunks))
+
+        embeddings = await self.get_contextualized_embeddings(chunks)
+
+        entries = [
+            VectorEntry(chunk=chunk, embedding=embedding)
+            for chunk, embedding in zip(chunks, embeddings)
+        ]
+        await self.vector_store.add_book(book_id, entries)
+
+        # Generate chapter-level index entries using Haiku (fast + cheap).
+        # These aren't narrative summaries — they're retrieval targets optimized
+        # for matching broad thematic questions to the right chapter.
+        CHAPTER_INDEX_PROMPT = (
+            "For this chapter, extract:\n"
+            "1. The main themes and arguments\n"
+            "2. Key names, terms, and concepts introduced or discussed\n"
+            "3. What is established or changes\n\n"
+            "Keep it to 3-4 sentences. Optimize for searchability — "
+            "someone will be searching for these topics later.\n\n"
+        )
+
+        chapters = structured_content.get("chapters", [])
+
+        # Build (index, title, text) for chapters with enough content
+        chapter_inputs: list[tuple[int, str, str]] = []
+        for i, chapter in enumerate(chapters):
+            chapter_title = chapter.get("title", f"Chapter {i + 1}")
+            chapter_text = "\n\n".join(
+                para
+                for section in chapter.get("sections", [])
+                for para in section.get("paragraphs", [])
+            )[:8000]
+            if len(chapter_text) >= 50:
+                chapter_inputs.append((i, chapter_title, chapter_text))
+
+        # Limit concurrent Haiku calls to avoid 429 rate limits
+        sem = asyncio.Semaphore(5)
+
+        async def _summarize(idx: int, title: str, text: str) -> TextChunk | None:
+            async with sem:
+                response = await asyncio.to_thread(
+                    self.anthropic.messages.create,
+                    model=config.CLAUDE_HAIKU_MODEL,
+                    max_tokens=200,
+                    messages=[{
+                        "role": "user",
+                        "content": f"{CHAPTER_INDEX_PROMPT}Chapter: {title}\n\n{text}",
+                    }],
+                )
+            summary_text = response.content[0].text if response.content else ""
+            if not summary_text:
+                return None
+            return TextChunk(
+                id=f"{book_id}-summary-{idx}",
+                text=summary_text,
+                metadata={
+                    "book_id": book_id,
+                    "chunk_index": idx,
+                    "chapter_title": title,
+                    "chapter_index": idx,
+                    "tier": "chapter_summary",
+                },
+            )
+
+        results = await asyncio.gather(
+            *(_summarize(i, t, txt) for i, t, txt in chapter_inputs)
+        )
+        summary_chunks: list[TextChunk] = [c for c in results if c is not None]
+
+        if summary_chunks:
+            summary_embeddings = await self.get_contextualized_embeddings(summary_chunks)
+            summary_entries = [
+                VectorEntry(chunk=chunk, embedding=emb)
+                for chunk, emb in zip(summary_chunks, summary_embeddings)
+            ]
+            await self.vector_store.save_summaries(book_id, summary_entries)
+            logger.info("Generated %d chapter summaries for %s", len(summary_chunks), book_id)
+
+        logger.info("Structured indexing complete for %s", book_id)
 
     async def query_book(
         self,
@@ -262,16 +458,18 @@ class RAGService:
         context = "\n\n===\n\n".join(context_parts)
 
         # Build the prompt
-        system_prompt = """You are a thoughtful reading companion helping a reader through a book.
+        system_prompt = """You are a reading companion.
 
-You have two types of context:
-- [ALREADY READ]: Content the reader has already encountered. You can reference this freely and directly.
-- [COMING UP]: Content the reader hasn't reached yet. Use this ONLY to subtly guide their thinking, intuition, or attention — never quote it, reveal what happens, or spoil events.
+Be direct and concise. Answer the question, then stop. No filler, no plot recaps, no dramatic narration.
+Short paragraphs. Prefer 2-4 sentences over a wall of text.
+Address the reader as "you." Never say "the user" or "the reader."
 
-Your goal: give meaningful, helpful responses that enrich the reading experience. If a question touches on future content, guide the reader toward noticing the right things without revealing outcomes."""
+Context types:
+- [ALREADY READ]: Content you've both covered. Reference freely.
+- [COMING UP]: Content not yet reached. Use ONLY to subtly guide attention — never reveal, quote, or spoil."""
 
         if selected_text:
-            user_prompt = f"""The user selected this text: "{selected_text}"
+            user_prompt = f"""Selected text: "{selected_text}"
 
 Context from the book:
 {context}
@@ -336,8 +534,9 @@ Question: {question}"""
             f.write("═" * 60 + "\n\n")
 
             f.write(f"Book:     {book_id}\n")
-            f.write(f"Position: {reader_position:.1%} (chunk {reader_chunk_index}/{total_chunks})\n")
-            f.write(f"Selected: \"{selected_text[:80]}{'…' if selected_text and len(selected_text) > 80 else ''}\"\n")
+            f.write(f"Position: {(reader_position or 0):.1%} (chunk {reader_chunk_index}/{total_chunks})\n")
+            selected_display = (selected_text or "")[:80]
+            f.write(f"Selected: \"{selected_display}{'…' if selected_text and len(selected_text) > 80 else ''}\"\n")
             f.write(f"Question: {question}\n\n")
 
             f.write(f"── Retrieved Chunks ({len(results)}) " + "─" * 35 + "\n")
@@ -390,7 +589,7 @@ Question: {question}"""
         response = self.anthropic.messages.create(
             model=config.CLAUDE_MODEL,
             max_tokens=1024,
-            system="You are a helpful reading assistant. Answer questions about the provided text concisely.",
+            system="You are a reading companion. Be direct and concise — answer the question, then stop. Address the reader as \"you.\"",
             messages=[
                 {
                     "role": "user",

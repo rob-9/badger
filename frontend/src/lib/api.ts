@@ -4,6 +4,8 @@
  * All API calls go to the Python FastAPI server running on localhost:8000
  */
 
+import type { StructuredBook } from '@/lib/parseEpub'
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 async function parseErrorResponse(response: Response, fallback: string): Promise<string> {
@@ -36,11 +38,15 @@ export async function isBookIndexed(bookId: string): Promise<boolean> {
   }
 }
 
-export async function indexBook(bookId: string, text: string): Promise<void> {
+export async function indexBook(bookId: string, content: StructuredBook | string): Promise<void> {
+  const payload = typeof content === 'string'
+    ? { book_id: bookId, text: content }
+    : { book_id: bookId, structured_content: content }
+
   const response = await apiFetch(`${API_URL}/api/rag/index`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ book_id: bookId, text })
+    body: JSON.stringify(payload)
   })
 
   if (!response.ok) {
@@ -72,6 +78,22 @@ export async function queryBook(params: {
   }
 
   return response.json()
+}
+
+export async function importLocalEpub(path: string): Promise<{ arrayBuffer: ArrayBuffer; filename: string }> {
+  const response = await apiFetch(`${API_URL}/api/epub/import-local`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path })
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response, 'Failed to import EPUB'))
+  }
+
+  const arrayBuffer = await response.arrayBuffer()
+  const filename = response.headers.get('X-Filename') || 'imported.epub'
+  return { arrayBuffer, filename }
 }
 
 export async function getAgentAssistance(params: {

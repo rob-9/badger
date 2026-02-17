@@ -23,6 +23,7 @@ from pathlib import Path
 import json
 import math
 from typing import Optional
+from rank_bm25 import BM25Okapi
 from .chunker import TextChunk
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,75 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot_product / (magnitude_a * magnitude_b)
 
 
+def _tokenize(text: str) -> list[str]:
+    """Split text into lowercase words for BM25 matching (e.g. 'Hello World!' → ['hello', 'world'])."""
+    return re.findall(r'\w+', text.lower())
+
+
+class BM25Index:
+    """
+    BM25 (Best Match 25) keyword index over document chunks.
+
+    BM25 is a classical text retrieval algorithm that ranks documents by
+    term frequency (how often a word appears in a chunk) and inverse document
+    frequency (how rare a word is across all chunks). Unlike semantic/vector
+    search, BM25 excels at exact keyword matching — it will find "photosynthesis"
+    even if the embedding model doesn't place it near the query vector.
+
+    Used alongside vector search in hybrid retrieval for better recall.
+    """
+
+    def __init__(self, entries: list[VectorEntry]):
+        self.entries = entries
+        corpus = [_tokenize(e.chunk.text) for e in entries]
+        self.bm25 = BM25Okapi(corpus)
+
+    def search(self, query: str, top_k: int = 20) -> list[SearchResult]:
+        tokens = _tokenize(query)
+        scores = self.bm25.get_scores(tokens)
+        ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
+        return [
+            SearchResult(chunk=self.entries[idx].chunk, score=float(score))
+            for idx, score in ranked
+            if score > 0
+        ]
+
+
+def reciprocal_rank_fusion(*result_lists: list[SearchResult], k: int = 60) -> list[SearchResult]:
+    """
+    Merge multiple ranked result lists into one using Reciprocal Rank Fusion (RRF).
+
+    RRF is a simple, robust way to combine results from different retrieval methods
+    (e.g. semantic search + BM25). Each result gets a score of 1/(k + rank + 1) from
+    each list it appears in, and scores are summed. The constant k=60 dampens the
+    influence of high ranks so that a result appearing in multiple lists is boosted
+    more than one that ranks #1 in only one list.
+
+    Reference: Cormack, Clarke & Buettcher (2009) — "Reciprocal Rank Fusion
+    outperforms Condorcet and individual Rank Learning Methods"
+    """
+    scores: dict[str, float] = {}
+    chunks: dict[str, SearchResult] = {}
+
+    for results in result_lists:
+        for rank, result in enumerate(results):
+            chunk_id = result.chunk.id
+            scores[chunk_id] = scores.get(chunk_id, 0) + 1.0 / (k + rank + 1)
+            if chunk_id not in chunks:
+                chunks[chunk_id] = result
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [
+        SearchResult(chunk=chunks[cid].chunk, score=score)
+        for cid, score in ranked
+    ]
+
+
+# Bump this when the indexing pipeline changes (chunking strategy, embedding model, etc.)
+# so that books indexed with an older version get automatically re-indexed.
+CURRENT_INDEX_VERSION = 2
+
+
 class VectorStore:
     """
     Simple file-based vector store.
@@ -85,11 +155,17 @@ class VectorStore:
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.entries: dict[str, list[VectorEntry]] = {}
+        self.bm25_indices: dict[str, BM25Index] = {}
+        self.summary_entries: dict[str, list[VectorEntry]] = {}
         logger.info("Initialized with storage: %s", self.storage_dir)
 
     def _get_file_path(self, book_id: str) -> Path:
         """Get file path for a book's vectors."""
         return self.storage_dir / f"{book_id}.json"
+
+    def _get_summaries_path(self, book_id: str) -> Path:
+        """Get file path for a book's chapter summary vectors."""
+        return self.storage_dir / f"{book_id}_summaries.json"
 
     def _serialize_entry(self, entry: VectorEntry) -> dict:
         """Serialize VectorEntry to JSON-compatible dict."""
@@ -116,6 +192,7 @@ class VectorStore:
         file_path = self._get_file_path(book_id)
 
         data = {
+            'version': CURRENT_INDEX_VERSION,
             'book_id': book_id,
             'entry_count': len(entries),
             'entries': [self._serialize_entry(e) for e in entries]
@@ -137,8 +214,14 @@ class VectorStore:
             with open(file_path, 'r') as f:
                 data = json.load(f)
 
+            file_version = data.get('version', 1)
+            if file_version < CURRENT_INDEX_VERSION:
+                logger.info("Outdated index v%d (current v%d), needs re-indexing: %s",
+                            file_version, CURRENT_INDEX_VERSION, file_path)
+                return None
+
             entries = [self._deserialize_entry(e) for e in data['entries']]
-            logger.info("Loaded %d entries from %s", len(entries), file_path)
+            logger.info("Loaded %d entries (v%d) from %s", len(entries), file_version, file_path)
             return entries
         except Exception as e:
             logger.error("Error loading from file: %s", e)
@@ -153,7 +236,8 @@ class VectorStore:
             entries: List of VectorEntry objects
         """
         self.entries[book_id] = entries
-        logger.info("Added %d chunks for book %s", len(entries), book_id)
+        self.bm25_indices[book_id] = BM25Index(entries)
+        logger.info("Added %d chunks for book %s (BM25 index built)", len(entries), book_id)
 
         # Persist to file system
         await self.save_to_file(book_id, entries)
@@ -210,20 +294,37 @@ class VectorStore:
         return top_results
 
     def has_book(self, book_id: str) -> bool:
-        """Check if a book has been indexed."""
-        return book_id in self.entries or self._get_file_path(book_id).exists()
+        """Check if a book has been indexed with the current version."""
+        if book_id in self.entries:
+            return True
+        file_path = self._get_file_path(book_id)
+        if not file_path.exists():
+            return False
+        try:
+            # Read only the first 200 bytes to extract version without parsing
+            # the entire file (which can be 50-100MB of embeddings).
+            with open(file_path, 'r') as f:
+                head = f.read(200)
+            match = re.search(r'"version"\s*:\s*(\d+)', head)
+            version = int(match.group(1)) if match else 1
+            return version >= CURRENT_INDEX_VERSION
+        except Exception as e:
+            logger.error("Error checking book version: %s", e)
+            return False
 
     async def remove_book(self, book_id: str) -> None:
-        """Remove a book from the store."""
-        # Remove from memory
+        """Remove a book from the store (entries, summaries, BM25 cache, files)."""
         if book_id in self.entries:
             del self.entries[book_id]
+        if book_id in self.bm25_indices:
+            del self.bm25_indices[book_id]
+        if book_id in self.summary_entries:
+            del self.summary_entries[book_id]
 
-        # Remove from file system
-        file_path = self._get_file_path(book_id)
-        if file_path.exists():
-            file_path.unlink()
-            logger.info("Deleted from disk: %s", book_id)
+        for path in [self._get_file_path(book_id), self._get_summaries_path(book_id)]:
+            if path.exists():
+                path.unlink()
+                logger.info("Deleted from disk: %s", path)
 
     async def get_total_chunks(self, book_id: str) -> int:
         """Return total number of indexed chunks for a book."""
@@ -275,6 +376,120 @@ class VectorStore:
             for e in entries
             if needle in e.chunk.text.lower()
         ]
+
+    async def _get_bm25(self, book_id: str) -> Optional[BM25Index]:
+        """
+        Get or lazily build the BM25 index for a book.
+
+        The index is built on first access (e.g. when a book was loaded from disk
+        rather than freshly indexed) and cached in memory for subsequent queries.
+        """
+        if book_id in self.bm25_indices:
+            return self.bm25_indices[book_id]
+
+        entries = self.entries.get(book_id)
+        if not entries:
+            entries = await self.load_from_file(book_id)
+            if entries:
+                self.entries[book_id] = entries
+
+        if not entries:
+            return None
+
+        self.bm25_indices[book_id] = BM25Index(entries)
+        return self.bm25_indices[book_id]
+
+    async def hybrid_search(
+        self,
+        book_id: str,
+        query_embedding: list[float],
+        query_text: str,
+        top_k: int = 20,
+    ) -> list[SearchResult]:
+        """
+        Combine semantic (vector) search with BM25 (keyword) search using
+        Reciprocal Rank Fusion for better recall.
+
+        Semantic search finds chunks with similar meaning (good for paraphrases,
+        conceptual matches). BM25 finds chunks with matching keywords (good for
+        exact terms, names, technical vocabulary). Fusing both via RRF gives
+        better retrieval than either alone — chunks that score well in both
+        methods get boosted to the top.
+
+        Returns top_k results (typically 20) for downstream reranking to narrow
+        down to the final 5.
+        """
+        logger.debug("Hybrid search for book %s (top %d)", book_id, top_k)
+
+        # Semantic search (vector cosine similarity)
+        semantic_results = await self.search(book_id, query_embedding, top_k=top_k)
+
+        # BM25 keyword search
+        bm25 = await self._get_bm25(book_id)
+        bm25_results = bm25.search(query_text, top_k=top_k) if bm25 else []
+
+        logger.debug("Semantic: %d results, BM25: %d results", len(semantic_results), len(bm25_results))
+
+        # Fuse both ranked lists — chunks appearing in both get higher scores
+        fused = reciprocal_rank_fusion(semantic_results, bm25_results)[:top_k]
+
+        logger.debug("Fused: %d results", len(fused))
+        return fused
+
+    async def save_summaries(self, book_id: str, entries: list[VectorEntry]) -> None:
+        """Save chapter summary vectors to a separate file and cache in memory."""
+        self.summary_entries[book_id] = entries
+        file_path = self._get_summaries_path(book_id)
+        data = {
+            'version': CURRENT_INDEX_VERSION,
+            'book_id': book_id,
+            'entry_count': len(entries),
+            'entries': [self._serialize_entry(e) for e in entries]
+        }
+        with open(file_path, 'w') as f:
+            json.dump(data, f)
+        logger.info("Saved %d chapter summaries to %s", len(entries), file_path)
+
+    async def load_summaries(self, book_id: str) -> Optional[list[VectorEntry]]:
+        """Load chapter summary vectors from file."""
+        file_path = self._get_summaries_path(book_id)
+        if not file_path.exists():
+            return None
+        try:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+            entries = [self._deserialize_entry(e) for e in data['entries']]
+            logger.info("Loaded %d chapter summaries from %s", len(entries), file_path)
+            return entries
+        except Exception as e:
+            logger.error("Error loading summaries: %s", e)
+            return None
+
+    async def search_summaries(
+        self,
+        book_id: str,
+        query_embedding: list[float],
+        top_k: int = 3,
+    ) -> list[SearchResult]:
+        """
+        Search chapter-level summaries for broad thematic matches.
+
+        Chapter summaries provide high-level context that passage-level chunks
+        miss — useful for "what is the book's stance on X" type questions.
+        """
+        summaries = self.summary_entries.get(book_id)
+        if not summaries:
+            summaries = await self.load_summaries(book_id)
+            if summaries:
+                self.summary_entries[book_id] = summaries
+        if not summaries:
+            return []
+
+        results = [
+            SearchResult(chunk=entry.chunk, score=cosine_similarity(query_embedding, entry.embedding))
+            for entry in summaries
+        ]
+        return sorted(results, key=lambda r: r.score, reverse=True)[:top_k]
 
     def get_stats(self) -> dict:
         """Get statistics about the store."""

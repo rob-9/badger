@@ -223,7 +223,7 @@ def _write_readable_log(state: QAState, log_entry: dict):
 
         # Classification
         section("Classification")
-        f.write("\n  Model:    claude-haiku-4-5-20251001\n")
+        f.write(f"\n  Model:    {config.CLAUDE_HAIKU_MODEL}\n")
         f.write(f"  Tokens:   {state.get('classify_tokens_in')} in / {state.get('classify_tokens_out')} out\n")
         f.write(f"  Raw:      {state.get('classify_raw_response')}\n")
         f.write(f"  Type:     {state.get('question_type')}\n")
@@ -242,7 +242,7 @@ def _write_readable_log(state: QAState, log_entry: dict):
         else:
             f.write(f"  Query:    {(state.get('retrieval_query') or '')[:200]}\n")
             f.write(f"  Top K:    {state.get('retrieval_top_k')}\n")
-            f.write(f"  Embedding: {state.get('retrieval_embedding_dims')} dimensions ({config.VOYAGE_MODEL})\n")
+            f.write(f"  Embedding: {state.get('retrieval_embedding_dims')} dimensions ({config.VOYAGE_CONTEXT_MODEL})\n")
 
         f.write(f"\n  Results: {len(chunks)} chunks\n")
         for i, c in enumerate(chunks):
@@ -287,6 +287,14 @@ def _write_readable_log(state: QAState, log_entry: dict):
 def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_client) -> StateGraph:
     """Build and compile the QA LangGraph."""
 
+    def _embed_query(text: str) -> list[float]:
+        """Embed a query using voyage-context-3."""
+        return voyage_client.contextualized_embed(
+            inputs=[[text]],
+            model=config.VOYAGE_CONTEXT_MODEL,
+            input_type="query",
+        ).results[0].embeddings[0]
+
     # --- Node: classify ---
 
     async def classify_node(state: QAState) -> dict:
@@ -299,7 +307,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info("  Book:     %s", book_id)
         logger.info("  Question: %s", question[:100])
         logger.info('  Selected: "%s%s"', selected[:80], "…" if len(selected) > 80 else "")
-        logger.info("  Model:    claude-haiku-4-5-20251001")
+        logger.info("  Model:    %s", config.CLAUDE_HAIKU_MODEL)
 
         classify_prompt = (
             f'Question: "{question}"\n'
@@ -311,7 +319,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info("  Prompt:   %s", classify_prompt.replace("\n", " ")[:200])
 
         response = anthropic.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=config.CLAUDE_HAIKU_MODEL,
             max_tokens=150,
             system="Classify the reading question. Return JSON only, no markdown.",
             messages=[{"role": "user", "content": classify_prompt}],
@@ -363,9 +371,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             logger.info("  No keyword matches — falling back to semantic search")
             strategy = "keyword→semantic_fallback"
             query = selected if selected else state["question"]
-            embedding = voyage_client.embed(
-                texts=[query], model=config.VOYAGE_MODEL, input_type="query"
-            ).embeddings[0]
+            embedding = _embed_query(query)
             logger.info('  Semantic query: "%s", %d dimensions', query[:100], len(embedding))
             results = await vector_store.search(book_id, embedding, top_k=5)
 
@@ -412,18 +418,16 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     # --- Node factory: semantic retrieval (lookup & analysis) ---
 
     def _make_semantic_node(top_k: int, strategy: str):
-        """Create a semantic retrieval node with the given top_k and strategy name."""
+        """Create a pure semantic retrieval node (cosine similarity only)."""
         async def semantic_node(state: QAState) -> dict:
             logger.info("── RETRIEVE (%s) %s", strategy, "─" * (33 - len(strategy)))
             logger.info("  Strategy: semantic search, top_k=%d", top_k)
 
             query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
             logger.info("  Query: %s", query[:200])
-            logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_MODEL)
+            logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_CONTEXT_MODEL)
 
-            embedding = voyage_client.embed(
-                texts=[query], model=config.VOYAGE_MODEL, input_type="query"
-            ).embeddings[0]
+            embedding = _embed_query(query)
             logger.info("  Embedding: %d dimensions", len(embedding))
             logger.info("  Searching %d total chunks in book %s", state.get("total_chunks", 0), state["book_id"])
 
@@ -439,8 +443,90 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             }
         return semantic_node
 
-    lookup_node = _make_semantic_node(top_k=5, strategy="semantic")
-    analysis_node = _make_semantic_node(top_k=8, strategy="broad_semantic")
+    lookup_node = _make_semantic_node(top_k=20, strategy="semantic")
+
+    # Analysis uses hybrid search + chapter summaries for broad thematic questions.
+    # Summaries act as chapter-level index entries that help match questions like
+    # "what does the book say about X" to the right chapter, even when no single
+    # passage chunk would score well on its own.
+    async def analysis_node(state: QAState) -> dict:
+        logger.info("── RETRIEVE (analysis) ───────────────────────")
+        logger.info("  Strategy: hybrid + chapter summaries")
+
+        query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
+        logger.info("  Query: %s", query[:200])
+
+        embedding = _embed_query(query)
+        logger.info("  Embedding: %d dimensions", len(embedding))
+
+        # Passage-level: hybrid (semantic + BM25), top 20
+        passage_results = await vector_store.hybrid_search(
+            state["book_id"], embedding, query_text=query, top_k=20,
+        )
+        logger.info("  Passage results: %d", len(passage_results))
+
+        # Chapter-level: summary vectors, top 3
+        summary_results = await vector_store.search_summaries(
+            state["book_id"], embedding, top_k=3,
+        )
+        logger.info("  Summary results: %d", len(summary_results))
+
+        # Merge both tiers — reranker will pick the best 5-8
+        all_results = passage_results + summary_results
+        labeled = _label_and_log(all_results, state)
+
+        return {
+            "chunks": labeled,
+            "retrieval_strategy": "hybrid_broad+summaries",
+            "retrieval_query": query,
+            "retrieval_top_k": 20,
+            "retrieval_embedding_dims": len(embedding),
+        }
+
+    # --- Node: rerank ---
+
+    async def rerank_node(state: QAState) -> dict:
+        """
+        Rerank retrieved chunks using Voyage's rerank-2.5 model.
+
+        Takes the 20 candidates from retrieval and narrows down to the
+        best 5 by relevance. Reranking uses a cross-encoder that scores
+        each (query, chunk) pair jointly — more accurate than embedding
+        similarity alone, but too slow to run on all chunks.
+        """
+        chunks = state.get("chunks", [])
+        if len(chunks) <= 5:
+            logger.info("── RERANK (skipped, %d chunks ≤ 5) %s", len(chunks), LOG_SEPARATOR[35:])
+            return {}
+
+        logger.info("── RERANK %s", LOG_SEPARATOR[10:])
+        logger.info("  Input: %d chunks → reranking to top 5", len(chunks))
+
+        query = state["question"]
+        if state.get("selected_text"):
+            query += f"\n\nReferring to: {state['selected_text']}"
+
+        reranking = voyage_client.rerank(
+            query=query,
+            documents=[c["text"] for c in chunks],
+            model=config.VOYAGE_RERANK_MODEL,
+            top_k=5,
+        )
+
+        reranked = [
+            {**chunks[r.index], "score": r.relevance_score}
+            for r in reranking.results
+        ]
+
+        logger.info("  Output: %d chunks", len(reranked))
+        for i, c in enumerate(reranked):
+            logger.info(
+                "    [%d] score=%.4f | chunk %d | %s…",
+                i + 1, c["score"], c["chunk_index"], c["text"][:80],
+            )
+        logger.info(LOG_SEPARATOR)
+
+        return {"chunks": reranked}
 
     # --- Node: generate ---
 
@@ -458,11 +544,11 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         system_prompt = SYSTEM_PROMPTS.get(q_type, SYSTEM_PROMPTS["context"])
 
         if not chunks:
-            user_prompt = f'The user selected: "{selected}"\n\nQuestion: {state["question"]}'
+            user_prompt = f'Selected text: "{selected}"\n\nQuestion: {state["question"]}'
             logger.info("  No chunks — generating from selected text only")
         elif selected:
             context = build_context_string(chunks)
-            user_prompt = f'The user selected this text: "{selected}"\n\nContext from the book:\n{context}\n\nQuestion: {state["question"]}'
+            user_prompt = f'Selected text: "{selected}"\n\nContext from the book:\n{context}\n\nQuestion: {state["question"]}'
         else:
             context = build_context_string(chunks)
             user_prompt = f'Context from the book:\n{context}\n\nQuestion: {state["question"]}'
@@ -542,6 +628,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     graph.add_node("context", context_node)
     graph.add_node("lookup", lookup_node)
     graph.add_node("analysis", analysis_node)
+    graph.add_node("rerank", rerank_node)
     graph.add_node("generate", generate_node)
     graph.add_node("log", log_node)
 
@@ -555,8 +642,9 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     })
 
     for node in ["vocabulary", "context", "lookup", "analysis"]:
-        graph.add_edge(node, "generate")
+        graph.add_edge(node, "rerank")
 
+    graph.add_edge("rerank", "generate")
     graph.add_edge("generate", "log")
     graph.add_edge("log", END)
 
