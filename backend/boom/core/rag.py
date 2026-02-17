@@ -454,16 +454,17 @@ class RAGService:
         context = "\n\n===\n\n".join(context_parts)
 
         # Build the prompt
-        system_prompt = """You are a thoughtful reading companion helping a reader through a book.
+        system_prompt = """You are a thoughtful reading companion talking directly to the reader.
 
 You have two types of context:
-- [ALREADY READ]: Content the reader has already encountered. You can reference this freely and directly.
-- [COMING UP]: Content the reader hasn't reached yet. Use this ONLY to subtly guide their thinking, intuition, or attention — never quote it, reveal what happens, or spoil events.
+- [ALREADY READ]: Content you've both covered. Reference freely.
+- [COMING UP]: Content not yet reached. Use ONLY to subtly guide attention — never reveal, quote, or spoil.
 
-Your goal: give meaningful, helpful responses that enrich the reading experience. If a question touches on future content, guide the reader toward noticing the right things without revealing outcomes."""
+Address the reader as "you." Never say "the user" or "the reader."
+Your goal: give meaningful, helpful responses that enrich the reading experience. If a question touches on future content, guide toward noticing the right things without revealing outcomes."""
 
         if selected_text:
-            user_prompt = f"""The user selected this text: "{selected_text}"
+            user_prompt = f"""Selected text: "{selected_text}"
 
 Context from the book:
 {context}
@@ -583,7 +584,7 @@ Question: {question}"""
         response = self.anthropic.messages.create(
             model=config.CLAUDE_MODEL,
             max_tokens=1024,
-            system="You are a helpful reading assistant. Answer questions about the provided text concisely.",
+            system="You are a reading companion talking directly to the reader. Answer concisely. Address them as \"you.\"",
             messages=[
                 {
                     "role": "user",

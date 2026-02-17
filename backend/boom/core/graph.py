@@ -544,11 +544,11 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         system_prompt = SYSTEM_PROMPTS.get(q_type, SYSTEM_PROMPTS["context"])
 
         if not chunks:
-            user_prompt = f'The user selected: "{selected}"\n\nQuestion: {state["question"]}'
+            user_prompt = f'Selected text: "{selected}"\n\nQuestion: {state["question"]}'
             logger.info("  No chunks — generating from selected text only")
         elif selected:
             context = build_context_string(chunks)
-            user_prompt = f'The user selected this text: "{selected}"\n\nContext from the book:\n{context}\n\nQuestion: {state["question"]}'
+            user_prompt = f'Selected text: "{selected}"\n\nContext from the book:\n{context}\n\nQuestion: {state["question"]}'
         else:
             context = build_context_string(chunks)
             user_prompt = f'Context from the book:\n{context}\n\nQuestion: {state["question"]}'
