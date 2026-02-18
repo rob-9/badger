@@ -98,76 +98,109 @@ export function queryBookStream(
 ): { abort: () => void } {
   const controller = new AbortController()
 
-  const run = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/rag/query/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          book_id: params.bookId,
-          question: params.question,
-          selected_text: params.selectedText,
-          use_rag: params.useRag ?? !!params.bookId,
-          reader_position: params.readerPosition,
-        }),
-        signal: controller.signal,
-      })
+  const requestBody = {
+    book_id: params.bookId,
+    question: params.question,
+    selected_text: params.selectedText,
+    use_rag: params.useRag ?? !!params.bookId,
+    reader_position: params.readerPosition,
+  }
 
-      if (!response.ok) {
-        const msg = await parseErrorResponse(response, 'Failed to query book')
-        callbacks.onError?.(msg)
-        return
-      }
+  const runStream = async (): Promise<boolean> => {
+    let receivedTokens = false
 
-      const reader = response.body!.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let currentEvent = ''
+    const response = await fetch(`${API_URL}/api/rag/query/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    })
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+    if (!response.ok) throw new Error(await parseErrorResponse(response, 'Stream failed'))
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop()! // Keep incomplete line in buffer
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let currentEvent = ''
 
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7)
-          } else if (line.startsWith('data: ') && currentEvent) {
-            const data = line.slice(6)
-            try {
-              const parsed = JSON.parse(data)
-              switch (currentEvent) {
-                case 'status':
-                  callbacks.onStatus?.(parsed.stage)
-                  break
-                case 'token':
-                  callbacks.onToken?.(parsed.text)
-                  break
-                case 'sources':
-                  callbacks.onSources?.(parsed)
-                  break
-                case 'done':
-                  callbacks.onDone?.()
-                  break
-                case 'error':
-                  callbacks.onError?.(parsed.message)
-                  break
-              }
-            } catch {
-              // Skip unparseable data lines
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop()!
+
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7)
+        } else if (line.startsWith('data: ') && currentEvent) {
+          const data = line.slice(6)
+          try {
+            const parsed = JSON.parse(data)
+            switch (currentEvent) {
+              case 'status':
+                callbacks.onStatus?.(parsed.stage)
+                break
+              case 'token':
+                receivedTokens = true
+                callbacks.onToken?.(parsed.text)
+                break
+              case 'sources':
+                callbacks.onSources?.(parsed)
+                break
+              case 'done':
+                callbacks.onDone?.()
+                break
+              case 'error':
+                callbacks.onError?.(parsed.message)
+                break
             }
-            currentEvent = ''
-          } else if (line === '') {
-            currentEvent = ''
+          } catch {
+            // Skip unparseable data lines
           }
+          currentEvent = ''
+        } else if (line === '') {
+          currentEvent = ''
         }
       }
+    }
+
+    return receivedTokens
+  }
+
+  const fallbackToQuery = async () => {
+    callbacks.onStatus?.('generating')
+    const response = await fetch(`${API_URL}/api/rag/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      callbacks.onError?.(await parseErrorResponse(response, 'Failed to query book'))
+      return
+    }
+
+    const data = await response.json()
+    if (data.sources) callbacks.onSources?.(data.sources)
+    callbacks.onToken?.(data.answer)
+    callbacks.onDone?.()
+  }
+
+  const run = async () => {
+    try {
+      await runStream()
     } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        callbacks.onError?.(error.message || 'Stream failed')
+      if (error.name === 'AbortError') return
+      // Stream failed before any tokens arrived — fall back to non-streaming
+      try {
+        await fallbackToQuery()
+      } catch (fallbackError: any) {
+        if (fallbackError.name !== 'AbortError') {
+          callbacks.onError?.(fallbackError.message || 'Request failed')
+        }
       }
     }
   }
