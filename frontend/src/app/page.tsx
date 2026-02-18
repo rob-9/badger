@@ -10,8 +10,15 @@ import QuestionPopup from '@/components/QuestionPopup'
 import ChatPanel, { type ChatMessage } from '@/components/ChatPanel'
 import Toast from '@/components/Toast'
 import { addBook, getBookData, getBookHistory, removeBook, type BookMetadata } from '@/lib/bookStorage'
-import { indexBook, isBookIndexed, queryBook } from '@/lib/api'
+import { indexBook, isBookIndexed, queryBookStream } from '@/lib/api'
 import { extractCover, extractText, extractStructuredText } from '@/lib/parseEpub'
+
+const STATUS_LABELS: Record<string, string> = {
+  classifying: 'Classifying question...',
+  retrieving: 'Retrieving context...',
+  reranking: 'Reranking results...',
+  generating: 'Generating answer...',
+}
 
 export default function Home() {
   const [document, setDocument] = useState<string | null>(null)
@@ -34,6 +41,8 @@ export default function Home() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [isChatLoading, setIsChatLoading] = useState(false)
+  const [loadingStatus, setLoadingStatus] = useState('')
+  const streamAbortRef = useRef<(() => void) | null>(null)
 
   // Loading transition state
   const [isLoadingBook, setIsLoadingBook] = useState(false)
@@ -191,88 +200,82 @@ export default function Home() {
     }
   }, [selection])
 
-  const handleQuestionSubmit = useCallback(async (question: string, context: string) => {
+  const startStreaming = useCallback((
+    params: Parameters<typeof queryBookStream>[0],
+    assistantId: string,
+  ) => {
+    setIsChatLoading(true)
+    setLoadingStatus('Classifying question...')
+
+    const handle = queryBookStream(params, {
+      onStatus: (stage) => {
+        setLoadingStatus(STATUS_LABELS[stage] || stage)
+      },
+      onToken: (text) => {
+        setChatMessages(prev => {
+          const last = prev[prev.length - 1]
+          if (last?.id === assistantId) {
+            return [...prev.slice(0, -1), { ...last, content: last.content + text }]
+          }
+          return [...prev, { id: assistantId, role: 'assistant' as const, content: text }]
+        })
+      },
+      onDone: () => {
+        setIsChatLoading(false)
+        setLoadingStatus('')
+        streamAbortRef.current = null
+      },
+      onError: (error) => {
+        console.error('[App] Stream error:', error)
+        setChatMessages(prev => {
+          const last = prev[prev.length - 1]
+          if (last?.id === assistantId && last.content) return prev
+          return [...prev, {
+            id: assistantId,
+            role: 'assistant' as const,
+            content: 'Sorry, I encountered an error processing your question. Please try again.',
+          }]
+        })
+        setIsChatLoading(false)
+        setLoadingStatus('')
+        streamAbortRef.current = null
+      },
+    })
+    streamAbortRef.current = handle.abort
+  }, [])
+
+  const handleQuestionSubmit = useCallback((question: string, context: string) => {
     setSelection(null)
     setIsChatOpen(true)
+    streamAbortRef.current?.()
 
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: question,
-      context,
-    }
+    const userMessage: ChatMessage = { id: Date.now().toString(), role: 'user', content: question, context }
+    const assistantId = (Date.now() + 1).toString()
     setChatMessages(prev => [...prev, userMessage])
 
-    setIsChatLoading(true)
-    try {
-      console.log('[App] Querying with RAG:', { bookId, question, hasContext: !!context })
+    startStreaming({
+      bookId: bookId || undefined,
+      question,
+      selectedText: context,
+      useRag: !!bookId,
+      readerPosition,
+    }, assistantId)
+  }, [bookId, readerPosition, startStreaming])
 
-      const data = await queryBook({
-        bookId: bookId || undefined,
-        question,
-        selectedText: context,
-        useRag: !!bookId,
-        readerPosition
-      })
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.answer,
-      }
-      setChatMessages(prev => [...prev, assistantMessage])
+  const handleChatMessage = useCallback((message: string) => {
+    streamAbortRef.current?.()
 
-      console.log('[App] Got answer from RAG')
-    } catch (error) {
-      console.error('[App] Failed to query:', error)
-      const errorMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: 'Sorry, I encountered an error processing your question. Please try again.',
-      }
-      setChatMessages(prev => [...prev, errorMessage])
-    } finally {
-      setIsChatLoading(false)
-    }
-  }, [bookId, readerPosition])
-
-  const handleChatMessage = useCallback(async (message: string) => {
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: message,
-    }
+    const userMessage: ChatMessage = { id: Date.now().toString(), role: 'user', content: message }
+    const assistantId = (Date.now() + 1).toString()
     setChatMessages(prev => [...prev, userMessage])
 
-    setIsChatLoading(true)
-    try {
-      console.log('[App] Follow-up query with RAG:', { bookId, message })
-
-      const data = await queryBook({
-        bookId: bookId || undefined,
-        question: message,
-        useRag: !!bookId,
-        readerPosition
-      })
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.answer,
-      }
-      setChatMessages(prev => [...prev, assistantMessage])
-
-      console.log('[App] Got follow-up answer from RAG')
-    } catch (error) {
-      console.error('[App] Failed to query:', error)
-      const errorMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: 'Sorry, I encountered an error processing your question. Please try again.',
-      }
-      setChatMessages(prev => [...prev, errorMessage])
-    } finally {
-      setIsChatLoading(false)
-    }
-  }, [bookId, readerPosition])
+    startStreaming({
+      bookId: bookId || undefined,
+      question: message,
+      useRag: !!bookId,
+      readerPosition,
+    }, assistantId)
+  }, [bookId, readerPosition, startStreaming])
 
   if (!historyLoaded && !document) {
     return <div className="h-screen bg-[#14120b]" />
@@ -324,6 +327,7 @@ export default function Home() {
               <ChatPanel
                 messages={chatMessages}
                 isLoading={isChatLoading}
+                loadingStatus={loadingStatus}
                 onSendMessage={handleChatMessage}
                 onClose={() => setIsChatOpen(false)}
               />

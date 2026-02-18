@@ -35,6 +35,47 @@ class FakeMessageResponse:
             self.usage = FakeUsage()
 
 
+class FakeAsyncStream:
+    """Mock for AsyncAnthropic messages.stream() context manager."""
+
+    def __init__(self, texts):
+        self._texts = texts
+        self._final = FakeMessageResponse(
+            content=[FakeContentBlock(text="".join(texts))]
+        )
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+    @property
+    def text_stream(self):
+        return self._async_iter()
+
+    async def _async_iter(self):
+        for text in self._texts:
+            yield text
+
+    async def get_final_message(self):
+        return self._final
+
+
+def parse_sse(text: str) -> list[dict]:
+    """Parse SSE text into list of {event, data} dicts."""
+    events = []
+    current_event = ""
+    for line in text.split("\n"):
+        if line.startswith("event: "):
+            current_event = line[7:]
+        elif line.startswith("data: ") and current_event:
+            data = json.loads(line[6:])
+            events.append({"event": current_event, "data": data})
+            current_event = ""
+    return events
+
+
 # ── Test client setup ─────────────────────────────────────────────────
 
 
@@ -61,27 +102,55 @@ def mock_services():
         )]
     )
 
+    mock_async_anthropic = MagicMock()
+    mock_async_anthropic.messages.stream.return_value = FakeAsyncStream(
+        ["Test ", "streaming ", "answer"]
+    )
+
     mock_graph = AsyncMock()
     mock_graph.ainvoke.return_value = {
         "answer": "RAG answer",
         "sources": [{"text": "source...", "score": 0.9, "chunk_index": 0}],
     }
 
+    async def mock_pre_generate(params):
+        yield "classifying"
+        yield "retrieving"
+        yield "reranking"
+        yield {
+            "question": params["question"],
+            "selected_text": params.get("selected_text"),
+            "reader_position": params.get("reader_position", 0),
+            "book_id": params["book_id"],
+            "question_type": "context",
+            "chunks": [
+                {"text": "chunk text from book", "label": "PAST", "chunk_index": 0, "score": 0.9},
+            ],
+            "total_chunks": 100,
+            "classify_tokens_in": 50,
+            "classify_tokens_out": 10,
+        }
+
     # Inject mocks
     server_mod.rag_service = mock_rag
     server_mod.anthropic_client = mock_anthropic
+    server_mod.async_anthropic_client = mock_async_anthropic
     server_mod.qa_graph = mock_graph
+    server_mod.qa_run_pre_generate = mock_pre_generate
 
     yield {
         "rag": mock_rag,
         "anthropic": mock_anthropic,
+        "async_anthropic": mock_async_anthropic,
         "graph": mock_graph,
     }
 
     # Cleanup
     server_mod.rag_service = None
     server_mod.anthropic_client = None
+    server_mod.async_anthropic_client = None
     server_mod.qa_graph = None
+    server_mod.qa_run_pre_generate = None
 
 
 @pytest.fixture
@@ -232,6 +301,98 @@ class TestQueryEndpoint:
             json={"book_id": "b1", "question": "What?"},
         )
         assert resp.status_code == 500
+
+
+# ── Stream endpoint ───────────────────────────────────────────────────
+
+
+class TestStreamEndpoint:
+    def test_rag_stream_returns_sse(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query/stream",
+            json={"book_id": "b1", "question": "What happens?", "use_rag": True},
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+
+    def test_rag_stream_has_all_events(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query/stream",
+            json={"book_id": "b1", "question": "What happens?", "use_rag": True},
+        )
+        events = parse_sse(resp.text)
+        event_types = [e["event"] for e in events]
+        assert "status" in event_types
+        assert "sources" in event_types
+        assert "token" in event_types
+        assert "done" in event_types
+
+    def test_rag_stream_status_stages(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query/stream",
+            json={"book_id": "b1", "question": "What?", "use_rag": True},
+        )
+        events = parse_sse(resp.text)
+        stages = [e["data"]["stage"] for e in events if e["event"] == "status"]
+        assert stages == ["classifying", "retrieving", "reranking"]
+
+    def test_rag_stream_tokens_concatenate(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query/stream",
+            json={"book_id": "b1", "question": "What?", "use_rag": True},
+        )
+        events = parse_sse(resp.text)
+        tokens = [e["data"]["text"] for e in events if e["event"] == "token"]
+        assert "".join(tokens) == "Test streaming answer"
+
+    def test_rag_stream_sources_present(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query/stream",
+            json={"book_id": "b1", "question": "What?", "use_rag": True},
+        )
+        events = parse_sse(resp.text)
+        sources_events = [e for e in events if e["event"] == "sources"]
+        assert len(sources_events) == 1
+        assert len(sources_events[0]["data"]) == 1  # 1 chunk from mock
+
+    def test_simple_stream(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query/stream",
+            json={"question": "What does this mean?", "selected_text": "passage", "use_rag": False},
+        )
+        assert resp.status_code == 200
+        events = parse_sse(resp.text)
+        event_types = [e["event"] for e in events]
+        assert "status" in event_types
+        assert "token" in event_types
+        assert "done" in event_types
+        # Simple path should not have sources or classifying/retrieving stages
+        assert "sources" not in event_types
+        stages = [e["data"]["stage"] for e in events if e["event"] == "status"]
+        assert stages == ["generating"]
+
+    def test_stream_no_book_no_text_returns_error(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query/stream",
+            json={"question": "What?", "use_rag": False},
+        )
+        events = parse_sse(resp.text)
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1
+        assert "message" in error_events[0]["data"]
+
+    def test_stream_503_when_not_initialized(self):
+        import boom.api.server as server_mod
+
+        server_mod.rag_service = None
+        from boom.api.server import app
+
+        c = TestClient(app, raise_server_exceptions=False)
+        resp = c.post(
+            "/api/rag/query/stream",
+            json={"book_id": "b1", "question": "What?"},
+        )
+        assert resp.status_code == 503
 
 
 # ── Agent endpoint ────────────────────────────────────────────────────

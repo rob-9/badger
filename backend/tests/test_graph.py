@@ -9,9 +9,12 @@ from boom.core.graph import (
     label_chunks,
     build_query,
     build_context_string,
+    prepare_generate,
+    log_query,
     _build_log_entry,
     VALID_TYPES,
 )
+from boom.core.prompts import SYSTEM_PROMPTS
 from tests.conftest import make_chunk
 
 
@@ -123,12 +126,12 @@ class TestBuildContextString:
         chunks = [{"text": "Past text.", "label": "PAST", "chunk_index": 0, "score": 0.9}]
         ctx = build_context_string(chunks)
         assert "[ALREADY READ]" in ctx
-        assert "[COMING UP" not in ctx
+        assert "[COMING UP]" not in ctx
 
     def test_ahead_only(self):
         chunks = [{"text": "Future text.", "label": "AHEAD", "chunk_index": 5, "score": 0.8}]
         ctx = build_context_string(chunks)
-        assert "[COMING UP" in ctx
+        assert "[COMING UP]" in ctx
         assert "[ALREADY READ]" not in ctx
 
     def test_mixed(self):
@@ -138,20 +141,20 @@ class TestBuildContextString:
         ]
         ctx = build_context_string(chunks)
         assert "[ALREADY READ]" in ctx
-        assert "[COMING UP" in ctx
-        assert "===" in ctx  # separator between sections
+        assert "[COMING UP]" in ctx
+        assert "===" in ctx
 
     def test_empty_chunks(self):
         assert build_context_string([]) == ""
 
-    def test_sources_numbered(self):
+    def test_passages_numbered(self):
         chunks = [
             {"text": "A", "label": "PAST", "chunk_index": 0, "score": 0.9},
             {"text": "B", "label": "PAST", "chunk_index": 1, "score": 0.8},
         ]
         ctx = build_context_string(chunks)
-        assert "[Source 1]" in ctx
-        assert "[Source 2]" in ctx
+        assert "[Passage 1]" in ctx
+        assert "[Passage 2]" in ctx
 
 
 # ── _build_log_entry ──────────────────────────────────────────────────
@@ -235,6 +238,96 @@ class TestLabelAndLog:
 
 
 # ── _write_readable_log ─────────────────────────────────────────────
+
+
+class TestPrepareGenerate:
+    def test_with_chunks_and_selected_text(self):
+        state = {
+            "question": "What does this mean?",
+            "question_type": "context",
+            "selected_text": "some passage",
+            "chunks": [
+                {"text": "chunk text", "label": "PAST", "chunk_index": 0, "score": 0.9},
+            ],
+        }
+        result = prepare_generate(state)
+        assert result["system_prompt"] == SYSTEM_PROMPTS["context"]
+        assert 'Selected text: "some passage"' in result["user_prompt"]
+        assert "Context from the book:" in result["user_prompt"]
+        assert "What does this mean?" in result["user_prompt"]
+        assert len(result["sources"]) == 1
+        assert result["sources"][0]["chunk_index"] == 0
+
+    def test_with_chunks_no_selected_text(self):
+        state = {
+            "question": "What happens next?",
+            "question_type": "lookup",
+            "chunks": [
+                {"text": "chunk", "label": "PAST", "chunk_index": 0, "score": 0.9},
+            ],
+        }
+        result = prepare_generate(state)
+        assert result["system_prompt"] == SYSTEM_PROMPTS["lookup"]
+        assert "Context from the book:" in result["user_prompt"]
+        assert "Selected text" not in result["user_prompt"]
+
+    def test_no_chunks(self):
+        state = {
+            "question": "What?",
+            "question_type": "vocabulary",
+            "selected_text": "word",
+            "chunks": [],
+        }
+        result = prepare_generate(state)
+        assert 'Selected text: "word"' in result["user_prompt"]
+        assert "Context from the book" not in result["user_prompt"]
+        assert result["sources"] == []
+
+    def test_defaults_to_context_type(self):
+        state = {"question": "What?", "chunks": []}
+        result = prepare_generate(state)
+        assert result["system_prompt"] == SYSTEM_PROMPTS["context"]
+
+    def test_source_truncation(self):
+        long_text = "x" * 500
+        state = {
+            "question": "What?",
+            "chunks": [
+                {"text": long_text, "label": "PAST", "chunk_index": 0, "score": 0.9},
+            ],
+        }
+        result = prepare_generate(state)
+        assert result["sources"][0]["text"] == "x" * 200 + "..."
+        assert result["sources"][0]["full_text"] == long_text
+
+
+class TestLogQuery:
+    def test_writes_jsonl_and_log(self, tmp_path):
+        import boom.core.graph as graph_mod
+
+        original_dir = graph_mod.LOG_DIR
+        graph_mod.LOG_DIR = tmp_path
+        try:
+            state = {
+                "question": "Test question?",
+                "book_id": "b1",
+                "chunks": [],
+                "reader_position": 0.5,
+                "total_chunks": 100,
+            }
+            log_query(state)
+            assert (tmp_path / "queries.jsonl").exists()
+            assert (tmp_path / "queries.log").exists()
+
+            jsonl = (tmp_path / "queries.jsonl").read_text()
+            entry = json.loads(jsonl.strip())
+            assert entry["question"] == "Test question?"
+            assert entry["book_id"] == "b1"
+
+            log_text = (tmp_path / "queries.log").read_text()
+            assert "QUERY @" in log_text
+        finally:
+            graph_mod.LOG_DIR = original_dir
 
 
 class TestWriteReadableLog:

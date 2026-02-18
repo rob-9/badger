@@ -48,19 +48,19 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
   }
 
   return (
-    <div className="fixed right-0 top-[69px] h-[calc(100vh-69px)] w-[400px] max-[768px]:w-full max-[768px]:max-w-[90vw] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-[#2a2a2a]">
-        <div className="flex items-center gap-2.5">
-          <BookOpen className="w-4 h-4 text-gray-400 dark:text-[#666]" />
-          <h2 className="font-medium text-gray-800 dark:text-[#e0e0e0] text-sm">Agent</h2>
+    <div className="fixed right-0 top-0 h-full w-[400px] max-[768px]:w-full max-[768px]:max-w-[90vw] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
+      {/* Header — matches main navbar height (px-6 py-4) */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-[#2a2a2a]">
+        <div className="flex items-center gap-3">
+          <BookOpen className="w-5 h-5 text-gray-400 dark:text-[#666]" />
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-[#e0e0e0]">Agent</h2>
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa]"
+          className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa]"
           aria-label="Close chat panel"
         >
-          <X className="w-4 h-4" />
+          <X className="w-5 h-5" />
         </button>
       </div>
 

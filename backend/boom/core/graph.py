@@ -129,7 +129,7 @@ def build_context_string(chunks: list[dict]) -> str:
     """Build context string with PAST/AHEAD labels from labeled chunks."""
     def format_group(group: list[dict]) -> str:
         return "\n\n---\n\n".join(
-            f"[Source {i + 1}]\n{c['text']}" for i, c in enumerate(group)
+            f"[Passage {i + 1}]\n{c['text']}" for i, c in enumerate(group)
         )
 
     past = [c for c in chunks if c["label"] == "PAST"]
@@ -139,9 +139,43 @@ def build_context_string(chunks: list[dict]) -> str:
     if past:
         parts.append(f"[ALREADY READ]\n{format_group(past)}")
     if ahead:
-        parts.append(f"[COMING UP - guide only, do not spoil]\n{format_group(ahead)}")
+        parts.append(f"[COMING UP]\n{format_group(ahead)}")
 
     return "\n\n===\n\n".join(parts)
+
+
+def prepare_generate(state: QAState) -> dict:
+    """Build prompts and sources for generation without calling the LLM."""
+    q_type = state.get("question_type", "context")
+    chunks = state.get("chunks", [])
+    selected = state.get("selected_text") or ""
+
+    system_prompt = SYSTEM_PROMPTS.get(q_type, SYSTEM_PROMPTS["context"])
+
+    if not chunks:
+        user_prompt = f'Selected text: "{selected}"\n\nQuestion: {state["question"]}'
+    elif selected:
+        context = build_context_string(chunks)
+        user_prompt = f'Selected text: "{selected}"\n\nContext from the book:\n{context}\n\nQuestion: {state["question"]}'
+    else:
+        context = build_context_string(chunks)
+        user_prompt = f'Context from the book:\n{context}\n\nQuestion: {state["question"]}'
+
+    sources = [
+        {
+            "text": c["text"][:200] + "...",
+            "full_text": c["text"],
+            "score": c["score"],
+            "chunk_index": c["chunk_index"],
+        }
+        for c in chunks
+    ]
+
+    return {
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "sources": sources,
+    }
 
 
 # === Logging ===
@@ -282,9 +316,29 @@ def _write_readable_log(state: QAState, log_entry: dict):
         f.write("\n" + "═" * W + "\n\n")
 
 
+def log_query(state: QAState):
+    """Log a completed query to JSONL and human-readable log files."""
+    logger.info("── LOG %s", LOG_SEPARATOR[6:])
+    logger.info("  Writing to queries.jsonl + queries.log")
+
+    log_entry = _build_log_entry(state)
+
+    with open(LOG_DIR / "queries.jsonl", "a") as f:
+        f.write(json.dumps(log_entry) + "\n")
+
+    _write_readable_log(state, log_entry)
+
+    logger.info(
+        "  Done — classify: %d/%d tokens, generate: %d/%d tokens",
+        state.get("classify_tokens_in", 0), state.get("classify_tokens_out", 0),
+        state.get("gen_tokens_in", 0), state.get("gen_tokens_out", 0),
+    )
+    logger.info(LOG_SEPARATOR)
+
+
 # === Graph builder ===
 
-def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_client) -> StateGraph:
+def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_client) -> dict:
     """Build and compile the QA LangGraph."""
 
     def _embed_query(text: str) -> list[float]:
@@ -534,24 +588,18 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         """Generate answer with type-specific system prompt."""
         q_type = state.get("question_type", "context")
         chunks = state.get("chunks", [])
-        selected = state.get("selected_text") or ""
 
         logger.info("── GENERATE %s", LOG_SEPARATOR[11:])
         logger.info("  Type:   %s", q_type)
         logger.info("  Model:  %s", config.CLAUDE_MODEL)
         logger.info("  Chunks: %d", len(chunks))
 
-        system_prompt = SYSTEM_PROMPTS.get(q_type, SYSTEM_PROMPTS["context"])
+        prepared = prepare_generate(state)
+        system_prompt = prepared["system_prompt"]
+        user_prompt = prepared["user_prompt"]
 
         if not chunks:
-            user_prompt = f'Selected text: "{selected}"\n\nQuestion: {state["question"]}'
             logger.info("  No chunks — generating from selected text only")
-        elif selected:
-            context = build_context_string(chunks)
-            user_prompt = f'Selected text: "{selected}"\n\nContext from the book:\n{context}\n\nQuestion: {state["question"]}'
-        else:
-            context = build_context_string(chunks)
-            user_prompt = f'Context from the book:\n{context}\n\nQuestion: {state["question"]}'
 
         logger.info("  System prompt (%d chars): %s…", len(system_prompt), system_prompt[:150])
         logger.info("  User prompt (%d chars):   %s…", len(user_prompt), user_prompt[:150])
@@ -570,19 +618,9 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info("  Answer (%d chars): %s…", len(answer), answer[:200])
         logger.info(LOG_SEPARATOR)
 
-        sources = [
-            {
-                "text": c["text"][:200] + "...",
-                "full_text": c["text"],
-                "score": c["score"],
-                "chunk_index": c["chunk_index"],
-            }
-            for c in chunks
-        ]
-
         return {
             "answer": answer,
-            "sources": sources,
+            "sources": prepared["sources"],
             "gen_model": response.model,
             "gen_tokens_in": response.usage.input_tokens,
             "gen_tokens_out": response.usage.output_tokens,
@@ -595,29 +633,40 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
 
     async def log_node(state: QAState) -> dict:
         """Log query to JSONL and human-readable log files."""
-        logger.info("── LOG %s", LOG_SEPARATOR[6:])
-        logger.info("  Writing to queries.jsonl + queries.log")
-
-        log_entry = _build_log_entry(state)
-
-        with open(LOG_DIR / "queries.jsonl", "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
-
-        _write_readable_log(state, log_entry)
-
-        logger.info(
-            "  Done — classify: %d/%d tokens, generate: %d/%d tokens",
-            state.get("classify_tokens_in", 0), state.get("classify_tokens_out", 0),
-            state.get("gen_tokens_in", 0), state.get("gen_tokens_out", 0),
-        )
-        logger.info(LOG_SEPARATOR)
-
+        log_query(state)
         return {}
 
     # --- Routing ---
 
     def route_by_type(state: QAState) -> str:
         return state.get("question_type", "context")
+
+    # --- Streaming helpers ---
+
+    async def run_pre_generate(params):
+        """Run pre-generation pipeline, yielding stage names then final state."""
+        state = dict(params)
+
+        yield "classifying"
+        result = await classify_node(state)
+        state.update(result)
+
+        yield "retrieving"
+        q_type = state.get("question_type", "context")
+        retrieval_fns = {
+            "vocabulary": vocabulary_node,
+            "context": context_node,
+            "lookup": lookup_node,
+            "analysis": analysis_node,
+        }
+        result = await retrieval_fns.get(q_type, context_node)(state)
+        state.update(result)
+
+        yield "reranking"
+        result = await rerank_node(state)
+        state.update(result)
+
+        yield state
 
     # --- Build graph ---
 
@@ -648,4 +697,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     graph.add_edge("generate", "log")
     graph.add_edge("log", END)
 
-    return graph.compile()
+    return {
+        "graph": graph.compile(),
+        "run_pre_generate": run_pre_generate,
+    }

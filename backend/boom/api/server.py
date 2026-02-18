@@ -17,27 +17,29 @@ from dotenv import load_dotenv
 load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, model_validator
 from typing import Optional
-from anthropic import Anthropic
+from anthropic import Anthropic, AsyncAnthropic
 
 from boom import config
 from boom.core.rag import RAGService
-from boom.core.graph import build_qa_graph
+from boom.core.graph import build_qa_graph, prepare_generate, log_query
 
 logger = logging.getLogger(__name__)
 
 # Global services
 rag_service: Optional[RAGService] = None
 anthropic_client: Optional[Anthropic] = None
+async_anthropic_client: Optional[AsyncAnthropic] = None
 qa_graph = None
+qa_run_pre_generate = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize services on startup."""
-    global rag_service, anthropic_client, qa_graph
+    global rag_service, anthropic_client, async_anthropic_client, qa_graph, qa_run_pre_generate
 
     logging.basicConfig(
         level=logging.INFO,
@@ -49,12 +51,15 @@ async def lifespan(app: FastAPI):
 
     logger.info("Initializing services...")
     anthropic_client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    async_anthropic_client = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
     rag_service = RAGService(storage_dir=config.VECTOR_STORAGE_DIR)
-    qa_graph = build_qa_graph(
+    qa_pipeline = build_qa_graph(
         anthropic=anthropic_client,
         vector_store=rag_service.vector_store,
         voyage_client=rag_service.voyage,
     )
+    qa_graph = qa_pipeline["graph"]
+    qa_run_pre_generate = qa_pipeline["run_pre_generate"]
     logger.info("Server ready (LangGraph pipeline active)")
     yield
     logger.info("Shutting down")
@@ -169,6 +174,98 @@ async def query_book(request: QueryBookRequest):
     except Exception as e:
         logger.error("Error querying book: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rag/query/stream")
+async def query_book_stream(request: QueryBookRequest):
+    """Stream a RAG query response via Server-Sent Events."""
+    if not rag_service:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    async def event_generator():
+        try:
+            if request.use_rag and request.book_id:
+                params = {
+                    "question": request.question,
+                    "selected_text": request.selected_text,
+                    "reader_position": request.reader_position or 0.0,
+                    "book_id": request.book_id,
+                }
+
+                # Run pre-generation pipeline with status events
+                state = None
+                async for item in qa_run_pre_generate(params):
+                    if isinstance(item, str):
+                        yield f"event: status\ndata: {json.dumps({'stage': item})}\n\n"
+                    else:
+                        state = item
+
+                # Prepare generation prompts
+                prepared = prepare_generate(state)
+                yield f"event: sources\ndata: {json.dumps(prepared['sources'])}\n\n"
+
+                # Stream tokens
+                full_answer = []
+                async with async_anthropic_client.messages.stream(
+                    model=config.CLAUDE_MODEL,
+                    max_tokens=1024,
+                    system=prepared["system_prompt"],
+                    messages=[{"role": "user", "content": prepared["user_prompt"]}],
+                ) as stream:
+                    async for text in stream.text_stream:
+                        full_answer.append(text)
+                        yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+
+                    final_message = await stream.get_final_message()
+
+                yield "event: done\ndata: {}\n\n"
+
+                # Log after streaming completes
+                try:
+                    state.update({
+                        "answer": "".join(full_answer),
+                        "sources": prepared["sources"],
+                        "gen_model": final_message.model,
+                        "gen_tokens_in": final_message.usage.input_tokens,
+                        "gen_tokens_out": final_message.usage.output_tokens,
+                        "gen_stop_reason": final_message.stop_reason,
+                        "gen_system_prompt": prepared["system_prompt"],
+                        "gen_user_prompt": prepared["user_prompt"],
+                    })
+                    log_query(state)
+                except Exception:
+                    logger.warning("Failed to log streaming query", exc_info=True)
+
+            elif request.selected_text:
+                # Simple path: stream without RAG pipeline
+                yield f"event: status\ndata: {json.dumps({'stage': 'generating'})}\n\n"
+
+                system = 'You are a reading companion. Be direct and concise — answer the question, then stop. Address the reader as "you."'
+                user_prompt = f'Selected text: "{request.selected_text}"\n\nQuestion: {request.question}'
+
+                async with async_anthropic_client.messages.stream(
+                    model=config.CLAUDE_MODEL,
+                    max_tokens=1024,
+                    system=system,
+                    messages=[{"role": "user", "content": user_prompt}],
+                ) as stream:
+                    async for text in stream.text_stream:
+                        yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
+
+                yield "event: done\ndata: {}\n\n"
+
+            else:
+                yield f"event: error\ndata: {json.dumps({'message': 'Must provide either book_id (for RAG) or selected_text'})}\n\n"
+
+        except Exception as e:
+            logger.error("Error in streaming query: %s", e)
+            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # === Agent Assistant Endpoint ===

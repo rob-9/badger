@@ -80,6 +80,103 @@ export async function queryBook(params: {
   return response.json()
 }
 
+export function queryBookStream(
+  params: {
+    bookId?: string
+    question: string
+    selectedText?: string
+    useRag?: boolean
+    readerPosition?: number
+  },
+  callbacks: {
+    onStatus?: (stage: string) => void
+    onToken?: (text: string) => void
+    onSources?: (sources: any[]) => void
+    onDone?: () => void
+    onError?: (error: string) => void
+  }
+): { abort: () => void } {
+  const controller = new AbortController()
+
+  const run = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/rag/query/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          book_id: params.bookId,
+          question: params.question,
+          selected_text: params.selectedText,
+          use_rag: params.useRag ?? !!params.bookId,
+          reader_position: params.readerPosition,
+        }),
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        const msg = await parseErrorResponse(response, 'Failed to query book')
+        callbacks.onError?.(msg)
+        return
+      }
+
+      const reader = response.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let currentEvent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop()! // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7)
+          } else if (line.startsWith('data: ') && currentEvent) {
+            const data = line.slice(6)
+            try {
+              const parsed = JSON.parse(data)
+              switch (currentEvent) {
+                case 'status':
+                  callbacks.onStatus?.(parsed.stage)
+                  break
+                case 'token':
+                  callbacks.onToken?.(parsed.text)
+                  break
+                case 'sources':
+                  callbacks.onSources?.(parsed)
+                  break
+                case 'done':
+                  callbacks.onDone?.()
+                  break
+                case 'error':
+                  callbacks.onError?.(parsed.message)
+                  break
+              }
+            } catch {
+              // Skip unparseable data lines
+            }
+            currentEvent = ''
+          } else if (line === '') {
+            currentEvent = ''
+          }
+        }
+      }
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        callbacks.onError?.(error.message || 'Stream failed')
+      }
+    }
+  }
+
+  run()
+
+  return { abort: () => controller.abort() }
+}
+
 export async function importLocalEpub(path: string): Promise<{ arrayBuffer: ArrayBuffer; filename: string }> {
   const response = await apiFetch(`${API_URL}/api/epub/import-local`, {
     method: 'POST',
