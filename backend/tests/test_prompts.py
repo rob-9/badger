@@ -28,4 +28,4 @@ class TestPrompts:
     def test_position_instructions_standalone(self):
         assert "ALREADY READ" in POSITION_INSTRUCTIONS
         assert "COMING UP" in POSITION_INSTRUCTIONS
-        assert "spoil" in POSITION_INSTRUCTIONS.lower()
+        assert "NEVER reveal" in POSITION_INSTRUCTIONS
