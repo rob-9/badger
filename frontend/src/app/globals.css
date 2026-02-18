@@ -67,10 +67,12 @@
   html {
     font-family: 'Cooper BT', Inter, system-ui, sans-serif;
     background: #14120b;
+    overscroll-behavior: none;
   }
 
   body {
     @apply bg-paper text-ink;
+    overscroll-behavior: none;
   }
 }
 

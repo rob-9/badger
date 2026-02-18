@@ -15,11 +15,12 @@ export interface ChatMessage {
 interface ChatPanelProps {
   messages: ChatMessage[]
   isLoading: boolean
+  loadingStatus?: string
   onSendMessage: (message: string) => void
   onClose: () => void
 }
 
-export default function ChatPanel({ messages, isLoading, onSendMessage, onClose }: ChatPanelProps) {
+export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -47,7 +48,7 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
   }
 
   return (
-    <div className="fixed right-0 top-0 h-full w-[400px] max-[768px]:w-full max-[768px]:max-w-[90vw] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
+    <div className="fixed right-0 top-[69px] h-[calc(100vh-69px)] w-[400px] max-[768px]:w-full max-[768px]:max-w-[90vw] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-[#2a2a2a]">
         <div className="flex items-center gap-2.5">
@@ -97,10 +98,10 @@ export default function ChatPanel({ messages, isLoading, onSendMessage, onClose 
           </div>
         ))}
 
-        {isLoading && (
+        {isLoading && (messages.length === 0 || messages[messages.length - 1].role === 'user') && (
           <div className="flex items-center gap-2 text-gray-400">
             <Loader2 className="w-4 h-4 animate-spin" />
-            <span className="text-xs">Thinking...</span>
+            <span className="text-xs">{loadingStatus || 'Thinking...'}</span>
           </div>
         )}
 

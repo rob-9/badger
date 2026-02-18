@@ -90,15 +90,18 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
   const MARGIN_GAP = 20
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
 
+  // Minimum left edge: avoid overlapping TOC sidebar (w-80 = 320px)
+  const minLeft = isMobile ? 16 : Math.max(16, pageRect.left)
+
   let left = pageRect.right + MARGIN_GAP
   if (left + POPUP_WIDTH > window.innerWidth - 16) {
     left = pageRect.left - POPUP_WIDTH - MARGIN_GAP
-    if (left < 16) {
-      // On mobile, center the popup
+    if (left < minLeft) {
       if (isMobile) {
         left = Math.max(16, (window.innerWidth - POPUP_WIDTH) / 2)
       } else {
-        left = window.innerWidth - POPUP_WIDTH - 16
+        // Center between page edges
+        left = Math.max(minLeft, pageRect.left + (pageRect.right - pageRect.left - POPUP_WIDTH) / 2)
       }
     }
   }

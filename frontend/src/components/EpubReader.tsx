@@ -65,6 +65,9 @@ export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen,
   })
   const [isDark, setIsDark] = useState(false)
 
+  // Progress
+  const [percentage, setPercentage] = useState(0)
+
   // Page transition
   const [isFlipping, setIsFlipping] = useState(false)
 
@@ -202,6 +205,9 @@ export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen,
 
         setIsReady(true)
 
+        const spineItems = (book.spine as any).spineItems || []
+        const spineLength = spineItems.length
+
         // Load table of contents
         const navigation = await book.loaded.navigation
         if (navigation?.toc) {
@@ -212,8 +218,13 @@ export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen,
           if (location.start?.cfi) {
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
           }
-          if (onLocationChange && location.start?.percentage != null) {
-            onLocationChange(location.start.percentage)
+          if (spineLength > 0 && location.start?.index != null) {
+            const displayed = location.start.displayed || {}
+            const page = displayed.page || 0
+            const sectionTotal = displayed.total || 1
+            const pct = (location.start.index + page / sectionTotal) / spineLength
+            setPercentage(pct)
+            if (onLocationChange) onLocationChange(pct)
           }
         })
 
@@ -413,7 +424,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen,
   }, [])
 
   return (
-    <div className={`min-h-screen bg-paper dark:bg-[#141414] flex flex-col transition-[margin] duration-300 ${isChatOpen ? 'min-[769px]:mr-[400px]' : ''}`}>
+    <div className={`h-screen overflow-hidden bg-paper dark:bg-[#141414] flex flex-col transition-[margin] duration-300 ${isChatOpen ? 'min-[769px]:mr-[400px]' : ''}`}>
       {/* Header */}
       <header className="bg-white/95 dark:bg-[#1e1e1e]/95 backdrop-blur border-b border-gray-200 dark:border-[#2a2a2a] px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-4">
@@ -507,8 +518,18 @@ export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen,
         </div>
       </header>
 
+      {/* Progress line */}
+      {isReady && (
+        <div className="relative h-0.5 bg-gray-200 dark:bg-[#2a2a2a] z-40">
+          <div
+            className="absolute inset-y-0 left-0 bg-accent transition-all duration-300"
+            style={{ width: `${percentage * 100}%` }}
+          />
+        </div>
+      )}
+
       {/* Table of Contents Sidebar */}
-      <div className={`fixed left-0 top-[73px] h-[calc(100vh-73px)] w-80 bg-white dark:bg-[#1e1e1e] border-r border-gray-200 dark:border-[#2a2a2a] shadow-lg z-30 overflow-y-auto transition-transform duration-300 ${
+      <div className={`fixed left-0 top-[69px] h-[calc(100vh-69px)] w-80 bg-white dark:bg-[#1e1e1e] border-r border-gray-200 dark:border-[#2a2a2a] shadow-lg z-30 overflow-y-auto transition-transform duration-300 ${
         showToc ? 'translate-x-0' : '-translate-x-full'
       }`}>
         <div className="p-4">
@@ -567,6 +588,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen,
           </>
         )}
       </div>
+
     </div>
   )
 }
