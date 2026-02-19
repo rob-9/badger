@@ -14,6 +14,7 @@ interface EpubReaderProps {
   epubData: ArrayBuffer
   fileName: string
   isIndexing?: boolean
+  isIndexed?: boolean
   isChatOpen?: boolean
   onCloseAction: () => void
   onTextSelect?: (selection: TextSelection) => void
@@ -23,7 +24,7 @@ interface EpubReaderProps {
 // Book page aspect ratio (width:height)
 const ASPECT_RATIO = 7 / 9
 
-export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen, onCloseAction, onTextSelect, onLocationChange }: EpubReaderProps) {
+export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, isChatOpen, onCloseAction, onTextSelect, onLocationChange }: EpubReaderProps) {
   // Initialize font size from localStorage
   const [fontSize, setFontSize] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -442,6 +443,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen,
               Indexing for AI...
             </span>
           )}
+          {isIndexed && !isIndexing && <ReadyBadge />}
         </div>
 
         <div className="flex items-center space-x-2">
@@ -590,6 +592,22 @@ export default function EpubReader({ epubData, fileName, isIndexing, isChatOpen,
       </div>
 
     </div>
+  )
+}
+
+// Ready badge — shows briefly after indexing completes
+function ReadyBadge() {
+  const [visible, setVisible] = useState(true)
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(false), 3000)
+    return () => clearTimeout(timer)
+  }, [])
+  if (!visible) return null
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2.5 py-1 rounded-full transition-opacity duration-500">
+      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+      Ready
+    </span>
   )
 }
 

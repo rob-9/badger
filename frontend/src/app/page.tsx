@@ -29,6 +29,7 @@ export default function Home() {
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [bookId, setBookId] = useState<string | null>(null)
   const [isIndexing, setIsIndexing] = useState(false)
+  const [isIndexed, setIsIndexed] = useState(false)
   const [readerPosition, setReaderPosition] = useState<number>(0)
 
   // View state
@@ -108,12 +109,11 @@ export default function Home() {
       // Index the book for RAG
       console.log('[App] Starting RAG indexing for book')
       setIsIndexing(true)
-      setToast({ message: 'Preparing book for AI questions...', type: 'info' })
       try {
         const structured = await extractStructuredText(arrayBuffer)
         await indexBook(id, structured)
         console.log('[App] Book indexed successfully')
-        setToast({ message: 'Book ready! Highlight text to ask questions', type: 'success' })
+        setIsIndexed(true)
       } catch (error) {
         console.error('[App] Failed to index book:', error)
         setToast({ message: 'AI features unavailable. You can still read.', type: 'error' })
@@ -176,6 +176,7 @@ export default function Home() {
     localStorage.removeItem('boom-active-book')
     setBookId(null)
     setIsIndexing(false)
+    setIsIndexed(false)
     setHistory(await getBookHistory()) // Refresh history
     // Reset chat state
     setSelection(null)
@@ -308,6 +309,7 @@ export default function Home() {
               epubData={epubData}
               fileName={fileName}
               isIndexing={isIndexing}
+              isIndexed={isIndexed}
               isChatOpen={isChatOpen}
               onCloseAction={handleBack}
               onTextSelect={handleTextSelect}

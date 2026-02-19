@@ -90,28 +90,27 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
   const MARGIN_GAP = 20
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
 
-  // Minimum left edge: avoid overlapping TOC sidebar (w-80 = 320px)
-  const minLeft = isMobile ? 16 : Math.max(16, pageRect.left)
-
+  let useBottomSheet = false
   let left = pageRect.right + MARGIN_GAP
+
   if (left + POPUP_WIDTH > window.innerWidth - 16) {
+    // Try left of book page
     left = pageRect.left - POPUP_WIDTH - MARGIN_GAP
-    if (left < minLeft) {
-      if (isMobile) {
-        left = Math.max(16, (window.innerWidth - POPUP_WIDTH) / 2)
-      } else {
-        // Center between page edges
-        left = Math.max(minLeft, pageRect.left + (pageRect.right - pageRect.left - POPUP_WIDTH) / 2)
-      }
+    if (left < 16) {
+      // No room on either side — use bottom sheet
+      useBottomSheet = true
+      left = Math.max(16, (window.innerWidth - POPUP_WIDTH) / 2)
     }
   }
 
-  const top = Math.max(80, Math.min(position.y - 60, window.innerHeight - 380))
+  const top = useBottomSheet
+    ? undefined
+    : Math.max(80, Math.min(position.y - 60, window.innerHeight - 380))
 
   return (
     <div
       ref={popupRef}
-      style={{ position: 'fixed', left, top, width: POPUP_WIDTH, zIndex: 50 }}
+      style={{ position: 'fixed', left, ...(useBottomSheet ? { bottom: 16 } : { top }), width: POPUP_WIDTH, zIndex: 50 }}
       className={`bg-white dark:bg-[#1e1e1e] rounded-2xl shadow-2xl border border-gray-100 dark:border-[#2a2a2a] overflow-hidden ${shouldClose ? 'animate-fade-scale-out' : 'animate-fade-scale-in'}`}
     >
       {/* Selected text preview */}
@@ -152,7 +151,7 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
             onKeyDown={handleKeyDown}
             placeholder="Ask anything..."
             rows={2}
-            className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-[#333] dark:bg-[#141414] dark:text-[#e0e0e0] rounded-xl focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent resize-none placeholder-gray-400 dark:placeholder-[#555]"
+            className="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-[#333] dark:bg-[#141414] dark:text-[#e0e0e0] rounded-xl focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent/50 resize-none placeholder-gray-400 dark:placeholder-[#555]"
           />
           <button
             type="submit"
