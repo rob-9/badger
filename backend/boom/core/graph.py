@@ -19,7 +19,7 @@ from anthropic import Anthropic
 from langgraph.graph import StateGraph, END
 
 from boom import config
-from .prompts import SYSTEM_PROMPTS, SANITIZE_PROMPT, CITATION_INSTRUCTIONS, EVALUATE_PROMPT
+from .prompts import SYSTEM_PROMPTS, EVALUATE_PROMPT
 from .vector_store import VectorStore, SearchResult, reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
@@ -31,10 +31,10 @@ VALID_TYPES = {"vocabulary", "context", "lookup", "analysis"}
 LOG_SEPARATOR = "──────────────────────────────────────────────"
 
 TOKEN_LIMITS = {
-    "vocabulary": 512,
-    "context": 1024,
-    "lookup": 1024,
-    "analysis": 2048,
+    "vocabulary": 256,
+    "context": 512,
+    "lookup": 512,
+    "analysis": 1024,
 }
 
 
@@ -420,9 +420,7 @@ def _write_readable_log(state: QAState, log_entry: dict):
         sanitize_count = state.get("sanitize_ahead_count", 0)
         if sanitize_count:
             section("Sanitization")
-            f.write(f"\n  Model:    {config.CLAUDE_HAIKU_MODEL}\n")
-            f.write(f"  AHEAD chunks sanitized: {sanitize_count}\n")
-            f.write(f"  Tokens:   {state.get('sanitize_tokens_in', 0)} in / {state.get('sanitize_tokens_out', 0)} out\n")
+            f.write(f"\n  AHEAD chunks dropped: {sanitize_count}\n")
 
         # LLM Input
         sys_prompt = state.get("gen_system_prompt") or ""
@@ -586,7 +584,11 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         classify_prompt = (
             f'Question: "{question}"\n'
             f'Selected text: "{selected[:200]}"\n\n'
-            f"Classify as exactly one of: vocabulary, context, lookup, analysis\n"
+            f"Classify as exactly one of:\n"
+            f"- vocabulary: The selected text IS the word/phrase to define\n"
+            f"- context: Reader wants to understand a specific passage they selected\n"
+            f"- lookup: Reader wants factual info from elsewhere in the book\n"
+            f"- analysis: Reader wants literary interpretation or thematic discussion\n\n"
             f"Extract key entities (names, terms, concepts).\n\n"
             f'Return: {{"type": "...", "entities": [...]}}'
         )
@@ -884,7 +886,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             logger.info("── RERANK (disabled, applying adaptive cutoff only) %s", LOG_SEPARATOR[50:])
             for c in chunks:
                 if c["label"] == "AHEAD":
-                    c["score"] *= 0.5
+                    c["score"] *= 0.3
             chunks.sort(key=lambda c: c["score"], reverse=True)
             cutoff = _adaptive_cutoff(chunks)
             logger.info("  Output: %d chunks", len(cutoff))
@@ -912,7 +914,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         # Penalize AHEAD chunks to reduce spoiler exposure
         for c in reranked:
             if c["label"] == "AHEAD":
-                c["score"] *= 0.5
+                c["score"] *= 0.3
         reranked.sort(key=lambda c: c["score"], reverse=True)
 
         reranked = _adaptive_cutoff(reranked)
@@ -955,7 +957,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     # --- Node: sanitize ---
 
     async def sanitize_node(state: QAState) -> dict:
-        """Replace AHEAD chunk text with spoiler-safe summaries via Haiku."""
+        """Drop AHEAD chunks to prevent spoiler leakage."""
         chunks = state.get("chunks", [])
         ahead = [c for c in chunks if c["label"] == "AHEAD"]
 
@@ -964,53 +966,18 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             return {}
 
         logger.info("── SANITIZE %s", LOG_SEPARATOR[12:])
-        logger.info("  AHEAD chunks to sanitize: %d", len(ahead))
+        logger.info("  Dropping %d AHEAD chunks (spoiler prevention)", len(ahead))
 
-        passages = "\n===\n".join(c["text"] for c in ahead)
-        user_prompt = f"Summarize each passage below. One summary per passage, separated by ===.\n\n{passages}"
+        past_only = [c for c in chunks if c["label"] == "PAST"]
 
-        try:
-            response = anthropic.messages.create(
-                model=config.CLAUDE_HAIKU_MODEL,
-                max_tokens=1024,
-                system=SANITIZE_PROMPT,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-            raw = response.content[0].text.strip()
-            summaries = [s.strip() for s in raw.split("===")]
-            tokens_in = response.usage.input_tokens
-            tokens_out = response.usage.output_tokens
-
-            logger.info("  Tokens: %d in / %d out", tokens_in, tokens_out)
-
-            # Match summaries to AHEAD chunks
-            for i, chunk in enumerate(ahead):
-                if i < len(summaries) and summaries[i]:
-                    chunk["text"] = summaries[i]
-                    logger.info("  [%d] chunk %d → %s", i + 1, chunk["chunk_index"], summaries[i][:100])
-                else:
-                    chunk["text"] = "This passage continues the narrative."
-                    logger.info("  [%d] chunk %d → (fallback)", i + 1, chunk["chunk_index"])
-
-        except Exception as e:
-            logger.warning("  Sanitization failed: %s — using fallback text", e)
-            tokens_in = 0
-            tokens_out = 0
-            for chunk in ahead:
-                chunk["text"] = "This passage continues the narrative."
-
-        # Reassemble: PAST unchanged + sanitized AHEAD
-        past = [c for c in chunks if c["label"] == "PAST"]
-        sanitized = past + ahead
-
-        logger.info("  Result: %d PAST + %d sanitized AHEAD = %d chunks", len(past), len(ahead), len(sanitized))
+        logger.info("  Result: %d PAST chunks kept, %d AHEAD dropped", len(past_only), len(ahead))
         logger.info(LOG_SEPARATOR)
 
         return {
-            "chunks": sanitized,
+            "chunks": past_only,
             "sanitize_ahead_count": len(ahead),
-            "sanitize_tokens_in": tokens_in,
-            "sanitize_tokens_out": tokens_out,
+            "sanitize_tokens_in": 0,
+            "sanitize_tokens_out": 0,
         }
 
     # --- Node: generate ---
