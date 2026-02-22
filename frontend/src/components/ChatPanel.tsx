@@ -100,6 +100,9 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
     }
   }
 
+  const lastMsg = messages[messages.length - 1]
+  const isStreaming = isLoading && lastMsg?.role === 'assistant'
+
   return (
     <div className="fixed right-0 top-0 h-full w-[400px] max-[768px]:w-full max-[768px]:max-w-[90vw] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
       {/* Header — matches main navbar height (px-6 py-4) */}
@@ -250,10 +253,19 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
           </div>
         ))}
 
-        {isLoading && (messages.length === 0 || messages[messages.length - 1].role === 'user') && (
-          <div className="flex items-center gap-2 text-gray-400">
+        {/* Pre-streaming spinner (before first token) */}
+        {isLoading && !isStreaming && (
+          <div className="flex items-center gap-2 text-gray-400" role="status" aria-live="polite">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span className="text-xs">{loadingStatus || 'Thinking...'}</span>
+          </div>
+        )}
+
+        {/* Status indicator during streaming */}
+        {isStreaming && loadingStatus && (
+          <div className="flex items-center gap-1.5 text-gray-400 dark:text-[#666]" role="status" aria-live="polite">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span className="text-[0.65rem]">{loadingStatus}</span>
           </div>
         )}
 
