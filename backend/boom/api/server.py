@@ -10,6 +10,7 @@ Simple API with three endpoints:
 import io
 import json
 import logging
+import re
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,6 +36,18 @@ async_anthropic_client: Optional[AsyncAnthropic] = None
 qa_graph = None
 qa_run_pre_generate = None
 qa_evaluate = None
+
+BOOK_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+MAX_BOOK_ID_LENGTH = 200
+
+
+def validate_book_id(book_id: str) -> str:
+    """Validate book_id is safe for use in file paths."""
+    if not book_id or len(book_id) > MAX_BOOK_ID_LENGTH:
+        raise HTTPException(status_code=400, detail="Invalid book ID")
+    if not BOOK_ID_PATTERN.match(book_id):
+        raise HTTPException(status_code=400, detail="Invalid book ID")
+    return book_id
 
 
 @asynccontextmanager
@@ -124,6 +137,8 @@ async def index_book(request: IndexBookRequest):
     if not rag_service:
         raise HTTPException(status_code=503, detail="RAG service not initialized")
 
+    validate_book_id(request.book_id)
+
     try:
         if request.structured_content:
             await rag_service.index_book_structured(request.book_id, request.structured_content)
@@ -132,7 +147,7 @@ async def index_book(request: IndexBookRequest):
         return {"success": True, "book_id": request.book_id}
     except Exception as e:
         logger.error("Error indexing book: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to index book")
 
 
 @app.post("/api/rag/query", response_model=QueryResponse)
@@ -145,6 +160,9 @@ async def query_book(request: QueryBookRequest):
     """
     if not rag_service:
         raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    if request.book_id:
+        validate_book_id(request.book_id)
 
     try:
         if request.use_rag and request.book_id:
@@ -175,7 +193,7 @@ async def query_book(request: QueryBookRequest):
         raise
     except Exception as e:
         logger.error("Error querying book: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to process query")
 
 
 @app.post("/api/rag/query/stream")
@@ -183,6 +201,9 @@ async def query_book_stream(request: QueryBookRequest):
     """Stream a RAG query response via Server-Sent Events."""
     if not rag_service:
         raise HTTPException(status_code=503, detail="RAG service not initialized")
+
+    if request.book_id:
+        validate_book_id(request.book_id)
 
     async def event_generator():
         try:
@@ -264,7 +285,7 @@ async def query_book_stream(request: QueryBookRequest):
 
         except Exception as e:
             logger.error("Error in streaming query: %s", e)
-            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'message': 'An internal error occurred'})}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -346,7 +367,7 @@ Respond in JSON format with the following structure:
         raise
     except Exception as e:
         logger.error("Error in agent assist: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to process request")
 
 
 # === Local EPUB Import ===
@@ -364,7 +385,7 @@ async def import_local_epub(request: ImportLocalRequest):
     """
     p = Path(request.path).expanduser().resolve()
     if not p.exists():
-        raise HTTPException(status_code=404, detail=f"Path not found: {request.path}")
+        raise HTTPException(status_code=404, detail="Path not found")
 
     if p.is_file() and p.suffix.lower() == ".epub":
         data = p.read_bytes()
@@ -402,6 +423,7 @@ async def is_book_indexed(book_id: str):
     """Check if a book is already indexed."""
     if not rag_service:
         raise HTTPException(status_code=503, detail="RAG service not initialized")
+    validate_book_id(book_id)
     return {"indexed": rag_service.vector_store.has_book(book_id)}
 
 
