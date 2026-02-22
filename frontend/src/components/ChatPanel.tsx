@@ -82,23 +82,34 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
     })
   }, [])
 
+  const doSubmit = useCallback(() => {
+    if (!input.trim() || isLoading) return
+    onSendMessage(input.trim())
+    setInput('')
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto'
+    }
+  }, [input, isLoading, onSendMessage])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (input.trim() && !isLoading) {
-      onSendMessage(input.trim())
-      setInput('')
-    }
+    doSubmit()
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (input.trim() && !isLoading) {
-        onSendMessage(input.trim())
-        setInput('')
-      }
+      doSubmit()
     }
   }
+
+  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value)
+    e.target.style.height = 'auto'
+    const newHeight = Math.min(e.target.scrollHeight, 128)
+    e.target.style.height = newHeight + 'px'
+    e.target.style.overflowY = newHeight >= 128 ? 'auto' : 'hidden'
+  }, [])
 
   const lastMsg = messages[messages.length - 1]
   const isStreaming = isLoading && lastMsg?.role === 'assistant'
@@ -279,13 +290,13 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={handleInput}
               onKeyDown={handleKeyDown}
               placeholder="Ask a follow-up..."
               disabled={isLoading}
               rows={1}
-              className="flex-1 bg-transparent text-sm text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#555] focus:outline-none resize-none disabled:opacity-50 max-h-32 overflow-y-auto"
-              style={{ lineHeight: '1.5' }}
+              className="flex-1 bg-transparent text-sm text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#555] focus:outline-none resize-none disabled:opacity-50 max-h-32"
+              style={{ lineHeight: '1.5', overflowY: 'hidden' }}
             />
             <button
               type="submit"
