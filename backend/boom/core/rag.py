@@ -79,10 +79,11 @@ class RAGService:
         """
         logger.debug("Embedding text (%s), %d chars", input_type, len(text))
 
-        response = self.voyage.embed(
+        response = await asyncio.to_thread(
+            self.voyage.embed,
             texts=[text],
             model=config.VOYAGE_CONTEXT_MODEL,
-            input_type=input_type
+            input_type=input_type,
         )
 
         if not response.embeddings or len(response.embeddings) == 0:
@@ -132,10 +133,11 @@ class RAGService:
 
         all_embeddings: list[list[float]] = []
         for i, batch in enumerate(batches):
-            response = self.voyage.embed(
+            response = await asyncio.to_thread(
+                self.voyage.embed,
                 texts=batch,
                 model=config.VOYAGE_CONTEXT_MODEL,
-                input_type=input_type
+                input_type=input_type,
             )
             if not response.embeddings:
                 raise ValueError(f"No embeddings returned from Voyage AI (batch {i+1})")
@@ -596,7 +598,8 @@ Question: {question}"""
         Returns:
             Claude's answer
         """
-        response = self.anthropic.messages.create(
+        response = await asyncio.to_thread(
+            self.anthropic.messages.create,
             model=config.CLAUDE_MODEL,
             max_tokens=1024,
             system="You are a reading companion. Be direct and concise — answer the question, then stop. Address the reader as \"you.\"",

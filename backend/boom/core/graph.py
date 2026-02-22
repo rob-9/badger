@@ -9,6 +9,7 @@ Routes questions through type-specific retrieval strategies:
 """
 
 import json
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -485,17 +486,19 @@ def log_query(state: QAState):
 def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_client) -> dict:
     """Build and compile the QA LangGraph."""
 
-    def _embed_query(text: str) -> list[float]:
+    async def _embed_query(text: str) -> list[float]:
         """Embed a query using voyage-context-3."""
-        return voyage_client.contextualized_embed(
+        result = await asyncio.to_thread(
+            voyage_client.contextualized_embed,
             inputs=[[text]],
             model=config.VOYAGE_CONTEXT_MODEL,
             input_type="query",
-        ).results[0].embeddings[0]
+        )
+        return result.results[0].embeddings[0]
 
     # --- Helpers: query decomposition + HyDE ---
 
-    def _decompose_query(question: str, selected_text: str | None) -> dict:
+    async def _decompose_query(question: str, selected_text: str | None) -> dict:
         """Ask Haiku whether to decompose the question into sub-queries and/or use HyDE."""
         selected_ctx = f'\nSelected text: "{selected_text[:200]}"' if selected_text else ""
         prompt = (
@@ -506,7 +509,8 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             "If the question is already simple/specific, return the original question as the only item in queries."
         )
         try:
-            response = anthropic.messages.create(
+            response = await asyncio.to_thread(
+                anthropic.messages.create,
                 model=config.CLAUDE_HAIKU_MODEL,
                 max_tokens=300,
                 system="You decompose reading comprehension questions for retrieval. Return JSON only, no markdown.",
@@ -526,7 +530,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
 
         return result
 
-    def _generate_hyde(question: str, selected_text: str | None) -> str:
+    async def _generate_hyde(question: str, selected_text: str | None) -> str:
         """Generate a hypothetical answer passage (~100 tokens) via Haiku."""
         selected_ctx = f'\nThe reader highlighted: "{selected_text[:200]}"' if selected_text else ""
         prompt = (
@@ -536,7 +540,8 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             "Do not say 'the book says' — write as if you ARE the book text."
         )
         try:
-            response = anthropic.messages.create(
+            response = await asyncio.to_thread(
+                anthropic.messages.create,
                 model=config.CLAUDE_HAIKU_MODEL,
                 max_tokens=200,
                 system="You write hypothetical book passages for retrieval augmentation. Write naturally, as if from the source text.",
@@ -550,22 +555,25 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             logger.warning("  HyDE generation failed: %s", e)
             return ""
 
-    def _embed_queries(texts: list[str]) -> list[list[float]]:
+    async def _embed_queries(texts: list[str]) -> list[list[float]]:
         """Batch-embed multiple query texts in a single Voyage API call."""
-        result = voyage_client.contextualized_embed(
+        result = await asyncio.to_thread(
+            voyage_client.contextualized_embed,
             inputs=[[t] for t in texts],
             model=config.VOYAGE_CONTEXT_MODEL,
             input_type="query",
         )
         return [r.embeddings[0] for r in result.results]
 
-    def _embed_document(text: str) -> list[float]:
+    async def _embed_document(text: str) -> list[float]:
         """Embed a HyDE passage as a document (matching the indexed chunk space)."""
-        return voyage_client.contextualized_embed(
+        result = await asyncio.to_thread(
+            voyage_client.contextualized_embed,
             inputs=[[text]],
             model=config.VOYAGE_CONTEXT_MODEL,
             input_type="document",
-        ).results[0].embeddings[0]
+        )
+        return result.results[0].embeddings[0]
 
     # --- Node: classify ---
 
@@ -594,7 +602,8 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         )
         logger.info("  Prompt:   %s", classify_prompt.replace("\n", " ")[:200])
 
-        response = anthropic.messages.create(
+        response = await asyncio.to_thread(
+            anthropic.messages.create,
             model=config.CLAUDE_HAIKU_MODEL,
             max_tokens=150,
             system="Classify the reading question. Return JSON only, no markdown.",
@@ -641,7 +650,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info("── RETRIEVE (vocabulary) ─────────────────────")
         logger.info('  Strategy: hybrid search for "%s", top_k=20', query[:100])
 
-        embedding = _embed_query(query)
+        embedding = await _embed_query(query)
         logger.info("  Embedding: %d dimensions", len(embedding))
 
         results = await vector_store.hybrid_search(
@@ -699,7 +708,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         book_id = state["book_id"]
 
         # Decompose the query
-        decomp = _decompose_query(question, selected)
+        decomp = await _decompose_query(question, selected)
         sub_queries = decomp["queries"]
         use_hyde = decomp["use_hyde"]
         logger.info("  Sub-queries: %s", sub_queries)
@@ -712,12 +721,12 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         # Generate HyDE passage if recommended
         hyde_passage = ""
         if use_hyde:
-            hyde_passage = _generate_hyde(question, selected)
+            hyde_passage = await _generate_hyde(question, selected)
 
         if len(full_queries) == 1 and not hyde_passage:
             # Simple case: single query, no HyDE — hybrid search
             logger.info("  Strategy: hybrid search (single query), top_k=20")
-            embedding = _embed_query(full_queries[0])
+            embedding = await _embed_query(full_queries[0])
             logger.info("  Embedding: %d dimensions", len(embedding))
             results = await vector_store.hybrid_search(
                 book_id, embedding, query_text=full_queries[0], top_k=20,
@@ -734,7 +743,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             }
 
         # Multi-query and/or HyDE: embed all, search independently, fuse
-        query_embeddings = _embed_queries(full_queries)
+        query_embeddings = await _embed_queries(full_queries)
         logger.info("  Embedded %d queries (%d dimensions each)", len(query_embeddings), len(query_embeddings[0]))
 
         result_lists = []
@@ -746,7 +755,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             result_lists.append(results)
 
         if hyde_passage:
-            hyde_emb = _embed_document(hyde_passage)
+            hyde_emb = await _embed_document(hyde_passage)
             logger.info("  HyDE embedded as document (%d dimensions)", len(hyde_emb))
             hyde_results = await vector_store.search(book_id, hyde_emb, top_k=20)
             logger.info("  HyDE: %d results", len(hyde_results))
@@ -781,7 +790,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         entities = state.get("entities", [])
 
         # Always decompose for analysis; Haiku decides whether HyDE helps
-        decomp = _decompose_query(question, selected)
+        decomp = await _decompose_query(question, selected)
         sub_queries = decomp["queries"]
         use_hyde = decomp["use_hyde"]
         logger.info("  Sub-queries: %s", sub_queries)
@@ -789,13 +798,13 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
 
         hyde_passage = ""
         if use_hyde:
-            hyde_passage = _generate_hyde(question, selected)
+            hyde_passage = await _generate_hyde(question, selected)
 
         # Build full query strings
         full_queries = [build_query(sq, selected, entities) for sq in sub_queries]
 
         # Embed sub-queries as queries
-        query_embeddings = _embed_queries(full_queries)
+        query_embeddings = await _embed_queries(full_queries)
         logger.info("  Embedded %d queries (%d dimensions each)", len(query_embeddings), len(query_embeddings[0]))
 
         result_lists = []
@@ -810,7 +819,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
 
         # HyDE passage: embed as document, semantic search, top 20
         if hyde_passage:
-            hyde_emb = _embed_document(hyde_passage)
+            hyde_emb = await _embed_document(hyde_passage)
             logger.info("  HyDE embedded as document (%d dimensions)", len(hyde_emb))
             hyde_results = await vector_store.search(book_id, hyde_emb, top_k=20)
             logger.info("  HyDE semantic: %d results", len(hyde_results))
@@ -899,7 +908,8 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         if state.get("selected_text"):
             query += f"\n\nReferring to: {state['selected_text']}"
 
-        reranking = voyage_client.rerank(
+        reranking = await asyncio.to_thread(
+            voyage_client.rerank,
             query=query,
             documents=[c["text"] for c in chunks],
             model=config.VOYAGE_RERANK_MODEL,
@@ -1004,7 +1014,8 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info("  System prompt (%d chars): %s…", len(system_prompt), system_prompt[:150])
         logger.info("  User prompt (%d chars):   %s…", len(user_prompt), user_prompt[:150])
 
-        response = anthropic.messages.create(
+        response = await asyncio.to_thread(
+            anthropic.messages.create,
             model=config.CLAUDE_MODEL,
             max_tokens=max_tokens,
             system=system_prompt,
@@ -1051,7 +1062,8 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         )
 
         try:
-            response = anthropic.messages.create(
+            response = await asyncio.to_thread(
+                anthropic.messages.create,
                 model=config.CLAUDE_HAIKU_MODEL,
                 max_tokens=100,
                 system=EVALUATE_PROMPT,
