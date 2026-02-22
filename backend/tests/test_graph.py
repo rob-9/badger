@@ -10,10 +10,12 @@ from boom.core.graph import (
     label_chunks,
     build_query,
     build_context_string,
+    filter_by_relevance,
     prepare_generate,
     log_query,
     _build_log_entry,
     VALID_TYPES,
+    TOKEN_LIMITS,
 )
 from boom.core.prompts import SYSTEM_PROMPTS
 from tests.conftest import make_chunk
@@ -223,14 +225,65 @@ class TestBuildContextString:
     def test_empty_chunks(self):
         assert build_context_string([]) == ""
 
-    def test_passages_numbered(self):
+    def test_sources_numbered(self):
         chunks = [
             {"text": "A", "label": "PAST", "chunk_index": 0, "score": 0.9},
             {"text": "B", "label": "PAST", "chunk_index": 1, "score": 0.8},
         ]
         ctx = build_context_string(chunks)
-        assert "[Passage 1]" in ctx
-        assert "[Passage 2]" in ctx
+        assert "[Source 1]" in ctx
+        assert "[Source 2]" in ctx
+
+    def test_global_sequential_numbering(self):
+        """PAST sources numbered first, then AHEAD continues the sequence."""
+        chunks = [
+            {"text": "Past A", "label": "PAST", "chunk_index": 0, "score": 0.9},
+            {"text": "Past B", "label": "PAST", "chunk_index": 1, "score": 0.8},
+            {"text": "Ahead C", "label": "AHEAD", "chunk_index": 5, "score": 0.7},
+        ]
+        ctx = build_context_string(chunks)
+        assert "[Source 1]" in ctx
+        assert "[Source 2]" in ctx
+        assert "[Source 3]" in ctx
+        # PAST sources come before AHEAD in the output
+        past_pos = ctx.index("[Source 1]")
+        ahead_pos = ctx.index("[Source 3]")
+        assert past_pos < ahead_pos
+
+
+# ── filter_by_relevance ───────────────────────────────────────────────
+
+
+class TestRelevanceFilter:
+    def _chunk(self, index: int, score: float, label: str = "PAST") -> dict:
+        return {"text": f"Chunk {index}", "chunk_index": index, "score": score, "label": label}
+
+    def test_all_above_threshold(self):
+        chunks = [self._chunk(0, 0.9), self._chunk(1, 0.5)]
+        result = filter_by_relevance(chunks, 0.3)
+        assert len(result) == 2
+
+    def test_some_below_threshold(self):
+        chunks = [self._chunk(0, 0.9), self._chunk(1, 0.2), self._chunk(2, 0.1)]
+        result = filter_by_relevance(chunks, 0.3)
+        assert len(result) == 1
+        assert result[0]["chunk_index"] == 0
+
+    def test_all_below_keeps_best(self):
+        chunks = [self._chunk(0, 0.2), self._chunk(1, 0.25), self._chunk(2, 0.1)]
+        result = filter_by_relevance(chunks, 0.3)
+        assert len(result) == 1
+        assert result[0]["chunk_index"] == 1  # highest score
+
+    def test_empty_input(self):
+        assert filter_by_relevance([], 0.3) == []
+
+    def test_boundary_score_kept(self):
+        """Score exactly at threshold should be kept (>=)."""
+        chunks = [self._chunk(0, 0.3), self._chunk(1, 0.1)]
+        result = filter_by_relevance(chunks, 0.3)
+        assert len(result) == 1
+        assert result[0]["chunk_index"] == 0
 
 
 # ── _build_log_entry ──────────────────────────────────────────────────
@@ -381,6 +434,31 @@ class TestPrepareGenerate:
         result = prepare_generate(state)
         assert result["sources"][0]["text"] == "x" * 200 + "..."
         assert result["sources"][0]["full_text"] == long_text
+
+    def test_max_tokens_per_type(self):
+        for q_type, expected in TOKEN_LIMITS.items():
+            state = {"question": "What?", "question_type": q_type, "chunks": []}
+            result = prepare_generate(state)
+            assert result["max_tokens"] == expected, f"{q_type}: expected {expected}, got {result['max_tokens']}"
+
+    def test_source_number_in_sources(self):
+        state = {
+            "question": "What?",
+            "question_type": "context",
+            "chunks": [
+                {"text": "A", "label": "PAST", "chunk_index": 0, "score": 0.9},
+                {"text": "B", "label": "AHEAD", "chunk_index": 5, "score": 0.7},
+                {"text": "C", "label": "PAST", "chunk_index": 1, "score": 0.8},
+            ],
+        }
+        result = prepare_generate(state)
+        # PAST sources first (0, 1), then AHEAD (5)
+        assert result["sources"][0]["source_number"] == 1
+        assert result["sources"][0]["label"] == "PAST"
+        assert result["sources"][1]["source_number"] == 2
+        assert result["sources"][1]["label"] == "PAST"
+        assert result["sources"][2]["source_number"] == 3
+        assert result["sources"][2]["label"] == "AHEAD"
 
 
 class TestLogQuery:

@@ -19,7 +19,7 @@ from anthropic import Anthropic
 from langgraph.graph import StateGraph, END
 
 from boom import config
-from .prompts import SYSTEM_PROMPTS, SANITIZE_PROMPT
+from .prompts import SYSTEM_PROMPTS, SANITIZE_PROMPT, CITATION_INSTRUCTIONS, EVALUATE_PROMPT
 from .vector_store import VectorStore, SearchResult, reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,13 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 VALID_TYPES = {"vocabulary", "context", "lookup", "analysis"}
 LOG_SEPARATOR = "──────────────────────────────────────────────"
+
+TOKEN_LIMITS = {
+    "vocabulary": 512,
+    "context": 1024,
+    "lookup": 1024,
+    "analysis": 2048,
+}
 
 
 # === State ===
@@ -61,12 +68,17 @@ class QAState(TypedDict, total=False):
     # Generation
     answer: str
     sources: list[dict]
+    gen_max_tokens: int
     gen_model: str
     gen_tokens_in: int
     gen_tokens_out: int
     gen_stop_reason: str
     gen_system_prompt: str
     gen_user_prompt: str
+
+    # Relevance filtering
+    relevance_filtered_count: int
+    relevance_threshold_used: float
 
     # Sanitization
     sanitize_ahead_count: int
@@ -76,6 +88,14 @@ class QAState(TypedDict, total=False):
     # Query decomposition / HyDE
     sub_queries: list[str]
     hyde_passage: str
+
+    # Evaluation
+    eval_relevance: int
+    eval_grounding: int
+    eval_flags: list[str]
+    eval_low_confidence: bool
+    eval_tokens_in: int
+    eval_tokens_out: int
 
     # Internal
     total_chunks: int
@@ -159,23 +179,40 @@ def build_query(question: str, selected_text: Optional[str], entities: list[str]
     return "\n".join(parts)
 
 
-def build_context_string(chunks: list[dict]) -> str:
-    """Build context string with PAST/AHEAD labels from labeled chunks."""
-    def format_group(group: list[dict]) -> str:
-        return "\n\n---\n\n".join(
-            f"[Passage {i + 1}]\n{c['text']}" for i, c in enumerate(group)
-        )
+def filter_by_relevance(chunks: list[dict], threshold: float) -> list[dict]:
+    """Drop chunks below threshold, always keeping the best one."""
+    if not chunks:
+        return chunks
+    best = max(chunks, key=lambda c: c["score"])
+    kept = [c for c in chunks if c["score"] >= threshold]
+    if not kept:
+        kept = [best]
+    return kept
 
+
+def build_context_string(chunks: list[dict]) -> str:
+    """Build context string with PAST/AHEAD labels and global [Source N] numbering."""
     past = [c for c in chunks if c["label"] == "PAST"]
     ahead = [c for c in chunks if c["label"] == "AHEAD"]
 
-    parts = []
-    if past:
-        parts.append(f"[ALREADY READ]\n{format_group(past)}")
-    if ahead:
-        parts.append(f"[COMING UP]\n{format_group(ahead)}")
+    # Global sequential numbering: PAST first, then AHEAD
+    counter = 1
 
-    return "\n\n===\n\n".join(parts)
+    def format_group(group: list[dict]) -> str:
+        nonlocal counter
+        parts = []
+        for c in group:
+            parts.append(f"[Source {counter}]\n{c['text']}")
+            counter += 1
+        return "\n\n---\n\n".join(parts)
+
+    sections = []
+    if past:
+        sections.append(f"[ALREADY READ]\n{format_group(past)}")
+    if ahead:
+        sections.append(f"[COMING UP]\n{format_group(ahead)}")
+
+    return "\n\n===\n\n".join(sections)
 
 
 def prepare_generate(state: QAState) -> dict:
@@ -195,20 +232,28 @@ def prepare_generate(state: QAState) -> dict:
         context = build_context_string(chunks)
         user_prompt = f'Context from the book:\n{context}\n\nQuestion: {state["question"]}'
 
+    # Order: PAST first, then AHEAD — matches build_context_string numbering
+    past = [c for c in chunks if c["label"] == "PAST"]
+    ahead = [c for c in chunks if c["label"] == "AHEAD"]
+    ordered = past + ahead
+
     sources = [
         {
             "text": c["text"][:200] + "...",
             "full_text": c["text"],
             "score": c["score"],
             "chunk_index": c["chunk_index"],
+            "source_number": i + 1,
+            "label": c["label"],
         }
-        for c in chunks
+        for i, c in enumerate(ordered)
     ]
 
     return {
         "system_prompt": system_prompt,
         "user_prompt": user_prompt,
         "sources": sources,
+        "max_tokens": TOKEN_LIMITS.get(q_type, 1024),
     }
 
 
@@ -236,6 +281,9 @@ def _build_log_entry(state: QAState) -> dict:
             "in": state.get("classify_tokens_in"),
             "out": state.get("classify_tokens_out"),
         },
+        # Relevance filtering
+        "relevance_filtered_count": state.get("relevance_filtered_count", 0),
+        "relevance_threshold_used": state.get("relevance_threshold_used"),
         # Sanitization
         "sanitize_ahead_count": state.get("sanitize_ahead_count", 0),
         "sanitize_tokens": {
@@ -268,9 +316,19 @@ def _build_log_entry(state: QAState) -> dict:
         "response": {
             "answer": state.get("answer", ""),
             "model": state.get("gen_model"),
+            "max_tokens": state.get("gen_max_tokens"),
             "input_tokens": state.get("gen_tokens_in"),
             "output_tokens": state.get("gen_tokens_out"),
             "stop_reason": state.get("gen_stop_reason"),
+        },
+        # Evaluation
+        "evaluation": {
+            "relevance": state.get("eval_relevance"),
+            "grounding": state.get("eval_grounding"),
+            "flags": state.get("eval_flags", []),
+            "low_confidence": state.get("eval_low_confidence", False),
+            "input_tokens": state.get("eval_tokens_in", 0),
+            "output_tokens": state.get("eval_tokens_out", 0),
         },
     }
 
@@ -351,6 +409,13 @@ def _write_readable_log(state: QAState, log_entry: dict):
             for line in chunk_text.split("\n"):
                 f.write(f"        {line}\n")
 
+        # Relevance filtering
+        filtered_count = state.get("relevance_filtered_count", 0)
+        if filtered_count:
+            section("Relevance Filter")
+            f.write(f"\n  Threshold: {state.get('relevance_threshold_used', 0):.2f}\n")
+            f.write(f"  Dropped:   {filtered_count} chunks\n")
+
         # Sanitization
         sanitize_count = state.get("sanitize_ahead_count", 0)
         if sanitize_count:
@@ -380,6 +445,18 @@ def _write_readable_log(state: QAState, log_entry: dict):
         for line in state.get("answer", "").split("\n"):
             f.write(f"    {line}\n")
 
+        # Evaluation
+        eval_rel = state.get("eval_relevance")
+        if eval_rel is not None:
+            section("Evaluation")
+            f.write(f"\n  Model:      {config.CLAUDE_HAIKU_MODEL}\n")
+            f.write(f"  Tokens:     {state.get('eval_tokens_in', 0)} in / {state.get('eval_tokens_out', 0)} out\n")
+            f.write(f"  Relevance:  {eval_rel}/5\n")
+            f.write(f"  Grounding:  {state.get('eval_grounding')}/5\n")
+            flags = state.get("eval_flags", [])
+            if flags:
+                f.write(f"  Flags:      {', '.join(flags)}\n")
+
         f.write("\n" + "═" * W + "\n\n")
 
 
@@ -396,10 +473,11 @@ def log_query(state: QAState):
     _write_readable_log(state, log_entry)
 
     logger.info(
-        "  Done — classify: %d/%d, sanitize: %d/%d, generate: %d/%d tokens",
+        "  Done — classify: %d/%d, sanitize: %d/%d, generate: %d/%d, evaluate: %d/%d tokens",
         state.get("classify_tokens_in", 0), state.get("classify_tokens_out", 0),
         state.get("sanitize_tokens_in", 0), state.get("sanitize_tokens_out", 0),
         state.get("gen_tokens_in", 0), state.get("gen_tokens_out", 0),
+        state.get("eval_tokens_in", 0), state.get("eval_tokens_out", 0),
     )
     logger.info(LOG_SEPARATOR)
 
@@ -849,6 +927,31 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
 
         return {"chunks": reranked}
 
+    # --- Node: relevance filter ---
+
+    async def relevance_filter_node(state: QAState) -> dict:
+        """Drop chunks below relevance threshold, always keeping the best one."""
+        chunks = state.get("chunks", [])
+        threshold = config.RELEVANCE_THRESHOLD
+        before = len(chunks)
+        filtered = filter_by_relevance(chunks, threshold)
+        dropped = before - len(filtered)
+
+        if dropped:
+            logger.info("── FILTER %s", LOG_SEPARATOR[10:])
+            logger.info("  Threshold: %.2f — dropped %d/%d chunks", threshold, dropped, before)
+            for c in filtered:
+                logger.info("    kept score=%.4f | chunk %d", c["score"], c["chunk_index"])
+            logger.info(LOG_SEPARATOR)
+        else:
+            logger.info("── FILTER (all %d chunks above %.2f) %s", before, threshold, LOG_SEPARATOR[40:])
+
+        return {
+            "chunks": filtered,
+            "relevance_filtered_count": dropped,
+            "relevance_threshold_used": threshold,
+        }
+
     # --- Node: sanitize ---
 
     async def sanitize_node(state: QAState) -> dict:
@@ -925,16 +1028,18 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         prepared = prepare_generate(state)
         system_prompt = prepared["system_prompt"]
         user_prompt = prepared["user_prompt"]
+        max_tokens = prepared["max_tokens"]
 
         if not chunks:
             logger.info("  No chunks — generating from selected text only")
 
+        logger.info("  Max tokens: %d", max_tokens)
         logger.info("  System prompt (%d chars): %s…", len(system_prompt), system_prompt[:150])
         logger.info("  User prompt (%d chars):   %s…", len(user_prompt), user_prompt[:150])
 
         response = anthropic.messages.create(
             model=config.CLAUDE_MODEL,
-            max_tokens=1024,
+            max_tokens=max_tokens,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -949,6 +1054,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         return {
             "answer": answer,
             "sources": prepared["sources"],
+            "gen_max_tokens": max_tokens,
             "gen_model": response.model,
             "gen_tokens_in": response.usage.input_tokens,
             "gen_tokens_out": response.usage.output_tokens,
@@ -956,6 +1062,78 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             "gen_system_prompt": system_prompt,
             "gen_user_prompt": user_prompt,
         }
+
+    # --- Node: evaluate ---
+
+    async def evaluate_node(state: QAState) -> dict:
+        """Score answer quality with Haiku."""
+        answer = state.get("answer", "")
+        question = state.get("question", "")
+        chunks = state.get("chunks", [])
+
+        if not answer:
+            return {}
+
+        logger.info("── EVALUATE %s", LOG_SEPARATOR[12:])
+
+        context_preview = "\n".join(c["text"][:200] for c in chunks[:3])
+        user_prompt = (
+            f"Question: {question}\n\n"
+            f"Sources (first 3):\n{context_preview}\n\n"
+            f"Answer: {answer}"
+        )
+
+        try:
+            response = anthropic.messages.create(
+                model=config.CLAUDE_HAIKU_MODEL,
+                max_tokens=100,
+                system=EVALUATE_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            raw = response.content[0].text.strip()
+            tokens_in = response.usage.input_tokens
+            tokens_out = response.usage.output_tokens
+
+            parsed = json.loads(strip_code_fences(raw))
+            relevance = max(1, min(5, int(parsed.get("relevance", 3))))
+            grounding = max(1, min(5, int(parsed.get("grounding", 3))))
+
+            flags = []
+            if relevance <= 2:
+                flags.append("low_relevance")
+            if grounding <= 2:
+                flags.append("low_grounding")
+
+            low_confidence = bool(flags)
+
+            logger.info("  Model:      %s", config.CLAUDE_HAIKU_MODEL)
+            logger.info("  Tokens:     %d in / %d out", tokens_in, tokens_out)
+            logger.info("  Relevance:  %d/5", relevance)
+            logger.info("  Grounding:  %d/5", grounding)
+            if flags:
+                logger.warning("  Flags: %s", ", ".join(flags))
+            logger.info(LOG_SEPARATOR)
+
+            return {
+                "eval_relevance": relevance,
+                "eval_grounding": grounding,
+                "eval_flags": flags,
+                "eval_low_confidence": low_confidence,
+                "eval_tokens_in": tokens_in,
+                "eval_tokens_out": tokens_out,
+            }
+
+        except Exception as e:
+            logger.warning("  Evaluation failed: %s", e)
+            logger.info(LOG_SEPARATOR)
+            return {
+                "eval_relevance": 0,
+                "eval_grounding": 0,
+                "eval_flags": ["eval_error"],
+                "eval_low_confidence": True,
+                "eval_tokens_in": 0,
+                "eval_tokens_out": 0,
+            }
 
     # --- Node: log ---
 
@@ -994,6 +1172,10 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         result = await rerank_node(state)
         state.update(result)
 
+        yield "filtering"
+        result = await relevance_filter_node(state)
+        state.update(result)
+
         yield "sanitizing"
         result = await sanitize_node(state)
         state.update(result)
@@ -1009,9 +1191,11 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     graph.add_node("context", context_node)
     graph.add_node("lookup", lookup_node)
     graph.add_node("analysis", analysis_node)
+    graph.add_node("relevance_filter", relevance_filter_node)
     graph.add_node("rerank", rerank_node)
     graph.add_node("sanitize", sanitize_node)
     graph.add_node("generate", generate_node)
+    graph.add_node("evaluate", evaluate_node)
     graph.add_node("log", log_node)
 
     graph.set_entry_point("classify")
@@ -1026,12 +1210,15 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     for node in ["vocabulary", "context", "lookup", "analysis"]:
         graph.add_edge(node, "rerank")
 
-    graph.add_edge("rerank", "sanitize")
+    graph.add_edge("rerank", "relevance_filter")
+    graph.add_edge("relevance_filter", "sanitize")
     graph.add_edge("sanitize", "generate")
-    graph.add_edge("generate", "log")
+    graph.add_edge("generate", "evaluate")
+    graph.add_edge("evaluate", "log")
     graph.add_edge("log", END)
 
     return {
         "graph": graph.compile(),
         "run_pre_generate": run_pre_generate,
+        "evaluate": evaluate_node,
     }

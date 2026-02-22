@@ -34,12 +34,13 @@ anthropic_client: Optional[Anthropic] = None
 async_anthropic_client: Optional[AsyncAnthropic] = None
 qa_graph = None
 qa_run_pre_generate = None
+qa_evaluate = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize services on startup."""
-    global rag_service, anthropic_client, async_anthropic_client, qa_graph, qa_run_pre_generate
+    global rag_service, anthropic_client, async_anthropic_client, qa_graph, qa_run_pre_generate, qa_evaluate
 
     logging.basicConfig(
         level=logging.INFO,
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
     )
     qa_graph = qa_pipeline["graph"]
     qa_run_pre_generate = qa_pipeline["run_pre_generate"]
+    qa_evaluate = qa_pipeline["evaluate"]
     logger.info("Server ready (LangGraph pipeline active)")
     yield
     logger.info("Shutting down")
@@ -208,7 +210,7 @@ async def query_book_stream(request: QueryBookRequest):
                 full_answer = []
                 async with async_anthropic_client.messages.stream(
                     model=config.CLAUDE_MODEL,
-                    max_tokens=1024,
+                    max_tokens=prepared["max_tokens"],
                     system=prepared["system_prompt"],
                     messages=[{"role": "user", "content": prepared["user_prompt"]}],
                 ) as stream:
@@ -220,11 +222,12 @@ async def query_book_stream(request: QueryBookRequest):
 
                 yield "event: done\ndata: {}\n\n"
 
-                # Log after streaming completes
+                # Evaluate + log after streaming completes
                 try:
                     state.update({
                         "answer": "".join(full_answer),
                         "sources": prepared["sources"],
+                        "gen_max_tokens": prepared["max_tokens"],
                         "gen_model": final_message.model,
                         "gen_tokens_in": final_message.usage.input_tokens,
                         "gen_tokens_out": final_message.usage.output_tokens,
@@ -232,9 +235,11 @@ async def query_book_stream(request: QueryBookRequest):
                         "gen_system_prompt": prepared["system_prompt"],
                         "gen_user_prompt": prepared["user_prompt"],
                     })
+                    eval_result = await qa_evaluate(state)
+                    state.update(eval_result)
                     log_query(state)
                 except Exception:
-                    logger.warning("Failed to log streaming query", exc_info=True)
+                    logger.warning("Failed to evaluate/log streaming query", exc_info=True)
 
             elif request.selected_text:
                 # Simple path: stream without RAG pipeline

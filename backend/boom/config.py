@@ -22,6 +22,14 @@ VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")
 # Feature flags
 RERANK_ENABLED: bool = os.getenv("RERANK_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# RAG pipeline
+_relevance_raw = os.getenv("RELEVANCE_THRESHOLD", "0.3")
+try:
+    RELEVANCE_THRESHOLD: float = float(_relevance_raw)
+except ValueError:
+    print(f"ERROR: RELEVANCE_THRESHOLD must be a number, got: {_relevance_raw}", file=sys.stderr)
+    sys.exit(1)
+
 # Infrastructure
 CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 VECTOR_STORAGE_DIR: str = os.getenv("VECTOR_STORAGE_DIR", ".data/vectors")

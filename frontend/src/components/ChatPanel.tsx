@@ -10,6 +10,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   context?: string
+  sources?: Array<{ text: string; full_text: string; score: number; chunk_index: number; source_number: number; label: string }>
 }
 
 interface ChatPanelProps {
@@ -91,7 +92,46 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
             ) : (
               <div className="max-w-[92%]">
                 <div className="px-4 py-3 bg-gray-50 dark:bg-[#252525] rounded-2xl rounded-bl-md prose prose-sm dark:prose-invert max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={msg.sources?.length ? (() => {
+                      const sources = msg.sources!
+
+                      const processNode = (node: React.ReactNode): React.ReactNode => {
+                        if (typeof node !== 'string') return node
+                        const parts = node.split(/(\[Source \d+\])/)
+                        if (parts.length === 1) return node
+                        return parts.map((part, i) => {
+                          const match = part.match(/^\[Source (\d+)\]$/)
+                          if (!match) return part
+                          const num = parseInt(match[1])
+                          const source = sources.find(s => s.source_number === num)
+                          return (
+                            <button
+                              key={i}
+                              title={source ? `[${source.label}] ${source.text}` : `Source ${num}`}
+                              className="inline-flex items-center justify-center min-w-[1.1em] h-[1.1em] text-[0.6em] font-semibold bg-accent/20 text-accent-foreground rounded-full px-[0.3em] align-super cursor-help hover:bg-accent/40 transition-colors mx-[0.1em] leading-none"
+                            >
+                              {num}
+                            </button>
+                          )
+                        })
+                      }
+
+                      const processChildren = (children: React.ReactNode) => {
+                        return Array.isArray(children)
+                          ? children.map((child, i) => <span key={i}>{processNode(child)}</span>)
+                          : processNode(children)
+                      }
+
+                      return {
+                        p: ({ children }) => <p>{processChildren(children)}</p>,
+                        li: ({ children }) => <li>{processChildren(children)}</li>,
+                        td: ({ children }) => <td>{processChildren(children)}</td>,
+                        blockquote: ({ children }) => <blockquote>{processChildren(children)}</blockquote>,
+                      }
+                    })() : undefined}
+                  >{msg.content}</ReactMarkdown>
                 </div>
               </div>
             )}
