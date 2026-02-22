@@ -17,6 +17,7 @@ const STATUS_LABELS: Record<string, string> = {
   classifying: 'Classifying question...',
   retrieving: 'Retrieving context...',
   reranking: 'Reranking results...',
+  sanitizing: 'Checking for spoilers...',
   generating: 'Generating answer...',
 }
 

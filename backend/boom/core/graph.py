@@ -19,7 +19,7 @@ from anthropic import Anthropic
 from langgraph.graph import StateGraph, END
 
 from boom import config
-from .prompts import SYSTEM_PROMPTS
+from .prompts import SYSTEM_PROMPTS, SANITIZE_PROMPT
 from .vector_store import VectorStore, SearchResult
 
 logger = logging.getLogger(__name__)
@@ -67,6 +67,11 @@ class QAState(TypedDict, total=False):
     gen_stop_reason: str
     gen_system_prompt: str
     gen_user_prompt: str
+
+    # Sanitization
+    sanitize_ahead_count: int
+    sanitize_tokens_in: int
+    sanitize_tokens_out: int
 
     # Internal
     total_chunks: int
@@ -202,6 +207,12 @@ def _build_log_entry(state: QAState) -> dict:
             "in": state.get("classify_tokens_in"),
             "out": state.get("classify_tokens_out"),
         },
+        # Sanitization
+        "sanitize_ahead_count": state.get("sanitize_ahead_count", 0),
+        "sanitize_tokens": {
+            "in": state.get("sanitize_tokens_in", 0),
+            "out": state.get("sanitize_tokens_out", 0),
+        },
         # Retrieval
         "retrieval_strategy": state.get("retrieval_strategy"),
         "retrieval_query": state.get("retrieval_query"),
@@ -292,6 +303,14 @@ def _write_readable_log(state: QAState, log_entry: dict):
             for line in chunk_text.split("\n"):
                 f.write(f"        {line}\n")
 
+        # Sanitization
+        sanitize_count = state.get("sanitize_ahead_count", 0)
+        if sanitize_count:
+            section("Sanitization")
+            f.write(f"\n  Model:    {config.CLAUDE_HAIKU_MODEL}\n")
+            f.write(f"  AHEAD chunks sanitized: {sanitize_count}\n")
+            f.write(f"  Tokens:   {state.get('sanitize_tokens_in', 0)} in / {state.get('sanitize_tokens_out', 0)} out\n")
+
         # LLM Input
         sys_prompt = state.get("gen_system_prompt") or ""
         usr_prompt = state.get("gen_user_prompt") or ""
@@ -329,8 +348,9 @@ def log_query(state: QAState):
     _write_readable_log(state, log_entry)
 
     logger.info(
-        "  Done — classify: %d/%d tokens, generate: %d/%d tokens",
+        "  Done — classify: %d/%d, sanitize: %d/%d, generate: %d/%d tokens",
         state.get("classify_tokens_in", 0), state.get("classify_tokens_out", 0),
+        state.get("sanitize_tokens_in", 0), state.get("sanitize_tokens_out", 0),
         state.get("gen_tokens_in", 0), state.get("gen_tokens_out", 0),
     )
     logger.info(LOG_SEPARATOR)
@@ -593,6 +613,12 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             for r in reranking.results
         ]
 
+        # Penalize AHEAD chunks to reduce spoiler exposure
+        for c in reranked:
+            if c["label"] == "AHEAD":
+                c["score"] *= 0.5
+        reranked.sort(key=lambda c: c["score"], reverse=True)
+
         reranked = _adaptive_cutoff(reranked)
 
         logger.info("  Output: %d chunks", len(reranked))
@@ -604,6 +630,67 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info(LOG_SEPARATOR)
 
         return {"chunks": reranked}
+
+    # --- Node: sanitize ---
+
+    async def sanitize_node(state: QAState) -> dict:
+        """Replace AHEAD chunk text with spoiler-safe summaries via Haiku."""
+        chunks = state.get("chunks", [])
+        ahead = [c for c in chunks if c["label"] == "AHEAD"]
+
+        if not ahead:
+            logger.info("── SANITIZE (skipped, no AHEAD chunks) %s", LOG_SEPARATOR[40:])
+            return {}
+
+        logger.info("── SANITIZE %s", LOG_SEPARATOR[12:])
+        logger.info("  AHEAD chunks to sanitize: %d", len(ahead))
+
+        passages = "\n===\n".join(c["text"] for c in ahead)
+        user_prompt = f"Summarize each passage below. One summary per passage, separated by ===.\n\n{passages}"
+
+        try:
+            response = anthropic.messages.create(
+                model=config.CLAUDE_HAIKU_MODEL,
+                max_tokens=1024,
+                system=SANITIZE_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            raw = response.content[0].text.strip()
+            summaries = [s.strip() for s in raw.split("===")]
+            tokens_in = response.usage.input_tokens
+            tokens_out = response.usage.output_tokens
+
+            logger.info("  Tokens: %d in / %d out", tokens_in, tokens_out)
+
+            # Match summaries to AHEAD chunks
+            for i, chunk in enumerate(ahead):
+                if i < len(summaries) and summaries[i]:
+                    chunk["text"] = summaries[i]
+                    logger.info("  [%d] chunk %d → %s", i + 1, chunk["chunk_index"], summaries[i][:100])
+                else:
+                    chunk["text"] = "This passage continues the narrative."
+                    logger.info("  [%d] chunk %d → (fallback)", i + 1, chunk["chunk_index"])
+
+        except Exception as e:
+            logger.warning("  Sanitization failed: %s — using fallback text", e)
+            tokens_in = 0
+            tokens_out = 0
+            for chunk in ahead:
+                chunk["text"] = "This passage continues the narrative."
+
+        # Reassemble: PAST unchanged + sanitized AHEAD
+        past = [c for c in chunks if c["label"] == "PAST"]
+        sanitized = past + ahead
+
+        logger.info("  Result: %d PAST + %d sanitized AHEAD = %d chunks", len(past), len(ahead), len(sanitized))
+        logger.info(LOG_SEPARATOR)
+
+        return {
+            "chunks": sanitized,
+            "sanitize_ahead_count": len(ahead),
+            "sanitize_tokens_in": tokens_in,
+            "sanitize_tokens_out": tokens_out,
+        }
 
     # --- Node: generate ---
 
@@ -689,6 +776,10 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         result = await rerank_node(state)
         state.update(result)
 
+        yield "sanitizing"
+        result = await sanitize_node(state)
+        state.update(result)
+
         yield state
 
     # --- Build graph ---
@@ -701,6 +792,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     graph.add_node("lookup", lookup_node)
     graph.add_node("analysis", analysis_node)
     graph.add_node("rerank", rerank_node)
+    graph.add_node("sanitize", sanitize_node)
     graph.add_node("generate", generate_node)
     graph.add_node("log", log_node)
 
@@ -716,7 +808,8 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     for node in ["vocabulary", "context", "lookup", "analysis"]:
         graph.add_edge(node, "rerank")
 
-    graph.add_edge("rerank", "generate")
+    graph.add_edge("rerank", "sanitize")
+    graph.add_edge("sanitize", "generate")
     graph.add_edge("generate", "log")
     graph.add_edge("log", END)
 
