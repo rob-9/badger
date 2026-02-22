@@ -440,7 +440,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
           {isIndexing && (
             <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2.5 py-1 rounded-full">
               <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-              Indexing for AI...
+              Indexing...
             </span>
           )}
           {isIndexed && !isIndexing && <ReadyBadge />}
