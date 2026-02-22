@@ -417,8 +417,10 @@ class RAGService:
 
         question_embedding = await self.get_embedding(query_text, input_type="query")
 
-        # Find relevant chunks
-        results = await self.vector_store.search(book_id, question_embedding, top_k=5)
+        # Find relevant chunks via hybrid search (semantic + BM25)
+        results = await self.vector_store.hybrid_search(
+            book_id, question_embedding, query_text=query_text, top_k=5,
+        )
 
         if not results:
             logger.info("No relevant chunks found")

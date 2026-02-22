@@ -431,31 +431,28 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
     # --- Node: vocabulary retrieval ---
 
     async def vocabulary_node(state: QAState) -> dict:
-        """Keyword search for vocabulary — find chunks containing the word."""
+        """Hybrid search for vocabulary — BM25 catches exact terms, semantic finds related context."""
         selected = state.get("selected_text") or ""
         book_id = state["book_id"]
+        query = selected if selected else state["question"]
+
         logger.info("── RETRIEVE (vocabulary) ─────────────────────")
-        logger.info('  Strategy: keyword search for "%s"', selected[:100])
+        logger.info('  Strategy: hybrid search for "%s", top_k=20', query[:100])
 
-        results = await vector_store.keyword_search(book_id, selected)
-        strategy = "keyword"
-        logger.info('  Keyword matches: %d chunks contain "%s"', len(results), selected[:50])
+        embedding = _embed_query(query)
+        logger.info("  Embedding: %d dimensions", len(embedding))
 
-        if not results:
-            logger.info("  No keyword matches — falling back to semantic search")
-            strategy = "keyword→semantic_fallback"
-            query = selected if selected else state["question"]
-            embedding = _embed_query(query)
-            logger.info('  Semantic query: "%s", %d dimensions', query[:100], len(embedding))
-            results = await vector_store.search(book_id, embedding, top_k=5)
-
-        results = results[:5]
+        results = await vector_store.hybrid_search(
+            book_id, embedding, query_text=query, top_k=20,
+        )
         labeled = _label_and_log(results, state)
 
         return {
             "chunks": labeled,
-            "retrieval_strategy": strategy,
-            "retrieval_query": selected,
+            "retrieval_strategy": "hybrid_vocabulary",
+            "retrieval_query": query,
+            "retrieval_top_k": 20,
+            "retrieval_embedding_dims": len(embedding),
         }
 
     # --- Node: context (proximity) retrieval ---
@@ -489,35 +486,31 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             "retrieval_chunk_match": chunk_match,
         }
 
-    # --- Node factory: semantic retrieval (lookup & analysis) ---
+    # --- Node: lookup retrieval ---
 
-    def _make_semantic_node(top_k: int, strategy: str):
-        """Create a pure semantic retrieval node (cosine similarity only)."""
-        async def semantic_node(state: QAState) -> dict:
-            logger.info("── RETRIEVE (%s) %s", strategy, "─" * (33 - len(strategy)))
-            logger.info("  Strategy: semantic search, top_k=%d", top_k)
+    async def lookup_node(state: QAState) -> dict:
+        """Hybrid retrieval for lookup — semantic + BM25 via RRF."""
+        logger.info("── RETRIEVE (lookup) ─────────────────────────")
+        logger.info("  Strategy: hybrid search (semantic + BM25), top_k=20")
 
-            query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
-            logger.info("  Query: %s", query[:200])
-            logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_CONTEXT_MODEL)
+        query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
+        logger.info("  Query: %s", query[:200])
 
-            embedding = _embed_query(query)
-            logger.info("  Embedding: %d dimensions", len(embedding))
-            logger.info("  Searching %d total chunks in book %s", state.get("total_chunks", 0), state["book_id"])
+        embedding = _embed_query(query)
+        logger.info("  Embedding: %d dimensions", len(embedding))
 
-            results = await vector_store.search(state["book_id"], embedding, top_k=top_k)
-            labeled = _label_and_log(results, state)
+        results = await vector_store.hybrid_search(
+            state["book_id"], embedding, query_text=query, top_k=20,
+        )
+        labeled = _label_and_log(results, state)
 
-            return {
-                "chunks": labeled,
-                "retrieval_strategy": strategy,
-                "retrieval_query": query,
-                "retrieval_top_k": top_k,
-                "retrieval_embedding_dims": len(embedding),
-            }
-        return semantic_node
-
-    lookup_node = _make_semantic_node(top_k=20, strategy="semantic")
+        return {
+            "chunks": labeled,
+            "retrieval_strategy": "hybrid",
+            "retrieval_query": query,
+            "retrieval_top_k": 20,
+            "retrieval_embedding_dims": len(embedding),
+        }
 
     # Analysis uses hybrid search + chapter summaries for broad thematic questions.
     # Summaries act as chapter-level index entries that help match questions like
@@ -588,11 +581,24 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         Takes up to 20 candidates from retrieval, reranks to top 15,
         then applies adaptive cutoff (floor=3, ceiling=10) based on
         the largest score drop-off between consecutive chunks.
+
+        When RERANK_ENABLED is false, skips the Voyage API call but
+        still applies adaptive cutoff on existing scores.
         """
         chunks = state.get("chunks", [])
         if len(chunks) <= 3:
             logger.info("── RERANK (skipped, %d chunks ≤ 3) %s", len(chunks), LOG_SEPARATOR[35:])
             return {}
+
+        if not config.RERANK_ENABLED:
+            logger.info("── RERANK (disabled, applying adaptive cutoff only) %s", LOG_SEPARATOR[50:])
+            for c in chunks:
+                if c["label"] == "AHEAD":
+                    c["score"] *= 0.5
+            chunks.sort(key=lambda c: c["score"], reverse=True)
+            cutoff = _adaptive_cutoff(chunks)
+            logger.info("  Output: %d chunks", len(cutoff))
+            return {"chunks": cutoff}
 
         logger.info("── RERANK %s", LOG_SEPARATOR[10:])
         logger.info("  Input: %d chunks → reranking to top 15", len(chunks))
