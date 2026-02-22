@@ -582,13 +582,19 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info("  Model:    %s", config.CLAUDE_HAIKU_MODEL)
 
         classify_prompt = (
-            f'Question: "{question}"\n'
-            f'Selected text: "{selected[:200]}"\n\n'
             f"Classify as exactly one of:\n"
             f"- vocabulary: The selected text IS the word/phrase to define\n"
             f"- context: Reader wants to understand a specific passage they selected\n"
             f"- lookup: Reader wants factual info from elsewhere in the book\n"
             f"- analysis: Reader wants literary interpretation or thematic discussion\n\n"
+            f"Examples:\n"
+            f'Q: "What does this mean?" Selected: "ephemeral" → {{"type": "vocabulary", "entities": ["ephemeral"]}}\n'
+            f'Q: "Why did he do that?" Selected: "He slammed the door and left without a word" → {{"type": "context", "entities": ["he"]}}\n'
+            f'Q: "When was the battle of Hogwarts?" Selected: "Harry raised his wand" → {{"type": "lookup", "entities": ["battle of Hogwarts", "Harry"]}}\n'
+            f'Q: "What does the green light symbolize?" Selected: "he stretched out his arms toward the dark water" → {{"type": "analysis", "entities": ["green light"]}}\n\n'
+            f'Now classify:\n'
+            f'Question: "{question}"\n'
+            f'Selected text: "{selected[:200]}"\n\n'
             f"Extract key entities (names, terms, concepts).\n\n"
             f'Return: {{"type": "...", "entities": [...]}}'
         )
