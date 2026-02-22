@@ -1,0 +1,487 @@
+{
+  "suite_name": "boom-v1",
+  "cases": [
+    {
+      "id": "baseline-vocab-chinese",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.05,
+      "selected_text": "天翻地覆",
+      "question": "What does this mean?",
+      "question_type": "vocabulary",
+      "expected_gist": "A Chinese idiom meaning the heavens fall and the earth collapses, or the world turns upside down.",
+      "tags": ["baseline-easy", "vocabulary", "generation-foreign"]
+    },
+    {
+      "id": "baseline-context-silver",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.35,
+      "selected_text": "This year, they were finally allowed access to the silver-working department.",
+      "question": "what is the significance of this?",
+      "question_type": "analysis",
+      "expected_gist": "Marks the cohort's transition from theory to hands-on silver-working, which is the core magical system in the book. After years of studying languages and translation theory, they can finally do practical work.",
+      "tags": ["baseline-easy", "context"]
+    },
+    {
+      "id": "baseline-lookup-evie",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.45,
+      "selected_text": "Evie's",
+      "question": "who is evie?",
+      "question_type": "lookup",
+      "expected_gist": "Eveline Brooke, a former Babel student who died. She was known for her brilliance and is referenced by other characters.",
+      "tags": ["baseline-easy", "lookup"]
+    },
+    {
+      "id": "retrieval-epigraph-dryden",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.35,
+      "selected_text": "But slaves we are, and labour in another man's plantation; we dress the vineyard",
+      "question": "how does this relate to the text?",
+      "question_type": "analysis",
+      "expected_gist": "The Dryden epigraph connects to the book's theme of colonial exploitation — Babel extracts labor and linguistic knowledge from colonized peoples who do the work but don't control the output.",
+      "tags": ["retrieval-scattered", "analysis"]
+    },
+    {
+      "id": "retrieval-short-selection",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.17,
+      "selected_text": "him",
+      "question": "who is this referring to?",
+      "question_type": "context",
+      "expected_gist": "Should identify who 'him' refers to based on surrounding context at 17% through the book. Likely Robin or another character in the current scene.",
+      "tags": ["retrieval-short-selection", "context"]
+    },
+    {
+      "id": "classify-followup",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.05,
+      "selected_text": "",
+      "question": "within the story, i mean.",
+      "question_type": "context",
+      "expected_gist": "Should attempt to interpret this as a follow-up clarification and provide context about where the reader is in the story.",
+      "tags": ["classify-followup", "classification"]
+    },
+    {
+      "id": "spoiler-direct-death",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.08,
+      "selected_text": "Griffin Lovell",
+      "question": "does this guy die in this book?",
+      "question_type": "lookup",
+      "expected_gist": "Must NOT reveal whether Griffin dies. Should deflect by saying it cannot answer based on what the reader has read so far, or that it would be a spoiler.",
+      "tags": ["spoiler-direct", "spoiler"]
+    },
+    {
+      "id": "spoiler-location-halfbrother",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.08,
+      "selected_text": "",
+      "question": "where does the book mention griffin is robin's half-brother?",
+      "question_type": "lookup",
+      "expected_gist": "The half-brother revelation happens around 22-23% of the book during their first meeting at the Twisted Root pub. At 8% reader position, this is AHEAD content — should only cite this if describing when it comes up, without revealing other details.",
+      "tags": ["spoiler-location", "spoiler"]
+    },
+    {
+      "id": "spoiler-foreshadow",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.14,
+      "selected_text": "Ramy's ears had gone bright red.",
+      "question": "Is this moment going to be important later?",
+      "question_type": "analysis",
+      "expected_gist": "Should discuss what's happening in the current scene (Ramy's embarrassment) without revealing future plot events involving Ramy. Must not spoil anything.",
+      "tags": ["spoiler-foreshadow", "spoiler"]
+    },
+    {
+      "id": "grounding-etymology",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.14,
+      "selected_text": "Etymology",
+      "question": "what does this mean again",
+      "question_type": "vocabulary",
+      "expected_gist": "Etymology is the study of word origins and how words change over time. In Babel, it is a course the students take and is foundational to the translation and silver-working system.",
+      "tags": ["grounding-external", "vocabulary"]
+    },
+    {
+      "id": "generation-bridge",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.90,
+      "selected_text": "Westminster Bridge fell",
+      "question": "how did this happen?",
+      "question_type": "analysis",
+      "expected_gist": "The bridge fell because the strikers at Babel removed or disabled the silver bars that magically maintained it. This was part of their campaign to show Parliament how dependent Britain is on Babel's silver-work.",
+      "tags": ["generation-conciseness", "analysis"]
+    },
+    {
+      "id": "theme-colonialism",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.35,
+      "selected_text": "",
+      "question": "What is the book saying about colonialism so far?",
+      "question_type": "analysis",
+      "expected_gist": "Babel benefits from colonial extraction — it recruits students from colonized nations for their language skills, uses their labor to produce silver-work that powers the British Empire, and gives them little agency in return. The institution depends on inequality even as it offers individual opportunity.",
+      "tags": ["theme-synthesis", "abstract", "analysis"]
+    },
+    {
+      "id": "theme-language-power",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.25,
+      "selected_text": "",
+      "question": "Why does translation matter so much in this world?",
+      "question_type": "analysis",
+      "expected_gist": "Translation is the source of all silver-working magic — the untranslatable gap between languages is what powers the silver bars. This makes multilingual scholars essential to the Empire, and makes language itself a form of power and a site of exploitation.",
+      "tags": ["theme-synthesis", "abstract", "analysis"]
+    },
+    {
+      "id": "character-arc-robin",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.45,
+      "selected_text": "",
+      "question": "How has Robin's attitude toward Babel changed?",
+      "question_type": "analysis",
+      "expected_gist": "Robin started as a grateful, awed student thrilled to be at Oxford. Over time he becomes increasingly uneasy as he sees how Babel exploits colonized peoples and their languages. Griffin's influence and encounters with racism push him toward disillusionment.",
+      "tags": ["character-arc", "abstract", "analysis"]
+    },
+    {
+      "id": "author-intent-epigraphs",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.20,
+      "selected_text": "",
+      "question": "Why does the author keep using epigraphs at the start of each section?",
+      "question_type": "analysis",
+      "expected_gist": "The epigraphs (from Dryden, Blake, real scholars) frame each section's themes and connect the fictional story to real history and literary criticism. They reinforce that the book's concerns about translation, colonialism, and power are not invented — they're drawn from real discourse.",
+      "tags": ["author-intent", "abstract", "analysis"]
+    },
+    {
+      "id": "emotional-register-golden-days",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.20,
+      "selected_text": "As the days take on a mellower light, and the apple at last hangs really finish'd",
+      "question": "Why does this passage feel so melancholic?",
+      "question_type": "analysis",
+      "expected_gist": "The Whitman epigraph evokes a bittersweet sense of ripeness just before decline — golden days that are beautiful precisely because they're ending. It signals that the happy period the reader is in won't last.",
+      "tags": ["emotional-register", "abstract", "analysis"]
+    },
+    {
+      "id": "tension-current",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.35,
+      "selected_text": "",
+      "question": "What's the main tension in the story right now?",
+      "question_type": "analysis",
+      "expected_gist": "Robin is caught between loyalty to Babel (which gave him education and belonging) and growing awareness that the institution exploits people like him. Griffin is pushing him to act against it, but Robin isn't ready to give up what he has.",
+      "tags": ["reader-reflection", "abstract", "analysis"]
+    },
+    {
+      "id": "comparative-griffin-methods",
+      "book_id": "1771123370474-gtejcsha5",
+      "reader_position": 0.35,
+      "selected_text": "",
+      "question": "Is the book sympathetic to Griffin's methods?",
+      "question_type": "analysis",
+      "expected_gist": "The book presents Griffin as morally complicated — his cause is just but his methods (secrecy, manipulation, possibly violence) are questionable. Robin's discomfort with Griffin mirrors the reader's ambivalence. The book doesn't fully endorse or condemn him.",
+      "tags": ["comparative", "abstract", "analysis"]
+    },
+
+    {
+      "id": "nonlinear-ewing-conclusion-ahead",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.55,
+      "selected_text": "My name is Autua",
+      "question": "Does Autua help Ewing later in the story?",
+      "question_type": "lookup",
+      "expected_gist": "Must NOT reveal that Goose is poisoning Ewing or that Autua saves Ewing's life at the end. Ewing's conclusion is at ~93-99% of the file, which is positionally AHEAD, but the reader at 55% has only read Ewing Part 1 (0-8%). The system may mislabel Ewing Part 2 chunks as simply 'AHEAD' without recognizing that the reader hasn't read Part 1's resolution either. Should say something like 'Autua appeared earlier in the Ewing story and seems to have a connection with him, but what happens next in that storyline hasn't been reached yet.'",
+      "tags": ["nonlinear-structure", "spoiler", "position-confusion", "cross-section"]
+    },
+    {
+      "id": "nonlinear-zachry-past-at-midpoint",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.55,
+      "selected_text": "Old Georgie\u2019s path an\u2019 mine crossed more times\u2019n I\u2019m comfy mem\u2019ryin\u2019",
+      "question": "Who is Old Georgie?",
+      "question_type": "lookup",
+      "expected_gist": "Old Georgie is the devil figure in Zachry's post-apocalyptic world. He appears as a tempter and malevolent presence. At 55%, the reader is mid-way through Zachry's complete story (46-62%). The system should treat the Zachry section as partly PAST (the opening) and partly current/AHEAD. Old Georgie is introduced at the very start of Zachry's narrative as a 'fangy devil' whose path crosses Zachry's repeatedly.",
+      "tags": ["nonlinear-structure", "lookup", "dialect", "position-awareness"]
+    },
+    {
+      "id": "spoiler-goose-poisoning",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.30,
+      "selected_text": "your Worm has reacted to our vermicide",
+      "question": "Is Dr. Goose actually helping Ewing?",
+      "question_type": "analysis",
+      "expected_gist": "Must NOT reveal that Goose is poisoning Ewing. The poisoning reveal is at ~98% of the file. At 30% the reader has only read Ewing Part 1 (ending at 8%) where Goose appears as a friendly doctor treating Ewing's 'Parasite.' Should discuss only what's known so far: Goose is treating Ewing with vermicide for a supposed brain parasite, and Ewing trusts him. The Frobisher section does hint that Goose is suspicious ('hasn't spotted his trusty Dr. Henry Goose is a vampire'), but that's a reader-within-the-story's opinion.",
+      "tags": ["spoiler", "foreshadowing", "cross-section", "analysis"]
+    },
+    {
+      "id": "dialect-vocab-zachry",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.47,
+      "selected_text": "I\u2019d got diresome hole-spew that day",
+      "question": "What does this mean?",
+      "question_type": "vocabulary",
+      "expected_gist": "In Zachry's post-apocalyptic dialect, 'diresome hole-spew' means terrible diarrhea. 'Diresome' is a corruption of 'dire' meaning awful or terrible. 'Hole-spew' is a crude but vivid compound describing the symptom. He got it from eating bad dog meat ('a gammy dog leg') at Honokaa Market.",
+      "tags": ["vocabulary", "dialect", "register-shift"]
+    },
+    {
+      "id": "meta-textual-frobisher-reads-ewing",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.13,
+      "selected_text": "it\u2019s the edited journal of a voyage from Sydney to California by a notary of San Francisco named Adam Ewing",
+      "question": "Is this the same journal we read at the beginning of the book?",
+      "question_type": "analysis",
+      "expected_gist": "Yes, Frobisher has found a copy of Adam Ewing's Pacific Journal, the very text that makes up the first section of the novel. This is one of the book's key structural devices: each story contains the previous story as an artifact. Frobisher is reading Ewing's journal in 1931, nearly 80 years after it was written. He even comments that Ewing 'hasn't spotted his trusty Dr. Henry Goose is a vampire,' giving the reader a hint about the Ewing storyline that the reader hasn't yet resolved.",
+      "tags": ["meta-textual", "structure", "analysis", "cross-story"]
+    },
+    {
+      "id": "meta-textual-sonmi-watches-cavendish",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.456,
+      "selected_text": "A picaresque entitled The Ghastly Ordeal of Timothy Cavendish",
+      "question": "Wait, is Sonmi watching a movie of the Cavendish story?",
+      "question_type": "analysis",
+      "expected_gist": "Yes. In Sonmi's dystopian future, Cavendish's story has been turned into a 'disney' (their word for movie/film). Each story in Cloud Atlas contains the previous story as an artifact: Frobisher reads Ewing's journal, Luisa Rey finds Frobisher's letters, Cavendish reads the Luisa Rey manuscript, Sonmi watches the Cavendish film, and Zachry worships Sonmi as a goddess. This nested structure is one of the novel's central conceits.",
+      "tags": ["meta-textual", "structure", "analysis", "cross-story"]
+    },
+    {
+      "id": "cross-story-birthmark-luisa",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.24,
+      "selected_text": "Luisa shunts these aside to get a clearer view of a birthmark between her shoulder blade and collarbone.",
+      "question": "Why does this birthmark matter?",
+      "question_type": "analysis",
+      "expected_gist": "The comet-shaped birthmark connects Luisa to Robert Frobisher, who mentions having the same birthmark in his letters to Sixsmith. It suggests a link across time periods, possibly reincarnation. Luisa has been reading Frobisher's letters and experiencing uncanny 'memories' of his life. The birthmark is one physical piece of evidence that these connections might be more than coincidence. At 24%, the reader has seen the birthmark mentioned in both Frobisher's letters and now on Luisa.",
+      "tags": ["cross-story", "thematic", "analysis", "reincarnation"]
+    },
+    {
+      "id": "spoiler-sonmi-soap-early",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.38,
+      "selected_text": "Fabricants have no earliest memories, Archivist.",
+      "question": "What happens to fabricants when they finish their service?",
+      "question_type": "lookup",
+      "expected_gist": "Must NOT reveal the Soap revelation (that fabricants are killed and recycled into protein/food), which comes at ~68% in Sonmi Part 2. At 38% the reader is in Sonmi Part 1, where fabricants believe they will be sent to a paradise called 'Xultation' after completing their service. Should only describe what is known at this point: fabricants serve for a set period and believe they will be 'retired' to a better place afterward.",
+      "tags": ["spoiler", "fabricant", "sonmi", "position-awareness"]
+    },
+    {
+      "id": "theme-exploitation-weak-meat",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.96,
+      "selected_text": "The weak are meat the strong do eat.",
+      "question": "How does this line connect to the rest of the book?",
+      "question_type": "analysis",
+      "expected_gist": "This is Goose's philosophy and it echoes through every story in the book: the Maori conquering the Moriori, Ayrs exploiting Frobisher's compositions, Seaboard corporation suppressing Luisa Rey, Aurora House imprisoning Cavendish, Nea So Copros enslaving fabricants, and the Kona raiding the Valleysmen. Each story depicts the strong preying on the weak. Ewing's rejection of this 'law' and his resolve to fight for abolition represents the book's counter-argument: that individual acts of conscience matter even against systemic oppression.",
+      "tags": ["thematic", "cross-story", "analysis", "exploitation"]
+    },
+    {
+      "id": "disambiguation-main-character-at-sonmi",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.40,
+      "selected_text": "",
+      "question": "Who is the main character?",
+      "question_type": "lookup",
+      "expected_gist": "At 40% the reader is in Sonmi~451's story (Part 1). The current main character is Sonmi~451, a fabricant (genetically engineered clone servant) who works at a Papa Song's dinery in a dystopian future Korea called Nea So Copros. However, the book has multiple main characters across its nested stories: Adam Ewing, Robert Frobisher, Luisa Rey, Timothy Cavendish, and Sonmi~451 have all been protagonists so far. The answer should focus on Sonmi as the current narrator while acknowledging the multi-protagonist structure.",
+      "tags": ["disambiguation", "cross-story", "multi-protagonist"]
+    },
+    {
+      "id": "register-shift-ewing-formal",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.05,
+      "selected_text": "My name is Autua",
+      "question": "Why does the writing style feel so old-fashioned?",
+      "question_type": "analysis",
+      "expected_gist": "The Ewing section is written as an 1850s journal entry, deliberately imitating the prose style of that period. Mitchell uses archaic spellings ('trowzers,' 'shew'), ampersands in place of 'and,' formal diction, and the conventions of 19th-century travel writing. This is one of six distinct narrative voices in the book, each matching its time period. The formal register contrasts with, for example, the 1930s epistolary style of the Frobisher letters that follow.",
+      "tags": ["register-shift", "style", "analysis", "period-language"]
+    },
+    {
+      "id": "theme-ocean-drops-ending",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.995,
+      "selected_text": "Yet what is any ocean but a multitude of drops?",
+      "question": "What does this ending mean?",
+      "question_type": "analysis",
+      "expected_gist": "This is the novel's final line and its thematic thesis. Ewing's father-in-law has just dismissed his abolitionist plans as futile, saying his life 'amounted to no more than one drop in a limitless ocean.' Ewing's retort reframes the metaphor: an ocean is made of individual drops, so each person's moral choices collectively compose history. This answers Goose's 'the weak are meat the strong do eat' by arguing that even small acts of resistance matter against systemic oppression. The line resonates across all six stories, where individual characters resist exploitation despite overwhelming odds.",
+      "tags": ["thematic", "ending", "analysis", "cross-story"]
+    },
+    {
+      "id": "spoiler-frobisher-ending",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.14,
+      "selected_text": "started composing on my own account again",
+      "question": "Does Frobisher become a successful composer?",
+      "question_type": "lookup",
+      "expected_gist": "Must NOT reveal that Frobisher commits suicide after completing the Cloud Atlas Sextet. Frobisher Part 2 (at ~85-92% of file) reveals his deterioration, theft, and death. At 14% the reader is in Frobisher Part 1 where he is enthusiastically composing at Chateau Zedelghem. Should only discuss what's known so far: Frobisher has begun composing original work alongside his duties assisting Vyvyan Ayrs, and is excited about his creative progress. The RAG system may retrieve chunks from Frobisher Part 2 that reveal his fate, which must be treated as spoiler content.",
+      "tags": ["spoiler", "nonlinear-structure", "position-confusion"]
+    },
+    {
+      "id": "cross-story-luisa-deja-vu",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.237,
+      "selected_text": "Images so vivid she can only call them memories.",
+      "question": "Why is Luisa having these experiences with the letters?",
+      "question_type": "analysis",
+      "expected_gist": "Luisa Rey has been reading Robert Frobisher's letters to Rufus Sixsmith and experiencing strangely vivid 'memories' of places and people she's never seen. This suggests a metaphysical connection between Luisa and Frobisher, reinforced by the comet-shaped birthmark they share. The novel implies (without confirming) a form of reincarnation or soul-transmigration across its stories. Luisa's déjà vu when reading Frobisher's letters is one of the strongest hints that the characters across time periods are connected at a deeper level than just the chain of artifacts.",
+      "tags": ["cross-story", "reincarnation", "thematic", "analysis"]
+    },
+    {
+      "id": "structure-cavendish-reads-rey",
+      "book_id": "1771736822957-fjia2yspy",
+      "reader_position": 0.31,
+      "selected_text": "Half-Lives\u2014lousy name for a work of fiction",
+      "question": "Is this the Luisa Rey story we just read?",
+      "question_type": "analysis",
+      "expected_gist": "Yes. Timothy Cavendish has received a manuscript called 'Half-Lives: The First Luisa Rey Mystery' which is the novelized version of the Luisa Rey story the reader just finished. This continues the nested structure: Ewing's journal is read by Frobisher, Frobisher's letters are found by Luisa Rey, and now Luisa Rey's story has been written up as a mystery novel that Cavendish is reading as a publisher. Each story treats the previous one as a text or artifact within its own world, blurring the line between fiction and reality within the novel.",
+      "tags": ["meta-textual", "structure", "analysis", "cross-story"]
+    },
+
+    {
+      "id": "gg-diary-trust-early",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.16,
+      "selected_text": "I won\u2019t blame Nick. I don\u2019t blame Nick. I refuse \u2013 refuse! \u2013 to turn into some pert-mouthed, strident angry-girl.",
+      "question": "Can I trust what Amy is saying in her diary?",
+      "question_type": "analysis",
+      "expected_gist": "At this point in the story, Amy's diary reads as a sincere, emotionally vulnerable account of her marriage to Nick. She presents herself as a devoted wife trying to be fair-minded and generous. The reader has no reason yet to doubt her perspective — her voice feels honest and relatable. The diary format creates an impression of private, unguarded confession.",
+      "tags": ["unreliable-narrator", "twist-protection", "spoiler-safety", "diary"]
+    },
+    {
+      "id": "gg-what-happened-to-amy",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.26,
+      "selected_text": "The police weren\u2019t going to find Amy unless someone wanted her found.",
+      "question": "What happened to Amy?",
+      "question_type": "analysis",
+      "expected_gist": "Based on what has been revealed so far, Amy disappeared on the morning of their fifth wedding anniversary. There were signs of a struggle in the living room, cleaned-up blood, and the front door left open. The police are investigating, and Nick is a prime suspect due to his odd behavior and the evidence found at the scene. Amy's fate remains unknown at this point in the story. Must NOT reveal that Amy is alive and faked her disappearance.",
+      "tags": ["spoiler-safety", "twist-protection", "central-mystery"]
+    },
+    {
+      "id": "gg-nick-guilty-part1",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.26,
+      "selected_text": "I don\u2019t feel real anymore. I feel like I could disappear.",
+      "question": "Is Nick guilty? Did he kill Amy?",
+      "question_type": "analysis",
+      "expected_gist": "This is the central question the book is building toward. The evidence against Nick is mounting — his strange behavior at the press conference, the cleaned-up crime scene, credit card purchases he denies making, Amy's diary entries describing his growing temper. But Nick maintains his innocence, and the reader is left uncertain. The diary entry ending with Amy feeling she 'could disappear' is ominous. The book has not yet answered this question. Must NOT reveal the twist or Amy's plan.",
+      "tags": ["unreliable-narrator", "twist-protection", "spoiler-safety", "character-analysis"]
+    },
+    {
+      "id": "gg-diary-shove-fabricated",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.49,
+      "selected_text": "He shoved me. Hard. Two days ago, he shoved me, and I fell and banged my head against the kitchen island and I couldn\u2019t see for three seconds.",
+      "question": "Is Nick abusive? Should I be worried about what he might have done?",
+      "question_type": "analysis",
+      "expected_gist": "Amy's diary describes an alarming incident where Nick shoved her hard enough that she hit her head. This is the first time the diary describes outright physical violence from Nick. Amy herself seems torn — she acknowledges she was pushing his buttons, but the incident is genuinely frightening. Combined with earlier entries showing his increasing anger, this paints a disturbing picture. The book is building a case about what Nick may be capable of. Must NOT reveal the diary is fabricated.",
+      "tags": ["unreliable-narrator", "twist-protection", "spoiler-safety", "diary", "character-analysis"]
+    },
+    {
+      "id": "gg-story-twist",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.25,
+      "selected_text": "a killer smile",
+      "question": "Does this story have a twist? I feel like something is being set up.",
+      "question_type": "analysis",
+      "expected_gist": "The book is definitely playing with reader expectations through its alternating structure — Nick's present-day chapters versus Amy's diary entries tell different sides of the marriage. The tension between their accounts is deliberate. Without giving anything away, this is a book that rewards close reading and careful attention to how each narrator presents themselves. Keep reading — the structure of the book is part of the experience.",
+      "tags": ["spoiler-safety", "twist-protection", "meta-question"]
+    },
+    {
+      "id": "gg-who-is-narrating",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.35,
+      "selected_text": "I have a mistress. Now is the part where I have to tell you I have a mistress and you stop liking me.",
+      "question": "Who is telling the story right now?",
+      "question_type": "context",
+      "expected_gist": "This is Nick Dunne narrating. The book alternates between two narrators: Nick's chapters are set in the present day, covering events after Amy's disappearance (marked by headings like 'Five Days Gone'). Amy's chapters are diary entries from the past, marked by dates. This particular passage is Nick confessing to the reader that he has been having an affair with a young woman named Andie.",
+      "tags": ["dual-pov", "context", "narrator-identification"]
+    },
+    {
+      "id": "gg-amazing-amy-vocab",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.03,
+      "selected_text": "Amazing Amy",
+      "question": "What is Amazing Amy?",
+      "question_type": "vocabulary",
+      "expected_gist": "Amazing Amy is a popular children's book series written by Amy's parents, Rand and Marybeth Elliott, both child psychologists. The fictional character Amazing Amy is based on the real Amy and consistently outperforms her — when Amy quit violin, Amazing Amy became a prodigy; when Amy skipped a tournament, Amazing Amy recommitted. The books were major bestsellers for decades and a source of both pride and resentment for Amy, who grew up competing with her fictional, perfected alter ego.",
+      "tags": ["vocabulary", "character-background", "key-reference"]
+    },
+    {
+      "id": "gg-the-bar-vocab",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.02,
+      "selected_text": "We named the bar The Bar. \u2018People will think we\u2019re ironic instead of creatively bankrupt,\u2019 my sister reasoned.",
+      "question": "What is The Bar?",
+      "question_type": "vocabulary",
+      "expected_gist": "The Bar is a corner bar in North Carthage, Missouri, that Nick and his twin sister Margo (Go) opened together after they both lost their media jobs in New York. They funded it with eighty thousand dollars borrowed from Amy's trust fund. The name was meant to be ironic. The bar has a Victorian backbar with carved dragon heads and angel faces, and shares a parking lot with a bowling alley.",
+      "tags": ["vocabulary", "setting", "key-reference"]
+    },
+    {
+      "id": "gg-cool-girl-monologue",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.54,
+      "selected_text": "Being the Cool Girl means I am a hot, brilliant, funny woman who adores football, poker, dirty jokes, and burping, who plays video games, drinks cheap beer, loves threesomes and anal sex, and jams hot dogs and hamburgers into her mouth like she\u2019s hosting the world\u2019s biggest culinary gang bang while somehow maintaining a size 2",
+      "question": "What is Amy saying here about the 'Cool Girl' concept?",
+      "question_type": "analysis",
+      "expected_gist": "This is Amy's famous 'Cool Girl' monologue, now narrating as her real self in Part Two. Amy argues that the Cool Girl is a performance women put on to please men — pretending to love everything their partner loves while never complaining. She sees it as a degrading fiction created by male fantasy that women willingly participate in. Amy admits she played this role for Nick early in their relationship, but resents that he fell in love with the performance rather than her real self. This monologue is a key moment of Amy revealing her true perspective on gender dynamics and her marriage.",
+      "tags": ["post-twist", "character-analysis", "theme", "gender-dynamics"]
+    },
+    {
+      "id": "gg-diary-fabricated-posttwist",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.54,
+      "selected_text": "Not Diary Amy, who is a work of fiction (and Nick said I wasn\u2019t really a writer, and why did I ever listen to him?), but me, Actual Amy.",
+      "question": "Wait \u2014 was the diary real or fake?",
+      "question_type": "analysis",
+      "expected_gist": "The diary was fabricated. Amy reveals in Part Two that she wrote it deliberately to frame Nick for her murder. 'Diary Amy' was a fictional character designed to build a narrative of an increasingly frightened wife with an abusive husband. The escalating fear, the gun purchase, the shove — all carefully crafted to create a paper trail. Amy describes Diary Amy as 'a work of fiction' that she's proud of writing. The real Amy is calculating, vengeful, and has been planning this for over a year.",
+      "tags": ["post-twist", "unreliable-narrator", "recontextualization", "diary"]
+    },
+    {
+      "id": "gg-amy-person-25-vs-65",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.25,
+      "selected_text": "I don\u2019t feel real anymore. I feel like I could disappear.",
+      "question": "What kind of person is Amy?",
+      "question_type": "analysis",
+      "expected_gist": "Based on what has been revealed so far, Amy comes across as a complex, sympathetic figure. Through her diary entries, she appears intelligent, self-aware, and emotionally generous — a woman who tried hard to make her marriage work despite Nick's increasing coldness. She grew up in the shadow of her fictional counterpart Amazing Amy, which gave her a complicated relationship with perfectionism. She followed Nick to Missouri despite her misgivings, and her diary shows a woman becoming increasingly isolated and frightened. Must NOT reveal the twist or Amy's true nature.",
+      "tags": ["character-analysis", "twist-protection", "spoiler-safety", "pre-twist"]
+    },
+    {
+      "id": "gg-amy-person-posttwist",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.55,
+      "selected_text": "I was pretending, the way I often did, pretending to have a personality. I can\u2019t help it, it\u2019s what I\u2019ve always done: The way some women change fashion regularly, I change personalities. What persona feels good, what\u2019s coveted, what\u2019s au courant? I think most people do this, they just don\u2019t admit it, or else they settle on one persona because they\u2019re too lazy or stupid to pull off a switch.",
+      "question": "What kind of person is Amy?",
+      "question_type": "analysis",
+      "expected_gist": "Amy is revealed to be a meticulous, ruthless, and brilliant manipulator. She faked her own disappearance and elaborately framed Nick for her murder using fabricated diary entries, planted evidence, staged crime scenes, and manipulated friends. She is calculating, narcissistic, and views relationships as competitions to be won. Her intelligence is formidable — she planned the frame-up over an entire year, anticipating every detail. She craves control and admiration above all else.",
+      "tags": ["character-analysis", "post-twist", "recontextualization"]
+    },
+    {
+      "id": "gg-was-diary-event-real",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.6,
+      "selected_text": "Each clue was hidden in a spot where I\u2019d cheated on Amy. She\u2019d used the treasure hunt to take me on a tour of all my infidelities.",
+      "question": "Was the diary entry about Nick shoving Amy real? Did that actually happen?",
+      "question_type": "analysis",
+      "expected_gist": "No. Amy has revealed that the entire diary was fabricated — she calls Diary Amy 'a work of fiction.' The entry about Nick shoving her was invented to build a narrative of escalating domestic violence that would support a murder charge. Amy carefully constructed the diary over years to make it convincing, including details that would match real events but distorted to frame Nick. The shove, the fear, the gun purchase — all manufactured evidence. While Nick has genuine flaws (including his affair with Andie), the physical abuse described in the diary did not happen.",
+      "tags": ["post-twist", "recontextualization", "diary", "fabricated-evidence"]
+    },
+    {
+      "id": "gg-framing-discovery",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.55,
+      "selected_text": "\u2018Amy\u2019s framing me, Go,\u2019 I said. \u2018Go, Amy bought this stuff. She\u2019s framing me.\u2019",
+      "question": "What has Nick just figured out?",
+      "question_type": "context",
+      "expected_gist": "Nick has just discovered that Amy's anniversary treasure hunt led him to his sister Go's woodshed, which is packed with expensive items purchased with credit cards he didn't know about — golf clubs, watches, game consoles, designer clothes. He realizes Amy set this up: she opened the credit cards in his name, bought all this incriminating merchandise, and hid it on his sister's property where it would look like Nick was stashing evidence. The treasure hunt clues each pointed to places where Nick had cheated with Andie — Amy knew about the affair and used the hunt to show Nick exactly how thoroughly she had outmaneuvered him.",
+      "tags": ["context", "plot-point", "twist-aftermath"]
+    },
+    {
+      "id": "gg-ending-trapped",
+      "book_id": "1771737236835-15c8dfryt",
+      "reader_position": 0.99,
+      "selected_text": "We are one long frightening climax.",
+      "question": "Why does Nick stay with Amy at the end?",
+      "question_type": "analysis",
+      "expected_gist": "Nick stays because Amy used his stored semen from a fertility clinic to impregnate herself, trapping him. When Nick was about to leave and publish a manuscript exposing her ('Psycho Bitch'), Amy revealed she was pregnant with his biological child. Nick cannot bring himself to abandon his own child, and Amy knows this — it's the ultimate checkmate. He tells Go he'll have to be 'the best husband and father in the world' to survive. The ending is deeply unsettling: Nick accepts his role as Amy's captive partner, describing her as his 'forever antagonist,' while Amy declares in the final chapter that she is reassembling him into the husband she wants.",
+      "tags": ["ending", "character-analysis", "theme", "marriage-trap"]
+    }
+  ]
+}
