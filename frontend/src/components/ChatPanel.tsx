@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Send, BookOpen, Loader2 } from 'lucide-react'
+import { X, Send, BookOpen, Loader2, ChevronDown } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -38,6 +38,7 @@ function truncate(text: string, maxLen: number): string {
 export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [openPopover, setOpenPopover] = useState<string | null>(null)
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -68,6 +69,18 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
       document.removeEventListener('keydown', handleEscape)
     }
   }, [openPopover])
+
+  const toggleSources = useCallback((msgId: string) => {
+    setExpandedSources(prev => {
+      const next = new Set(prev)
+      if (next.has(msgId)) {
+        next.delete(msgId)
+      } else {
+        next.add(msgId)
+      }
+      return next
+    })
+  }, [])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -199,6 +212,39 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
                     })() : undefined}
                   >{msg.content}</ReactMarkdown>
                 </div>
+
+                {/* Collapsible sources section */}
+                {msg.sources && msg.sources.length > 0 && (
+                  <div className="mt-1.5">
+                    <button
+                      onClick={() => toggleSources(msg.id)}
+                      aria-expanded={expandedSources.has(msg.id)}
+                      className="flex items-center gap-1 text-[0.7rem] text-gray-400 dark:text-[#666] hover:text-gray-600 dark:hover:text-[#999] transition-colors"
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${expandedSources.has(msg.id) ? 'rotate-180' : ''}`} />
+                      {msg.sources.length} source{msg.sources.length !== 1 ? 's' : ''}
+                    </button>
+                    {expandedSources.has(msg.id) && (
+                      <div className="mt-1.5 space-y-1.5 border-t border-gray-100 dark:border-[#333] pt-2">
+                        {msg.sources.map((source) => (
+                          <div key={source.source_number} className="flex gap-2 text-xs">
+                            <span className="inline-flex items-center justify-center min-w-[1.2em] h-[1.2em] text-[0.65rem] font-semibold bg-accent/20 text-accent-foreground rounded-full px-1 leading-none flex-shrink-0 mt-0.5">
+                              {source.source_number}
+                            </span>
+                            <div className="min-w-0">
+                              <span className={`text-[0.6rem] font-medium px-1 py-0.5 rounded mr-1 ${LABEL_COLORS[source.label] || DEFAULT_LABEL_COLOR}`}>
+                                {source.label}
+                              </span>
+                              <span className="text-gray-500 dark:text-[#888] line-clamp-2">
+                                {truncate(source.text, 120)}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
