@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 import math
+import numpy as np
 from typing import Optional
 from rank_bm25 import BM25Okapi
 from .chunker import TextChunk
@@ -46,29 +47,17 @@ class SearchResult:
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """
     Calculate cosine similarity between two vectors.
-
-    Measures the angle between two vectors (ignores magnitude).
-    Perfect for comparing embeddings because we care about direction, not length.
-
-    Formula: cos(θ) = (A · B) / (||A|| × ||B||)
-
-    Where:
-    - A · B = dot product (sum of element-wise multiplication)
-    - ||A|| = magnitude (sqrt of sum of squares)
-
-    Returns: -1 to 1 (1 = most similar)
+    Uses numpy for ~10x speedup over pure Python on high-dimensional vectors.
     """
     if len(a) != len(b):
         raise ValueError(f"Vectors must have same length: {len(a)} != {len(b)}")
-
-    dot_product = sum(a_i * b_i for a_i, b_i in zip(a, b))
-    magnitude_a = math.sqrt(sum(a_i * a_i for a_i in a))
-    magnitude_b = math.sqrt(sum(b_i * b_i for b_i in b))
-
-    if magnitude_a == 0 or magnitude_b == 0:
+    a_arr = np.asarray(a, dtype=np.float64)
+    b_arr = np.asarray(b, dtype=np.float64)
+    norm_a = np.linalg.norm(a_arr)
+    norm_b = np.linalg.norm(b_arr)
+    if norm_a == 0 or norm_b == 0:
         return 0.0
-
-    return dot_product / (magnitude_a * magnitude_b)
+    return float(np.dot(a_arr, b_arr) / (norm_a * norm_b))
 
 
 def _tokenize(text: str) -> list[str]:
@@ -279,10 +268,20 @@ class VectorStore:
 
         logger.debug("Comparing against %d chunks", len(book_entries))
 
-        # Calculate similarity for each chunk
+        # Batch cosine similarity with numpy
+        query_vec = np.asarray(query_embedding, dtype=np.float64)
+        embedding_matrix = np.array([e.embedding for e in book_entries], dtype=np.float64)
+        query_norm = np.linalg.norm(query_vec)
+        if query_norm == 0:
+            return []
+        norms = np.linalg.norm(embedding_matrix, axis=1)
+        valid = norms > 0
+        scores = np.zeros(len(book_entries))
+        scores[valid] = embedding_matrix[valid] @ query_vec / (norms[valid] * query_norm)
+
         results = [
-            SearchResult(chunk=entry.chunk, score=cosine_similarity(query_embedding, entry.embedding))
-            for entry in book_entries
+            SearchResult(chunk=entry.chunk, score=float(scores[i]))
+            for i, entry in enumerate(book_entries)
         ]
 
         # Sort by similarity (highest first) and take top K
@@ -519,9 +518,20 @@ class VectorStore:
         if not summaries:
             return []
 
+        # Batch cosine similarity with numpy
+        query_vec = np.asarray(query_embedding, dtype=np.float64)
+        embedding_matrix = np.array([e.embedding for e in summaries], dtype=np.float64)
+        query_norm = np.linalg.norm(query_vec)
+        if query_norm == 0:
+            return []
+        norms = np.linalg.norm(embedding_matrix, axis=1)
+        valid = norms > 0
+        scores = np.zeros(len(summaries))
+        scores[valid] = embedding_matrix[valid] @ query_vec / (norms[valid] * query_norm)
+
         results = [
-            SearchResult(chunk=entry.chunk, score=cosine_similarity(query_embedding, entry.embedding))
-            for entry in summaries
+            SearchResult(chunk=entry.chunk, score=float(scores[i]))
+            for i, entry in enumerate(summaries)
         ]
         return sorted(results, key=lambda r: r.score, reverse=True)[:top_k]
 
