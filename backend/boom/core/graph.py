@@ -4,8 +4,8 @@ LangGraph agent workflow for the RAG pipeline.
 Routes questions through type-specific retrieval strategies:
 - vocabulary: keyword/semantic top_k=5, concise definition
 - context: proximity ±3 chunks, passage explanation
-- lookup: semantic top_k=5, factual answer
-- analysis: broad semantic top_k=8, deeper analysis
+- lookup: semantic top_k=20 → rerank with adaptive cutoff (3-10)
+- analysis: hybrid + summaries → rerank with adaptive cutoff (3-10)
 """
 
 import json
@@ -525,7 +525,7 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         )
         logger.info("  Summary results: %d", len(summary_results))
 
-        # Merge both tiers — reranker will pick the best 5-8
+        # Merge both tiers — reranker + adaptive cutoff will select 3-10
         all_results = passage_results + summary_results
         labeled = _label_and_log(all_results, state)
 
@@ -539,22 +539,43 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
 
     # --- Node: rerank ---
 
+    def _adaptive_cutoff(chunks: list[dict], floor: int = 3, ceiling: int = 10) -> list[dict]:
+        """Select chunks using score drop-off: keep chunks before the largest gap."""
+        if len(chunks) <= floor:
+            return chunks
+
+        scores = [c["score"] for c in chunks]
+        limit = min(len(scores) - 1, ceiling)
+
+        max_drop = 0
+        cut_at = limit  # default: keep up to ceiling
+
+        for i in range(floor - 1, limit):
+            drop = scores[i] - scores[i + 1]
+            if drop > max_drop:
+                max_drop = drop
+                cut_at = i + 1
+
+        kept = chunks[:cut_at]
+        logger.info("  Adaptive cutoff: %d → %d chunks (max drop=%.4f at position %d)",
+                     len(chunks), len(kept), max_drop, cut_at)
+        return kept
+
     async def rerank_node(state: QAState) -> dict:
         """
         Rerank retrieved chunks using Voyage's rerank-2.5 model.
 
-        Takes the 20 candidates from retrieval and narrows down to the
-        best 5 by relevance. Reranking uses a cross-encoder that scores
-        each (query, chunk) pair jointly — more accurate than embedding
-        similarity alone, but too slow to run on all chunks.
+        Takes up to 20 candidates from retrieval, reranks to top 15,
+        then applies adaptive cutoff (floor=3, ceiling=10) based on
+        the largest score drop-off between consecutive chunks.
         """
         chunks = state.get("chunks", [])
-        if len(chunks) <= 5:
-            logger.info("── RERANK (skipped, %d chunks ≤ 5) %s", len(chunks), LOG_SEPARATOR[35:])
+        if len(chunks) <= 3:
+            logger.info("── RERANK (skipped, %d chunks ≤ 3) %s", len(chunks), LOG_SEPARATOR[35:])
             return {}
 
         logger.info("── RERANK %s", LOG_SEPARATOR[10:])
-        logger.info("  Input: %d chunks → reranking to top 5", len(chunks))
+        logger.info("  Input: %d chunks → reranking to top 15", len(chunks))
 
         query = state["question"]
         if state.get("selected_text"):
@@ -564,13 +585,15 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             query=query,
             documents=[c["text"] for c in chunks],
             model=config.VOYAGE_RERANK_MODEL,
-            top_k=5,
+            top_k=15,
         )
 
         reranked = [
             {**chunks[r.index], "score": r.relevance_score}
             for r in reranking.results
         ]
+
+        reranked = _adaptive_cutoff(reranked)
 
         logger.info("  Output: %d chunks", len(reranked))
         for i, c in enumerate(reranked):
