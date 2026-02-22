@@ -109,6 +109,13 @@ class IndexBookRequest(BaseModel):
     def check_content(self):
         if not self.text and not self.structured_content:
             raise ValueError("Must provide either 'text' or 'structured_content'")
+        max_size = config.MAX_INDEX_INPUT_SIZE
+        if self.text and len(self.text) > max_size:
+            raise ValueError(f"Text exceeds maximum size of {max_size // (1024 * 1024)}MB")
+        if self.structured_content:
+            content_size = len(json.dumps(self.structured_content))
+            if content_size > max_size:
+                raise ValueError(f"Structured content exceeds maximum size of {max_size // (1024 * 1024)}MB")
         return self
 
 
