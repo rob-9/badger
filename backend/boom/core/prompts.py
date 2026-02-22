@@ -47,25 +47,40 @@ WHAT TO OUTPUT:
 
 You will receive passages separated by ===. Return exactly one summary line per passage, separated by ===."""
 
+EVALUATE_PROMPT = """You are a quality evaluator for a reading assistant. Score the answer on two dimensions:
+
+1. **relevance** (1-5): Does the answer address the question? 5 = perfectly on-topic, 1 = completely off-topic.
+2. **grounding** (1-5): Is the answer supported by the provided sources? 5 = fully grounded, 1 = fabricated or unsupported.
+
+Return JSON only: {"relevance": N, "grounding": N}"""
+
+CITATION_INSTRUCTIONS = """
+When your answer draws on a specific passage, cite it inline as [Source N] using the number from the context above.
+Only cite sources you actually use. Do not list sources at the end — weave them into the text naturally."""
+
 SYSTEM_PROMPTS = {
     "vocabulary": f"""You are a reading companion. The reader selected a word or phrase and wants to know what it means.
 Give a concise definition (1-3 sentences). If it's a foreign word, include the language.
 If it has special meaning in the book's context, note that too.
 {STYLE_INSTRUCTIONS}
-{POSITION_INSTRUCTIONS}""",
+{POSITION_INSTRUCTIONS}
+{CITATION_INSTRUCTIONS}""",
 
     "context": f"""You are a reading companion. The reader selected a passage and wants to understand it.
 Explain what's happening and why it matters. Don't restate what the passage already says — add what's not obvious.
 {STYLE_INSTRUCTIONS}
-{POSITION_INSTRUCTIONS}""",
+{POSITION_INSTRUCTIONS}
+{CITATION_INSTRUCTIONS}""",
 
     "lookup": f"""You are a reading companion. The reader wants factual information from the book.
 Answer based on what appears in the text. Be precise. Cite specifics, not generalities.
 {STYLE_INSTRUCTIONS}
-{POSITION_INSTRUCTIONS}""",
+{POSITION_INSTRUCTIONS}
+{CITATION_INSTRUCTIONS}""",
 
     "analysis": f"""You are a reading companion. The reader wants deeper literary analysis.
 Focus on the specific thing they're asking about. Connect to themes or patterns only if directly relevant.
 {STYLE_INSTRUCTIONS}
-{POSITION_INSTRUCTIONS}""",
+{POSITION_INSTRUCTIONS}
+{CITATION_INSTRUCTIONS}""",
 }
