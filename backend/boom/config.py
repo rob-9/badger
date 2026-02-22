@@ -34,6 +34,14 @@ except ValueError:
 CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 VECTOR_STORAGE_DIR: str = os.getenv("VECTOR_STORAGE_DIR", ".data/vectors")
 
+# Allowed directories for EPUB import (comma-separated paths)
+EPUB_IMPORT_ALLOWED_DIRS: list[str] = [
+    d.strip() for d in os.getenv("EPUB_IMPORT_ALLOWED_DIRS", "~/").split(",") if d.strip()
+]
+
+# Maximum input size for book indexing (bytes)
+MAX_INDEX_INPUT_SIZE: int = int(os.getenv("MAX_INDEX_INPUT_SIZE", str(10 * 1024 * 1024)))  # 10MB default
+
 
 def validate_keys() -> None:
     """Exit with a clear error if required API keys are missing."""

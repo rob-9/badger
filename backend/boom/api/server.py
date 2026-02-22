@@ -384,6 +384,20 @@ async def import_local_epub(request: ImportLocalRequest):
     (common with Apple Books). Returns the raw EPUB bytes.
     """
     p = Path(request.path).expanduser().resolve()
+
+    # Validate path is within allowed directories
+    allowed = False
+    for allowed_dir in config.EPUB_IMPORT_ALLOWED_DIRS:
+        allowed_path = Path(allowed_dir).expanduser().resolve()
+        try:
+            p.relative_to(allowed_path)
+            allowed = True
+            break
+        except ValueError:
+            continue
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Path not in allowed directories")
+
     if not p.exists():
         raise HTTPException(status_code=404, detail="Path not found")
 

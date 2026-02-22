@@ -462,7 +462,8 @@ class TestAgentEndpoint:
 
 
 class TestImportLocalEpub:
-    def test_import_epub_file(self, client, mock_services, tmp_path):
+    def test_import_epub_file(self, client, mock_services, tmp_path, monkeypatch):
+        monkeypatch.setattr("boom.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
         epub_path = tmp_path / "test.epub"
         epub_path.write_bytes(b"PK\x03\x04fake epub content")
         resp = client.post("/api/epub/import-local", json={"path": str(epub_path)})
@@ -470,7 +471,8 @@ class TestImportLocalEpub:
         assert resp.headers["x-filename"] == "test.epub"
         assert resp.content == b"PK\x03\x04fake epub content"
 
-    def test_import_exploded_directory(self, client, mock_services, tmp_path):
+    def test_import_exploded_directory(self, client, mock_services, tmp_path, monkeypatch):
+        monkeypatch.setattr("boom.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
         epub_dir = tmp_path / "MyBook.epub"
         epub_dir.mkdir()
         (epub_dir / "mimetype").write_text("application/epub+zip")
@@ -491,15 +493,17 @@ class TestImportLocalEpub:
 
     def test_import_nonexistent_path(self, client, mock_services):
         resp = client.post("/api/epub/import-local", json={"path": "/nonexistent/path.epub"})
-        assert resp.status_code == 404
+        assert resp.status_code == 403  # blocked by path restriction before 404
 
-    def test_import_non_epub_file(self, client, mock_services, tmp_path):
+    def test_import_non_epub_file(self, client, mock_services, tmp_path, monkeypatch):
+        monkeypatch.setattr("boom.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
         txt = tmp_path / "readme.txt"
         txt.write_text("not an epub")
         resp = client.post("/api/epub/import-local", json={"path": str(txt)})
         assert resp.status_code == 400
 
-    def test_import_directory_without_container(self, client, mock_services, tmp_path):
+    def test_import_directory_without_container(self, client, mock_services, tmp_path, monkeypatch):
+        monkeypatch.setattr("boom.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
         plain_dir = tmp_path / "not_epub"
         plain_dir.mkdir()
         (plain_dir / "random.txt").write_text("hello")
