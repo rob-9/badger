@@ -6,6 +6,7 @@ import pytest
 from boom.core.vector_store import SearchResult
 from boom.core.graph import (
     strip_code_fences,
+    parse_decompose_response,
     label_chunks,
     build_query,
     build_context_string,
@@ -40,6 +41,81 @@ class TestStripCodeFences:
     def test_empty_between_fences(self):
         text = '```\n```'
         assert strip_code_fences(text) == ""
+
+
+# ── parse_decompose_response ──────────────────────────────────────────
+
+
+class TestParseDecomposeResponse:
+    def test_valid_json(self):
+        raw = '{"queries": ["sub1", "sub2"], "use_hyde": true}'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == ["sub1", "sub2"]
+        assert result["use_hyde"] is True
+
+    def test_single_query_no_hyde(self):
+        raw = '{"queries": ["original question"], "use_hyde": false}'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == ["original question"]
+        assert result["use_hyde"] is False
+
+    def test_code_fences_stripped(self):
+        raw = '```json\n{"queries": ["q1"], "use_hyde": false}\n```'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == ["q1"]
+
+    def test_malformed_json(self):
+        result = parse_decompose_response("not json at all")
+        assert result["queries"] == []
+        assert result["use_hyde"] is False
+
+    def test_empty_string(self):
+        result = parse_decompose_response("")
+        assert result["queries"] == []
+        assert result["use_hyde"] is False
+
+    def test_missing_queries_field(self):
+        raw = '{"use_hyde": true}'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == []
+        assert result["use_hyde"] is True
+
+    def test_missing_use_hyde_field(self):
+        raw = '{"queries": ["q1", "q2"]}'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == ["q1", "q2"]
+        assert result["use_hyde"] is False
+
+    def test_queries_not_list(self):
+        raw = '{"queries": "just a string", "use_hyde": false}'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == []
+
+    def test_use_hyde_not_bool(self):
+        raw = '{"queries": ["q1"], "use_hyde": "yes"}'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == ["q1"]
+        assert result["use_hyde"] is False
+
+    def test_filters_empty_strings(self):
+        raw = '{"queries": ["q1", "", "  ", "q2"], "use_hyde": false}'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == ["q1", "q2"]
+
+    def test_filters_non_string_items(self):
+        raw = '{"queries": ["q1", 42, null, "q2"], "use_hyde": false}'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == ["q1", "q2"]
+
+    def test_none_input(self):
+        result = parse_decompose_response(None)
+        assert result["queries"] == []
+        assert result["use_hyde"] is False
+
+    def test_strips_whitespace(self):
+        raw = '{"queries": ["  padded query  ", "clean"], "use_hyde": false}'
+        result = parse_decompose_response(raw)
+        assert result["queries"] == ["padded query", "clean"]
 
 
 # ── label_chunks ──────────────────────────────────────────────────────
@@ -180,6 +256,8 @@ class TestBuildLogEntry:
             "retrieval_query": "some text",
             "retrieval_top_k": 5,
             "retrieval_embedding_dims": 1024,
+            "sub_queries": ["sub1", "sub2"],
+            "hyde_passage": "hypothetical passage",
             "answer": "It means...",
             "gen_model": "claude-sonnet-4-20250514",
             "gen_tokens_in": 200,
@@ -195,6 +273,8 @@ class TestBuildLogEntry:
         assert entry["question_type"] == "vocabulary"
         assert len(entry["retrieved_chunks"]) == 1
         assert entry["response"]["answer"] == "It means..."
+        assert entry["sub_queries"] == ["sub1", "sub2"]
+        assert entry["hyde_passage"] == "hypothetical passage"
 
     def test_minimal_state(self):
         state = {"question": "Test?"}
@@ -202,6 +282,8 @@ class TestBuildLogEntry:
         assert entry["question"] == "Test?"
         assert entry["reader_chunk_index"] == 0
         assert entry["retrieved_chunks"] == []
+        assert entry["sub_queries"] == []
+        assert entry["hyde_passage"] == ""
 
 
 # ── VALID_TYPES ───────────────────────────────────────────────────────
@@ -369,5 +451,53 @@ class TestWriteReadableLog:
             log_content = (tmp_path / "queries.log").read_text()
             assert "QUERY @" in log_content
             assert "vocabulary" in log_content
+        finally:
+            graph_mod.LOG_DIR = original_dir
+
+    def test_writes_decomposition_section(self, tmp_path):
+        """Readable log should include decomposition/HyDE data when present."""
+        import boom.core.graph as graph_mod
+        from boom.core.graph import _write_readable_log
+
+        original_dir = graph_mod.LOG_DIR
+        graph_mod.LOG_DIR = tmp_path
+        try:
+            state = {
+                "book_id": "b1",
+                "reader_position": 0.3,
+                "total_chunks": 200,
+                "selected_text": "",
+                "question": "How does the protagonist change?",
+                "question_type": "analysis",
+                "entities": ["protagonist"],
+                "classify_raw_response": '{"type":"analysis"}',
+                "classify_tokens_in": 60,
+                "classify_tokens_out": 15,
+                "sub_queries": ["How does the protagonist develop?", "What changes does the protagonist undergo?"],
+                "hyde_passage": "The protagonist began as a timid figure, but through trials grew bolder.",
+                "chunks": [
+                    {"text": "chunk text", "chunk_index": 10, "score": 0.85, "label": "PAST"},
+                ],
+                "retrieval_strategy": "decomposed+hyde+hybrid+summaries",
+                "retrieval_query": "How does the protagonist develop?",
+                "retrieval_top_k": 20,
+                "retrieval_embedding_dims": 1024,
+                "gen_system_prompt": "You are a reading companion.",
+                "gen_user_prompt": "Question: How does the protagonist change?",
+                "gen_model": "claude-sonnet-4-20250514",
+                "gen_tokens_in": 300,
+                "gen_tokens_out": 80,
+                "gen_stop_reason": "end_turn",
+                "answer": "The protagonist evolves over time.",
+            }
+            log_entry = _build_log_entry(state)
+            _write_readable_log(state, log_entry)
+
+            log_content = (tmp_path / "queries.log").read_text()
+            assert "Decomposition" in log_content
+            assert "Sub-queries (2)" in log_content
+            assert "How does the protagonist develop?" in log_content
+            assert "HyDE passage" in log_content
+            assert "timid figure" in log_content
         finally:
             graph_mod.LOG_DIR = original_dir

@@ -20,7 +20,7 @@ from langgraph.graph import StateGraph, END
 
 from boom import config
 from .prompts import SYSTEM_PROMPTS, SANITIZE_PROMPT
-from .vector_store import VectorStore, SearchResult
+from .vector_store import VectorStore, SearchResult, reciprocal_rank_fusion
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,10 @@ class QAState(TypedDict, total=False):
     sanitize_tokens_in: int
     sanitize_tokens_out: int
 
+    # Query decomposition / HyDE
+    sub_queries: list[str]
+    hyde_passage: str
+
     # Internal
     total_chunks: int
 
@@ -87,6 +91,31 @@ def strip_code_fences(text: str) -> str:
     if text.endswith("```"):
         text = text[:-3]
     return text.strip()
+
+
+def parse_decompose_response(raw: str) -> dict:
+    """Parse Haiku's decomposition JSON → {"queries": [...], "use_hyde": bool}.
+
+    Returns a safe default if parsing fails or fields are missing.
+    """
+    if not isinstance(raw, str):
+        return {"queries": [], "use_hyde": False}
+    try:
+        parsed = json.loads(strip_code_fences(raw))
+    except (json.JSONDecodeError, TypeError):
+        return {"queries": [], "use_hyde": False}
+
+    queries = parsed.get("queries")
+    if not isinstance(queries, list):
+        queries = []
+    # Filter to non-empty strings only
+    queries = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
+
+    use_hyde = parsed.get("use_hyde")
+    if not isinstance(use_hyde, bool):
+        use_hyde = False
+
+    return {"queries": queries, "use_hyde": use_hyde}
 
 
 def label_chunks(results: list[SearchResult], reader_position: float, total_chunks: int) -> list[dict]:
@@ -213,6 +242,9 @@ def _build_log_entry(state: QAState) -> dict:
             "in": state.get("sanitize_tokens_in", 0),
             "out": state.get("sanitize_tokens_out", 0),
         },
+        # Query decomposition / HyDE
+        "sub_queries": state.get("sub_queries", []),
+        "hyde_passage": state.get("hyde_passage", ""),
         # Retrieval
         "retrieval_strategy": state.get("retrieval_strategy"),
         "retrieval_query": state.get("retrieval_query"),
@@ -273,6 +305,22 @@ def _write_readable_log(state: QAState, log_entry: dict):
         f.write(f"  Raw:      {state.get('classify_raw_response')}\n")
         f.write(f"  Type:     {state.get('question_type')}\n")
         f.write(f"  Entities: {', '.join(state.get('entities', [])) or '(none)'}\n")
+
+        # Decomposition / HyDE
+        sub_queries = state.get("sub_queries", [])
+        hyde_passage = state.get("hyde_passage", "")
+        if sub_queries or hyde_passage:
+            section("Decomposition")
+            if len(sub_queries) > 1:
+                f.write(f"\n  Sub-queries ({len(sub_queries)}):\n")
+                for i, sq in enumerate(sub_queries):
+                    f.write(f"    [{i+1}] {sq}\n")
+            elif sub_queries:
+                f.write(f"\n  Query (not decomposed): {sub_queries[0]}\n")
+            if hyde_passage:
+                f.write(f"\n  HyDE passage ({len(hyde_passage)} chars):\n")
+                for line in hyde_passage[:500].split("\n"):
+                    f.write(f"    {line}\n")
 
         # Retrieval
         strategy = state.get("retrieval_strategy")
@@ -367,6 +415,80 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             inputs=[[text]],
             model=config.VOYAGE_CONTEXT_MODEL,
             input_type="query",
+        ).results[0].embeddings[0]
+
+    # --- Helpers: query decomposition + HyDE ---
+
+    def _decompose_query(question: str, selected_text: str | None) -> dict:
+        """Ask Haiku whether to decompose the question into sub-queries and/or use HyDE."""
+        selected_ctx = f'\nSelected text: "{selected_text[:200]}"' if selected_text else ""
+        prompt = (
+            f'Question: "{question}"{selected_ctx}\n\n'
+            "Should this question be broken into 2-4 simpler sub-queries for better retrieval? "
+            "Is it abstract enough that a hypothetical answer passage (HyDE) would help?\n\n"
+            'Return JSON: {"queries": ["sub1", ...], "use_hyde": true/false}\n'
+            "If the question is already simple/specific, return the original question as the only item in queries."
+        )
+        try:
+            response = anthropic.messages.create(
+                model=config.CLAUDE_HAIKU_MODEL,
+                max_tokens=300,
+                system="You decompose reading comprehension questions for retrieval. Return JSON only, no markdown.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text.strip()
+            logger.info("  Decompose raw: %s", raw)
+            logger.info("  Decompose tokens: %d in / %d out", response.usage.input_tokens, response.usage.output_tokens)
+            result = parse_decompose_response(raw)
+        except Exception as e:
+            logger.warning("  Decompose failed: %s — using original question", e)
+            result = {"queries": [], "use_hyde": False}
+
+        # Fallback: if no valid queries returned, use the original question
+        if not result["queries"]:
+            result["queries"] = [question]
+
+        return result
+
+    def _generate_hyde(question: str, selected_text: str | None) -> str:
+        """Generate a hypothetical answer passage (~100 tokens) via Haiku."""
+        selected_ctx = f'\nThe reader highlighted: "{selected_text[:200]}"' if selected_text else ""
+        prompt = (
+            f"Question: {question}{selected_ctx}\n\n"
+            "Write a ~100-word passage that would answer this question, "
+            "as if it were an excerpt from a book. "
+            "Do not say 'the book says' — write as if you ARE the book text."
+        )
+        try:
+            response = anthropic.messages.create(
+                model=config.CLAUDE_HAIKU_MODEL,
+                max_tokens=200,
+                system="You write hypothetical book passages for retrieval augmentation. Write naturally, as if from the source text.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            passage = response.content[0].text.strip()
+            logger.info("  HyDE passage (%d chars): %s…", len(passage), passage[:120])
+            logger.info("  HyDE tokens: %d in / %d out", response.usage.input_tokens, response.usage.output_tokens)
+            return passage
+        except Exception as e:
+            logger.warning("  HyDE generation failed: %s", e)
+            return ""
+
+    def _embed_queries(texts: list[str]) -> list[list[float]]:
+        """Batch-embed multiple query texts in a single Voyage API call."""
+        result = voyage_client.contextualized_embed(
+            inputs=[[t] for t in texts],
+            model=config.VOYAGE_CONTEXT_MODEL,
+            input_type="query",
+        )
+        return [r.embeddings[0] for r in result.results]
+
+    def _embed_document(text: str) -> list[float]:
+        """Embed a HyDE passage as a document (matching the indexed chunk space)."""
+        return voyage_client.contextualized_embed(
+            inputs=[[text]],
+            model=config.VOYAGE_CONTEXT_MODEL,
+            input_type="document",
         ).results[0].embeddings[0]
 
     # --- Node: classify ---
@@ -489,72 +611,154 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
             "retrieval_chunk_match": chunk_match,
         }
 
-    # --- Node factory: semantic retrieval (lookup & analysis) ---
+    # --- Node: lookup retrieval (with decomposition + optional HyDE) ---
 
-    def _make_semantic_node(top_k: int, strategy: str):
-        """Create a pure semantic retrieval node (cosine similarity only)."""
-        async def semantic_node(state: QAState) -> dict:
-            logger.info("── RETRIEVE (%s) %s", strategy, "─" * (33 - len(strategy)))
-            logger.info("  Strategy: semantic search, top_k=%d", top_k)
+    async def lookup_node(state: QAState) -> dict:
+        """Semantic retrieval with query decomposition and optional HyDE."""
+        logger.info("── RETRIEVE (lookup) ─────────────────────────")
 
-            query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
-            logger.info("  Query: %s", query[:200])
-            logger.info("  Voyage model: %s, input_type: query", config.VOYAGE_CONTEXT_MODEL)
+        question = state["question"]
+        selected = state.get("selected_text")
+        book_id = state["book_id"]
 
-            embedding = _embed_query(query)
+        # Decompose the query
+        decomp = _decompose_query(question, selected)
+        sub_queries = decomp["queries"]
+        use_hyde = decomp["use_hyde"]
+        logger.info("  Sub-queries: %s", sub_queries)
+        logger.info("  Use HyDE: %s", use_hyde)
+
+        # Build full query strings (with entities/selected context)
+        entities = state.get("entities", [])
+        full_queries = [build_query(sq, selected, entities) for sq in sub_queries]
+
+        # Generate HyDE passage if recommended
+        hyde_passage = ""
+        if use_hyde:
+            hyde_passage = _generate_hyde(question, selected)
+
+        if len(full_queries) == 1 and not hyde_passage:
+            # Simple case: single query, no HyDE — same as before
+            logger.info("  Strategy: semantic search (single query), top_k=20")
+            embedding = _embed_query(full_queries[0])
             logger.info("  Embedding: %d dimensions", len(embedding))
-            logger.info("  Searching %d total chunks in book %s", state.get("total_chunks", 0), state["book_id"])
-
-            results = await vector_store.search(state["book_id"], embedding, top_k=top_k)
+            results = await vector_store.search(book_id, embedding, top_k=20)
             labeled = _label_and_log(results, state)
-
             return {
                 "chunks": labeled,
-                "retrieval_strategy": strategy,
-                "retrieval_query": query,
-                "retrieval_top_k": top_k,
+                "retrieval_strategy": "semantic",
+                "retrieval_query": full_queries[0],
+                "retrieval_top_k": 20,
                 "retrieval_embedding_dims": len(embedding),
+                "sub_queries": sub_queries,
+                "hyde_passage": hyde_passage,
             }
-        return semantic_node
 
-    lookup_node = _make_semantic_node(top_k=20, strategy="semantic")
+        # Multi-query and/or HyDE: embed all, search independently, fuse
+        query_embeddings = _embed_queries(full_queries)
+        logger.info("  Embedded %d queries (%d dimensions each)", len(query_embeddings), len(query_embeddings[0]))
 
-    # Analysis uses hybrid search + chapter summaries for broad thematic questions.
-    # Summaries act as chapter-level index entries that help match questions like
-    # "what does the book say about X" to the right chapter, even when no single
-    # passage chunk would score well on its own.
+        result_lists = []
+        for i, (q, emb) in enumerate(zip(full_queries, query_embeddings)):
+            results = await vector_store.search(book_id, emb, top_k=20)
+            logger.info("  Sub-query %d: %d results — %s", i + 1, len(results), q[:80])
+            result_lists.append(results)
+
+        if hyde_passage:
+            hyde_emb = _embed_document(hyde_passage)
+            logger.info("  HyDE embedded as document (%d dimensions)", len(hyde_emb))
+            hyde_results = await vector_store.search(book_id, hyde_emb, top_k=20)
+            logger.info("  HyDE: %d results", len(hyde_results))
+            result_lists.append(hyde_results)
+
+        fused = reciprocal_rank_fusion(*result_lists)
+        strategy = "decomposed" if len(sub_queries) > 1 else "semantic"
+        if hyde_passage:
+            strategy += "+hyde"
+        logger.info("  Strategy: %s → %d fused results", strategy, len(fused))
+
+        labeled = _label_and_log(fused, state)
+        return {
+            "chunks": labeled,
+            "retrieval_strategy": strategy,
+            "retrieval_query": "\n---\n".join(full_queries),
+            "retrieval_top_k": 20,
+            "retrieval_embedding_dims": len(query_embeddings[0]),
+            "sub_queries": sub_queries,
+            "hyde_passage": hyde_passage,
+        }
+
+    # Analysis uses decomposition + hybrid search + chapter summaries.
+    # Always decomposes; Haiku decides whether HyDE is useful.
     async def analysis_node(state: QAState) -> dict:
         logger.info("── RETRIEVE (analysis) ───────────────────────")
-        logger.info("  Strategy: hybrid + chapter summaries")
+        logger.info("  Strategy: decompose + hyde + hybrid + summaries")
 
-        query = build_query(state["question"], state.get("selected_text"), state.get("entities", []))
-        logger.info("  Query: %s", query[:200])
+        question = state["question"]
+        selected = state.get("selected_text")
+        book_id = state["book_id"]
+        entities = state.get("entities", [])
 
-        embedding = _embed_query(query)
-        logger.info("  Embedding: %d dimensions", len(embedding))
+        # Always decompose for analysis; Haiku decides whether HyDE helps
+        decomp = _decompose_query(question, selected)
+        sub_queries = decomp["queries"]
+        use_hyde = decomp["use_hyde"]
+        logger.info("  Sub-queries: %s", sub_queries)
+        logger.info("  Use HyDE: %s", use_hyde)
 
-        # Passage-level: hybrid (semantic + BM25), top 20
-        passage_results = await vector_store.hybrid_search(
-            state["book_id"], embedding, query_text=query, top_k=20,
-        )
-        logger.info("  Passage results: %d", len(passage_results))
+        hyde_passage = ""
+        if use_hyde:
+            hyde_passage = _generate_hyde(question, selected)
 
-        # Chapter-level: summary vectors, top 3
+        # Build full query strings
+        full_queries = [build_query(sq, selected, entities) for sq in sub_queries]
+
+        # Embed sub-queries as queries
+        query_embeddings = _embed_queries(full_queries)
+        logger.info("  Embedded %d queries (%d dimensions each)", len(query_embeddings), len(query_embeddings[0]))
+
+        result_lists = []
+
+        # For each sub-query: hybrid search (semantic + BM25), top 20
+        for i, (q, emb) in enumerate(zip(full_queries, query_embeddings)):
+            hybrid_results = await vector_store.hybrid_search(
+                book_id, emb, query_text=q, top_k=20,
+            )
+            logger.info("  Sub-query %d hybrid: %d results — %s", i + 1, len(hybrid_results), q[:80])
+            result_lists.append(hybrid_results)
+
+        # HyDE passage: embed as document, semantic search, top 20
+        if hyde_passage:
+            hyde_emb = _embed_document(hyde_passage)
+            logger.info("  HyDE embedded as document (%d dimensions)", len(hyde_emb))
+            hyde_results = await vector_store.search(book_id, hyde_emb, top_k=20)
+            logger.info("  HyDE semantic: %d results", len(hyde_results))
+            result_lists.append(hyde_results)
+        else:
+            logger.info("  HyDE skipped (generation returned empty)")
+
+        # Chapter summaries: semantic search using first query embedding, top 3
         summary_results = await vector_store.search_summaries(
-            state["book_id"], embedding, top_k=3,
+            book_id, query_embeddings[0], top_k=3,
         )
         logger.info("  Summary results: %d", len(summary_results))
+        if summary_results:
+            result_lists.append(summary_results)
 
-        # Merge both tiers — reranker + adaptive cutoff will select 3-10
-        all_results = passage_results + summary_results
-        labeled = _label_and_log(all_results, state)
+        # Fuse all result lists
+        fused = reciprocal_rank_fusion(*result_lists)
+        logger.info("  Fused: %d results from %d lists", len(fused), len(result_lists))
+
+        labeled = _label_and_log(fused, state)
 
         return {
             "chunks": labeled,
-            "retrieval_strategy": "hybrid_broad+summaries",
-            "retrieval_query": query,
+            "retrieval_strategy": "decomposed+hyde+hybrid+summaries",
+            "retrieval_query": "\n---\n".join(full_queries),
             "retrieval_top_k": 20,
-            "retrieval_embedding_dims": len(embedding),
+            "retrieval_embedding_dims": len(query_embeddings[0]),
+            "sub_queries": sub_queries,
+            "hyde_passage": hyde_passage,
         }
 
     # --- Node: rerank ---
