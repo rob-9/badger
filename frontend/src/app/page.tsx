@@ -218,6 +218,13 @@ export default function Home() {
       },
       onSources: (sources) => {
         streamSourcesRef.current = sources
+        setChatMessages(prev => {
+          const last = prev[prev.length - 1]
+          if (last?.id === assistantId) {
+            return [...prev.slice(0, -1), { ...last, sources }]
+          }
+          return prev
+        })
       },
       onToken: (text) => {
         setChatMessages(prev => {

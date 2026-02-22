@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { X, Send, BookOpen, Loader2 } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { X, Send, BookOpen, Loader2, ChevronDown } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -21,32 +21,98 @@ interface ChatPanelProps {
   onClose: () => void
 }
 
+const LABEL_COLORS: Record<string, string> = {
+  PAST: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+  AHEAD: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
+}
+const DEFAULT_LABEL_COLOR = 'bg-gray-100 dark:bg-gray-800/30 text-gray-600 dark:text-gray-400'
+
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text
+  // Break at last space within maxLen to avoid cutting mid-word
+  const truncated = text.slice(0, maxLen)
+  const lastSpace = truncated.lastIndexOf(' ')
+  return (lastSpace > maxLen * 0.6 ? truncated.slice(0, lastSpace) : truncated) + '...'
+}
+
 export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose }: ChatPanelProps) {
   const [input, setInput] = useState('')
+  const [openPopover, setOpenPopover] = useState<string | null>(null)
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const citationBtnClass = 'citation-btn'
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
 
+  // Close popover on outside click or Escape
+  useEffect(() => {
+    if (!openPopover) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      // Ignore clicks on citation buttons — their onClick handles toggling
+      if (target.closest(`.${citationBtnClass}`)) return
+      if (popoverRef.current && !popoverRef.current.contains(target)) {
+        setOpenPopover(null)
+      }
+    }
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenPopover(null)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [openPopover])
+
+  const toggleSources = useCallback((msgId: string) => {
+    setExpandedSources(prev => {
+      const next = new Set(prev)
+      if (next.has(msgId)) {
+        next.delete(msgId)
+      } else {
+        next.add(msgId)
+      }
+      return next
+    })
+  }, [])
+
+  const doSubmit = useCallback(() => {
+    if (!input.trim() || isLoading) return
+    onSendMessage(input.trim())
+    setInput('')
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto'
+    }
+  }, [input, isLoading, onSendMessage])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (input.trim() && !isLoading) {
-      onSendMessage(input.trim())
-      setInput('')
-    }
+    doSubmit()
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (input.trim() && !isLoading) {
-        onSendMessage(input.trim())
-        setInput('')
-      }
+      doSubmit()
     }
   }
+
+  const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value)
+    e.target.style.height = 'auto'
+    const newHeight = Math.min(e.target.scrollHeight, 128)
+    e.target.style.height = newHeight + 'px'
+    e.target.style.overflowY = newHeight >= 128 ? 'auto' : 'hidden'
+  }, [])
+
+  const lastMsg = messages[messages.length - 1]
+  const isStreaming = isLoading && lastMsg?.role === 'assistant'
 
   return (
     <div className="fixed right-0 top-0 h-full w-[400px] max-[768px]:w-full max-[768px]:max-w-[90vw] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
@@ -91,7 +157,7 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
               </div>
             ) : (
               <div className="max-w-[92%]">
-                <div className="px-4 py-3 bg-gray-50 dark:bg-[#252525] rounded-2xl rounded-bl-md prose prose-sm dark:prose-invert max-w-none">
+                <div className="px-4 py-3 bg-gray-50 dark:bg-[#252525] rounded-2xl rounded-bl-md prose prose-sm dark:prose-invert max-w-none relative">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={msg.sources?.length ? (() => {
@@ -106,14 +172,41 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
                           if (!match) return part
                           const num = parseInt(match[1])
                           const source = sources.find(s => s.source_number === num)
+                          const popoverKey = `${msg.id}-${num}`
+                          const isOpen = openPopover === popoverKey
                           return (
-                            <button
-                              key={i}
-                              title={source ? `[${source.label}] ${source.text}` : `Source ${num}`}
-                              className="inline-flex items-center justify-center min-w-[1.1em] h-[1.1em] text-[0.6em] font-semibold bg-accent/20 text-accent-foreground rounded-full px-[0.3em] align-super cursor-help hover:bg-accent/40 transition-colors mx-[0.1em] leading-none"
-                            >
-                              {num}
-                            </button>
+                            <span key={i} className="relative inline">
+                              <button
+                                onClick={() => setOpenPopover(isOpen ? null : popoverKey)}
+                                aria-label={`View source ${num}`}
+                                aria-haspopup="dialog"
+                                aria-expanded={isOpen}
+                                className={`${citationBtnClass} inline-flex items-center justify-center min-w-[1.1em] h-[1.1em] text-[0.6em] font-semibold bg-accent/20 text-accent-foreground rounded-full px-[0.3em] align-super cursor-pointer hover:bg-accent/40 transition-colors mx-[0.1em] leading-none`}
+                              >
+                                {num}
+                              </button>
+                              {isOpen && source && (
+                                <div
+                                  ref={popoverRef}
+                                  role="dialog"
+                                  aria-label={`Source ${num} details`}
+                                  className="absolute right-0 top-full mt-1 z-50 w-64 max-w-[calc(100vw-3rem)] bg-white dark:bg-[#2a2a2a] border border-gray-200 dark:border-[#444] rounded-lg shadow-lg p-3 text-left"
+                                  style={{ fontSize: '0.8rem' }}
+                                >
+                                  <div className="flex items-center gap-1.5 mb-1.5">
+                                    <span className={`text-[0.65rem] font-medium px-1.5 py-0.5 rounded ${LABEL_COLORS[source.label] || DEFAULT_LABEL_COLOR}`}>
+                                      {source.label}
+                                    </span>
+                                    <span className="text-[0.65rem] text-gray-400 dark:text-[#666]">
+                                      Chunk {source.chunk_index}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-gray-600 dark:text-[#bbb] leading-relaxed not-prose">
+                                    {truncate(source.text, 200)}
+                                  </p>
+                                </div>
+                              )}
+                            </span>
                           )
                         })
                       }
@@ -133,15 +226,57 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
                     })() : undefined}
                   >{msg.content}</ReactMarkdown>
                 </div>
+
+                {/* Collapsible sources section */}
+                {msg.sources && msg.sources.length > 0 && (
+                  <div className="mt-1.5">
+                    <button
+                      onClick={() => toggleSources(msg.id)}
+                      aria-expanded={expandedSources.has(msg.id)}
+                      className="flex items-center gap-1 text-[0.7rem] text-gray-400 dark:text-[#666] hover:text-gray-600 dark:hover:text-[#999] transition-colors"
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${expandedSources.has(msg.id) ? 'rotate-180' : ''}`} />
+                      {msg.sources.length} source{msg.sources.length !== 1 ? 's' : ''}
+                    </button>
+                    {expandedSources.has(msg.id) && (
+                      <div className="mt-1.5 space-y-1.5 border-t border-gray-100 dark:border-[#333] pt-2">
+                        {msg.sources.map((source) => (
+                          <div key={source.source_number} className="flex gap-2 text-xs">
+                            <span className="inline-flex items-center justify-center min-w-[1.2em] h-[1.2em] text-[0.65rem] font-semibold bg-accent/20 text-accent-foreground rounded-full px-1 leading-none flex-shrink-0 mt-0.5">
+                              {source.source_number}
+                            </span>
+                            <div className="min-w-0">
+                              <span className={`text-[0.6rem] font-medium px-1 py-0.5 rounded mr-1 ${LABEL_COLORS[source.label] || DEFAULT_LABEL_COLOR}`}>
+                                {source.label}
+                              </span>
+                              <span className="text-gray-500 dark:text-[#888] line-clamp-2">
+                                {truncate(source.text, 120)}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
         ))}
 
-        {isLoading && (messages.length === 0 || messages[messages.length - 1].role === 'user') && (
-          <div className="flex items-center gap-2 text-gray-400">
+        {/* Pre-streaming spinner (before first token) */}
+        {isLoading && !isStreaming && (
+          <div className="flex items-center gap-2 text-gray-400" role="status" aria-live="polite">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span className="text-xs">{loadingStatus || 'Thinking...'}</span>
+          </div>
+        )}
+
+        {/* Status indicator during streaming */}
+        {isStreaming && loadingStatus && (
+          <div className="flex items-center gap-1.5 text-gray-400 dark:text-[#666]" role="status" aria-live="polite">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span className="text-[0.65rem]">{loadingStatus}</span>
           </div>
         )}
 
@@ -155,13 +290,13 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
             <textarea
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={handleInput}
               onKeyDown={handleKeyDown}
               placeholder="Ask a follow-up..."
               disabled={isLoading}
               rows={1}
-              className="flex-1 bg-transparent text-sm text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#555] focus:outline-none resize-none disabled:opacity-50 max-h-32 overflow-y-auto"
-              style={{ lineHeight: '1.5' }}
+              className="flex-1 bg-transparent text-sm text-gray-800 dark:text-[#e0e0e0] placeholder-gray-400 dark:placeholder-[#555] focus:outline-none resize-none disabled:opacity-50 max-h-32"
+              style={{ lineHeight: '1.5', overflowY: 'hidden' }}
             />
             <button
               type="submit"
