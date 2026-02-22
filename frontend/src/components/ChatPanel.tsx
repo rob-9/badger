@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { X, Send, BookOpen, Loader2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -21,14 +21,53 @@ interface ChatPanelProps {
   onClose: () => void
 }
 
+const LABEL_COLORS: Record<string, string> = {
+  PAST: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+  AHEAD: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
+}
+const DEFAULT_LABEL_COLOR = 'bg-gray-100 dark:bg-gray-800/30 text-gray-600 dark:text-gray-400'
+
+function truncate(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text
+  // Break at last space within maxLen to avoid cutting mid-word
+  const truncated = text.slice(0, maxLen)
+  const lastSpace = truncated.lastIndexOf(' ')
+  return (lastSpace > maxLen * 0.6 ? truncated.slice(0, lastSpace) : truncated) + '...'
+}
+
 export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose }: ChatPanelProps) {
   const [input, setInput] = useState('')
+  const [openPopover, setOpenPopover] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  const citationBtnClass = 'citation-btn'
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
+
+  // Close popover on outside click or Escape
+  useEffect(() => {
+    if (!openPopover) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      // Ignore clicks on citation buttons — their onClick handles toggling
+      if (target.closest(`.${citationBtnClass}`)) return
+      if (popoverRef.current && !popoverRef.current.contains(target)) {
+        setOpenPopover(null)
+      }
+    }
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenPopover(null)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [openPopover])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -91,7 +130,7 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
               </div>
             ) : (
               <div className="max-w-[92%]">
-                <div className="px-4 py-3 bg-gray-50 dark:bg-[#252525] rounded-2xl rounded-bl-md prose prose-sm dark:prose-invert max-w-none">
+                <div className="px-4 py-3 bg-gray-50 dark:bg-[#252525] rounded-2xl rounded-bl-md prose prose-sm dark:prose-invert max-w-none relative">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={msg.sources?.length ? (() => {
@@ -106,14 +145,41 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
                           if (!match) return part
                           const num = parseInt(match[1])
                           const source = sources.find(s => s.source_number === num)
+                          const popoverKey = `${msg.id}-${num}`
+                          const isOpen = openPopover === popoverKey
                           return (
-                            <button
-                              key={i}
-                              title={source ? `[${source.label}] ${source.text}` : `Source ${num}`}
-                              className="inline-flex items-center justify-center min-w-[1.1em] h-[1.1em] text-[0.6em] font-semibold bg-accent/20 text-accent-foreground rounded-full px-[0.3em] align-super cursor-help hover:bg-accent/40 transition-colors mx-[0.1em] leading-none"
-                            >
-                              {num}
-                            </button>
+                            <span key={i} className="relative inline">
+                              <button
+                                onClick={() => setOpenPopover(isOpen ? null : popoverKey)}
+                                aria-label={`View source ${num}`}
+                                aria-haspopup="dialog"
+                                aria-expanded={isOpen}
+                                className={`${citationBtnClass} inline-flex items-center justify-center min-w-[1.1em] h-[1.1em] text-[0.6em] font-semibold bg-accent/20 text-accent-foreground rounded-full px-[0.3em] align-super cursor-pointer hover:bg-accent/40 transition-colors mx-[0.1em] leading-none`}
+                              >
+                                {num}
+                              </button>
+                              {isOpen && source && (
+                                <div
+                                  ref={popoverRef}
+                                  role="dialog"
+                                  aria-label={`Source ${num} details`}
+                                  className="absolute right-0 top-full mt-1 z-50 w-64 max-w-[calc(100vw-3rem)] bg-white dark:bg-[#2a2a2a] border border-gray-200 dark:border-[#444] rounded-lg shadow-lg p-3 text-left"
+                                  style={{ fontSize: '0.8rem' }}
+                                >
+                                  <div className="flex items-center gap-1.5 mb-1.5">
+                                    <span className={`text-[0.65rem] font-medium px-1.5 py-0.5 rounded ${LABEL_COLORS[source.label] || DEFAULT_LABEL_COLOR}`}>
+                                      {source.label}
+                                    </span>
+                                    <span className="text-[0.65rem] text-gray-400 dark:text-[#666]">
+                                      Chunk {source.chunk_index}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-gray-600 dark:text-[#bbb] leading-relaxed not-prose">
+                                    {truncate(source.text, 200)}
+                                  </p>
+                                </div>
+                              )}
+                            </span>
                           )
                         })
                       }
