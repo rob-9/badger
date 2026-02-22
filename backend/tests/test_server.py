@@ -117,6 +117,8 @@ def mock_services():
         yield "classifying"
         yield "retrieving"
         yield "reranking"
+        yield "filtering"
+        yield "sanitizing"
         yield {
             "question": params["question"],
             "selected_text": params.get("selected_text"),
@@ -131,12 +133,23 @@ def mock_services():
             "classify_tokens_out": 10,
         }
 
+    async def mock_evaluate(state):
+        return {
+            "eval_relevance": 4,
+            "eval_grounding": 5,
+            "eval_flags": [],
+            "eval_low_confidence": False,
+            "eval_tokens_in": 80,
+            "eval_tokens_out": 15,
+        }
+
     # Inject mocks
     server_mod.rag_service = mock_rag
     server_mod.anthropic_client = mock_anthropic
     server_mod.async_anthropic_client = mock_async_anthropic
     server_mod.qa_graph = mock_graph
     server_mod.qa_run_pre_generate = mock_pre_generate
+    server_mod.qa_evaluate = mock_evaluate
 
     yield {
         "rag": mock_rag,
@@ -151,6 +164,7 @@ def mock_services():
     server_mod.async_anthropic_client = None
     server_mod.qa_graph = None
     server_mod.qa_run_pre_generate = None
+    server_mod.qa_evaluate = None
 
 
 @pytest.fixture
@@ -334,7 +348,7 @@ class TestStreamEndpoint:
         )
         events = parse_sse(resp.text)
         stages = [e["data"]["stage"] for e in events if e["event"] == "status"]
-        assert stages == ["classifying", "retrieving", "reranking"]
+        assert stages == ["classifying", "retrieving", "reranking", "filtering", "sanitizing"]
 
     def test_rag_stream_tokens_concatenate(self, client, mock_services):
         resp = client.post(

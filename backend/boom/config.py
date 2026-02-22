@@ -19,6 +19,14 @@ VOYAGE_MODEL: str = os.getenv("VOYAGE_MODEL", "voyage-3")
 VOYAGE_CONTEXT_MODEL: str = os.getenv("VOYAGE_CONTEXT_MODEL", "voyage-context-3")
 VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")
 
+# RAG pipeline
+_relevance_raw = os.getenv("RELEVANCE_THRESHOLD", "0.3")
+try:
+    RELEVANCE_THRESHOLD: float = float(_relevance_raw)
+except ValueError:
+    print(f"ERROR: RELEVANCE_THRESHOLD must be a number, got: {_relevance_raw}", file=sys.stderr)
+    sys.exit(1)
+
 # Infrastructure
 CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 VECTOR_STORAGE_DIR: str = os.getenv("VECTOR_STORAGE_DIR", ".data/vectors")

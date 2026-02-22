@@ -17,6 +17,7 @@ const STATUS_LABELS: Record<string, string> = {
   classifying: 'Classifying question...',
   retrieving: 'Retrieving context...',
   reranking: 'Reranking results...',
+  filtering: 'Filtering results...',
   sanitizing: 'Checking for spoilers...',
   generating: 'Generating answer...',
 }
@@ -45,6 +46,7 @@ export default function Home() {
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [loadingStatus, setLoadingStatus] = useState('')
   const streamAbortRef = useRef<(() => void) | null>(null)
+  const streamSourcesRef = useRef<ChatMessage['sources']>(undefined)
 
   // Loading transition state
   const [isLoadingBook, setIsLoadingBook] = useState(false)
@@ -208,10 +210,14 @@ export default function Home() {
   ) => {
     setIsChatLoading(true)
     setLoadingStatus('Classifying question...')
+    streamSourcesRef.current = undefined
 
     const handle = queryBookStream(params, {
       onStatus: (stage) => {
         setLoadingStatus(STATUS_LABELS[stage] || stage)
+      },
+      onSources: (sources) => {
+        streamSourcesRef.current = sources
       },
       onToken: (text) => {
         setChatMessages(prev => {
@@ -223,6 +229,17 @@ export default function Home() {
         })
       },
       onDone: () => {
+        // Attach sources to the completed assistant message
+        const sources = streamSourcesRef.current
+        if (sources?.length) {
+          setChatMessages(prev => {
+            const last = prev[prev.length - 1]
+            if (last?.id === assistantId) {
+              return [...prev.slice(0, -1), { ...last, sources }]
+            }
+            return prev
+          })
+        }
         setIsChatLoading(false)
         setLoadingStatus('')
         streamAbortRef.current = null
