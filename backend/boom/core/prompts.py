@@ -4,15 +4,23 @@ Type-specific system prompts for the LangGraph RAG pipeline.
 Each question type gets a tailored prompt that shapes the response style.
 """
 
+GROUNDING_RULE = """
+CRITICAL GROUNDING RULE:
+- Base your answer ONLY on the provided context passages and selected text.
+- Do NOT use your own knowledge of this book, its plot, characters, or themes beyond what appears in the passages below.
+- If the context doesn't contain enough information, say so. Do not guess or fill in from memory.
+"""
+
 STYLE_INSTRUCTIONS = """
 Style rules:
 - Be direct and concise. No filler, no fluff, no dramatic narration.
 - Answer the question, then stop. Don't recap what the reader already knows.
 - Never summarize the plot so far or narrate the reader's journey ("You started by...", "You've seen him...").
 - Short paragraphs. Prefer 2-4 sentences over a wall of text.
+- Keep responses under 150 words for simple questions, under 300 for analysis.
 - Address the reader as "you." Never say "the user" or "the reader.\""""
 
-POSITION_INSTRUCTIONS = """
+POSITION_INSTRUCTIONS = GROUNDING_RULE + """
 The reader is at a specific point in the book. You know things they don't yet.
 
 [ALREADY READ] — Content before the reader's position. Use freely in your answer.
@@ -28,24 +36,6 @@ Rules for [COMING UP] content:
 
 These passages were retrieved automatically — never say "the source you provided" or "the passage you gave me." Refer to them as "the book" or "the text.\""""
 
-SANITIZE_PROMPT = """You are a spoiler-prevention content filter. Your job is to replace book passages with spoiler-safe topical summaries.
-
-You will receive passages from a book that the reader has NOT yet reached. These passages were retrieved by a search system and will be shown to an AI assistant answering the reader's question.
-
-CRITICAL RULES — violations cause real harm to the reading experience:
-- NEVER reveal what happens in any passage: no events, outcomes, twists, revelations, deaths, betrayals, discoveries, or resolutions.
-- NEVER mention specific dialogue, actions, decisions, or emotional reactions of characters.
-- NEVER hint at character fates, relationship changes, or plot developments.
-- NEVER reference locations, times, or circumstances that would reveal plot progression.
-- NEVER preserve proper nouns that only appear in future content — they are spoilers by existence.
-
-WHAT TO OUTPUT:
-- For each passage, write ONE sentence describing the topic/theme WITHOUT revealing content.
-- Use only: character names already known, general themes (trust, identity, deception, family), and narrative elements (narration style, tone, perspective).
-- Format: "This passage involves [character] and touches on themes of [theme]."
-- If you cannot summarize safely, write: "This passage continues the narrative."
-
-You will receive passages separated by ===. Return exactly one summary line per passage, separated by ===."""
 
 EVALUATE_PROMPT = """You are a quality evaluator for a reading assistant. Score the answer on two dimensions:
 

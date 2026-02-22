@@ -344,8 +344,25 @@ class VectorStore:
             if start_idx <= e.chunk.metadata['chunk_index'] <= end_idx
         ]
 
+    @staticmethod
+    def _normalize_quotes(text: str) -> str:
+        """Normalize smart quotes, dashes, and whitespace to ASCII equivalents."""
+        replacements = {
+            '\u2018': "'", '\u2019': "'",  # smart single quotes
+            '\u201c': '"', '\u201d': '"',  # smart double quotes
+            '\u2014': '--', '\u2013': '-',  # em/en dashes
+            '\u2026': '...',               # ellipsis
+        }
+        for src, dst in replacements.items():
+            text = text.replace(src, dst)
+        return re.sub(r'\s+', ' ', text).strip()
+
     async def find_chunk_containing(self, book_id: str, text: str) -> int:
-        """Find the chunk index that contains the given text."""
+        """Find the chunk index that contains the given text.
+
+        Uses progressive matching: tries full text, then 200, 100, 50 char
+        snippets with normalized quotes and case-insensitive comparison.
+        """
         entries = self.entries.get(book_id)
         if not entries:
             entries = await self.load_from_file(book_id)
@@ -353,12 +370,29 @@ class VectorStore:
                 self.entries[book_id] = entries
         if not entries or not text:
             return 0
-        # Normalize whitespace to match chunker output
-        normalized = re.sub(r'\s+', ' ', text).strip()
-        snippet = normalized[:50]
-        for entry in entries:
-            if snippet in entry.chunk.text:
-                return entry.chunk.metadata['chunk_index']
+
+        normalized = self._normalize_quotes(text)
+
+        # Precompute normalized chunk texts once
+        normalized_chunks = [
+            (self._normalize_quotes(e.chunk.text).lower(), e.chunk.metadata['chunk_index'])
+            for e in entries
+        ]
+
+        # Progressive snippet lengths — try longest first for best accuracy
+        # Deduplicate and skip lengths longer than the text
+        snippet_lengths = list(dict.fromkeys(
+            l for l in [len(normalized), 200, 100, 50] if l <= len(normalized)
+        ))
+
+        for length in snippet_lengths:
+            snippet = normalized[:length].lower()
+            if not snippet:
+                continue
+            for chunk_text, chunk_index in normalized_chunks:
+                if snippet in chunk_text:
+                    return chunk_index
+
         return 0
 
     async def keyword_search(self, book_id: str, text: str) -> list[SearchResult]:
