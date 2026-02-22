@@ -196,7 +196,7 @@ class RAGService:
         logger.info("Contextualized embedding for %d chunks", len(chunks))
 
         # voyage-context-3 limits
-        MAX_CHARS_PER_DOC = 120_000    # ~30K tokens, safe margin under 32K limit
+        MAX_CHARS_PER_DOC = 80_000     # ~20-27K tokens depending on content, safe under 32K limit
         MAX_CHARS_PER_REQUEST = 460_000  # ~115K tokens, safe margin under 120K limit
 
         # Group chunks by chapter, preserving order
@@ -332,20 +332,26 @@ class RAGService:
             if len(chapter_text) >= 50:
                 chapter_inputs.append((i, chapter_title, chapter_text))
 
-        # Limit concurrent Haiku calls to avoid 429 rate limits
-        sem = asyncio.Semaphore(5)
+        # Limit concurrent Haiku calls to stay under rate limits
+        # (50K input tokens/min — each chapter sends ~2K tokens)
+        sem = asyncio.Semaphore(2)
 
         async def _summarize(idx: int, title: str, text: str) -> TextChunk | None:
             async with sem:
-                response = await asyncio.to_thread(
-                    self.anthropic.messages.create,
-                    model=config.CLAUDE_HAIKU_MODEL,
-                    max_tokens=200,
-                    messages=[{
-                        "role": "user",
-                        "content": f"{CHAPTER_INDEX_PROMPT}Chapter: {title}\n\n{text}",
-                    }],
-                )
+                try:
+                    response = await asyncio.to_thread(
+                        self.anthropic.messages.create,
+                        model=config.CLAUDE_HAIKU_MODEL,
+                        max_tokens=200,
+                        messages=[{
+                            "role": "user",
+                            "content": f"{CHAPTER_INDEX_PROMPT}Chapter: {title}\n\n{text}",
+                        }],
+                    )
+                except Exception as e:
+                    logger.warning("Failed to summarize chapter %d (%s): %s", idx, title, e)
+                    return None
+                await asyncio.sleep(1)
             summary_text = response.content[0].text if response.content else ""
             if not summary_text:
                 return None
@@ -460,6 +466,8 @@ class RAGService:
         # Build the prompt
         system_prompt = """You are a reading companion.
 
+GROUNDING RULE: Base your answer ONLY on the provided context and selected text. Do not use outside knowledge of this book. If the context doesn't contain enough information to answer, say so honestly rather than guessing.
+
 Be direct and concise. Answer the question, then stop. No filler, no plot recaps, no dramatic narration.
 Short paragraphs. Prefer 2-4 sentences over a wall of text.
 Address the reader as "you." Never say "the user" or "the reader."
@@ -484,7 +492,7 @@ Question: {question}"""
         # Generate answer with Claude
         response = self.anthropic.messages.create(
             model=config.CLAUDE_MODEL,
-            max_tokens=1024,
+            max_tokens=400,
             system=system_prompt,
             messages=[
                 {"role": "user", "content": user_prompt}
