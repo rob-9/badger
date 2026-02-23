@@ -1,13 +1,19 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import ePub, { Book, Rendition, NavItem } from 'epubjs'
-import { ChevronLeft, ChevronRight, Settings, ZoomIn, ZoomOut, List, Moon, Sun, RotateCcw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, ZoomIn, ZoomOut, List, Moon, Sun, RotateCcw, ArrowLeft, Minus, Plus } from 'lucide-react'
 
 export interface TextSelection {
   text: string
   position: { x: number; y: number }
   pageRect: { left: number; right: number; top: number; bottom: number }
+}
+
+export interface EpubReaderHandle {
+  navigateToText: (text: string) => Promise<boolean>
+  getCurrentCfi: () => string | null
+  navigateToCfi: (cfi: string) => Promise<void>
 }
 
 interface EpubReaderProps {
@@ -16,15 +22,17 @@ interface EpubReaderProps {
   isIndexing?: boolean
   isIndexed?: boolean
   isChatOpen?: boolean
+  sourceNavCfi?: string | null
   onCloseAction: () => void
   onTextSelect?: (selection: TextSelection) => void
   onLocationChange?: (percentage: number) => void
+  onBackToReading?: () => void
 }
 
 // Book page aspect ratio (width:height)
 const ASPECT_RATIO = 7 / 9
 
-export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, isChatOpen, onCloseAction, onTextSelect, onLocationChange }: EpubReaderProps) {
+const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubReader({ epubData, fileName, isIndexing, isIndexed, isChatOpen, sourceNavCfi, onCloseAction, onTextSelect, onLocationChange, onBackToReading }, ref) {
   // Initialize font size from localStorage
   const [fontSize, setFontSize] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -69,6 +77,13 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
   // Progress
   const [percentage, setPercentage] = useState(0)
 
+  // Current chapter tracking
+  const [currentHref, setCurrentHref] = useState('')
+
+  // Page display (per-section)
+  const [displayedPage, setDisplayedPage] = useState(0)
+  const [displayedTotal, setDisplayedTotal] = useState(0)
+
   // Page transition
   const [isFlipping, setIsFlipping] = useState(false)
 
@@ -108,6 +123,124 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
   const renditionRef = useRef<Rendition | null>(null)
   const onTextSelectRef = useRef(onTextSelect)
   useEffect(() => { onTextSelectRef.current = onTextSelect }, [onTextSelect])
+
+  const highlightRef = useRef<HTMLElement | null>(null)
+  const currentCfiRef = useRef<string | null>(null)
+
+  const clearHighlight = useCallback(() => {
+    if (highlightRef.current) {
+      const mark = highlightRef.current
+      const parent = mark.parentNode
+      if (parent) {
+        while (mark.firstChild) {
+          parent.insertBefore(mark.firstChild, mark)
+        }
+        parent.removeChild(mark)
+        parent.normalize()
+      }
+      highlightRef.current = null
+    }
+  }, [])
+
+  // Clear highlight when sourceNavCfi is cleared (user clicked back or navigated away)
+  useEffect(() => {
+    if (!sourceNavCfi) clearHighlight()
+  }, [sourceNavCfi, clearHighlight])
+
+  useImperativeHandle(ref, () => ({
+    getCurrentCfi: () => currentCfiRef.current,
+
+    navigateToCfi: async (cfi: string) => {
+      clearHighlight()
+      if (renditionRef.current) {
+        setIsFlipping(true)
+        await new Promise(resolve => setTimeout(resolve, 150))
+        await renditionRef.current.display(cfi)
+        setIsFlipping(false)
+      }
+    },
+
+    navigateToText: async (text: string): Promise<boolean> => {
+      const book = bookRef.current
+      const rendition = renditionRef.current
+      if (!book || !rendition) return false
+
+      clearHighlight()
+
+      // Build candidate search keys: try progressively shorter lengths (80 → 60 → 40)
+      // trimmed at word boundaries to improve match resilience across whitespace variants
+      const normalized = text.replace(/\s+/g, ' ').trim()
+      const buildKey = (maxLen: number): string => {
+        let key = normalized.slice(0, maxLen)
+        if (normalized.length > maxLen) {
+          const lastSpace = key.lastIndexOf(' ')
+          if (lastSpace > maxLen * 0.5) key = key.slice(0, lastSpace)
+        }
+        return key
+      }
+      const searchKeys = [buildKey(80), buildKey(60), buildKey(40)].filter(
+        (k, i, arr) => k.length >= 15 && arr.indexOf(k) === i
+      )
+
+      const spineItems = (book.spine as any).spineItems || []
+
+      for (const item of spineItems) {
+        try {
+          const section = book.spine.get(item.index)
+          if (!section) continue
+
+          await section.load(book.load.bind(book))
+          const sectionText = (section as any).document?.body?.textContent || ''
+
+          // Try each key length against this section
+          const matchedKey = searchKeys.find(k => sectionText.includes(k))
+          if (!matchedKey) continue
+
+          // Pure fade transition
+          setIsFlipping(true)
+          await new Promise(resolve => setTimeout(resolve, 150))
+
+          // Navigate to section first
+          await rendition.display(item.href)
+
+          // Try CFI-based navigation for exact page within section
+          const sectionDoc = (section as any).document
+          if (sectionDoc) {
+            const tw = sectionDoc.createTreeWalker(sectionDoc.body, NodeFilter.SHOW_TEXT)
+            let tn: Text | null
+            while ((tn = tw.nextNode() as Text | null)) {
+              const c = tn.textContent || ''
+              const ci = c.indexOf(matchedKey)
+              if (ci !== -1) {
+                try {
+                  const r = sectionDoc.createRange()
+                  r.setStart(tn, ci)
+                  r.setEnd(tn, ci + 1)
+                  const cfi = (section as any).cfiFromRange(r)
+                  if (cfi) await rendition.display(cfi)
+                } catch { /* stay on section start */ }
+                break
+              }
+            }
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 200))
+          // Highlight while still invisible
+          const iframe = viewerRef.current?.querySelector('iframe')
+          const doc = iframe?.contentDocument
+          if (doc) {
+            highlightRef.current = highlightTextInDoc(doc, matchedKey)
+          }
+          // Fade in with content already in position
+          setIsFlipping(false)
+          return true
+        } catch {
+          continue
+        }
+      }
+      return false
+    },
+  }), [clearHighlight])
 
   // Initialize theme on mount
   useEffect(() => {
@@ -169,7 +302,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
           'body, p, div, span, li, td, th, blockquote': {
             'font-family': '"Cooper BT", Inter, system-ui, sans-serif !important',
           },
-          '::selection': { 'background': 'rgba(59, 130, 246, 0.15)', 'color': 'inherit' },
+          '::selection': { 'background': 'rgba(217, 149, 95, 0.15)', 'color': 'inherit' },
         })
         rendition.themes.select('boom')
 
@@ -183,9 +316,15 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
               style.id = 'boom-theme'
               doc.head.appendChild(style)
             }
-            style.textContent = dark
+            style.textContent = (dark
               ? '*, html, body { background: #1a1a1a !important; color: #d4d4d4 !important; border-color: #333 !important; }'
-              : '*, html, body { background: #ffffff !important; color: #1a1a1a !important; }'
+              : '*, html, body { background: #ffffff !important; color: #1a1a1a !important; }')
+              + '\n.boom-source-highlight { background: rgba(217, 149, 95, 0.3); border-radius: 2px; }'
+          }
+          // Apply current font size to new pages
+          if (renditionRef.current) {
+            const saved = localStorage.getItem('boom-font-size')
+            if (saved) renditionRef.current.themes.fontSize(`${saved}%`)
           }
         })
 
@@ -217,6 +356,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
 
         rendition.on('relocated', (location: any) => {
           if (location.start?.cfi) {
+            currentCfiRef.current = location.start.cfi
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
           }
           if (spineLength > 0 && location.start?.index != null) {
@@ -225,7 +365,13 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
             const sectionTotal = displayed.total || 1
             const pct = (location.start.index + page / sectionTotal) / spineLength
             setPercentage(pct)
+            setDisplayedPage(page)
+            setDisplayedTotal(sectionTotal)
             if (onLocationChange) onLocationChange(pct)
+          }
+          // Track current href for TOC highlighting
+          if (location.start?.href) {
+            setCurrentHref(location.start.href)
           }
         })
 
@@ -307,7 +453,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
       else await renditionRef.current?.prev()
       // fade in new page
       setIsFlipping(false)
-    }, 250)
+    }, 150)
   }, [isFlipping])
 
   const handleNext = useCallback(() => navigate('next'), [navigate])
@@ -348,6 +494,13 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
     setFontSize(newSize)
     localStorage.setItem('boom-font-size', newSize.toString())
   }, [])
+
+  // Apply font size to rendition
+  useEffect(() => {
+    if (renditionRef.current) {
+      renditionRef.current.themes.fontSize(`${fontSize}%`)
+    }
+  }, [fontSize])
 
   // Zoom handlers with persistence
   const handleZoomIn = useCallback(() => {
@@ -393,8 +546,10 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight') {
+        e.preventDefault()
         handleNext()
       } else if (e.key === 'ArrowLeft') {
+        e.preventDefault()
         handlePrev()
       } else if ((e.metaKey || e.ctrlKey) && e.key === '+') {
         e.preventDefault()
@@ -447,37 +602,37 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
         </div>
 
         <div className="flex items-center space-x-2">
-          {/* Zoom Controls */}
+          {/* Font Size Controls */}
           <div className={`flex items-center space-x-1 bg-gray-100 dark:bg-[#2a2a2a] rounded-lg p-1 transition-all duration-200 origin-right ${
             showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
           }`}>
             <button
-              onClick={handleZoomOut}
+              onClick={() => handleFontSizeChange(Math.max(60, fontSize - 10))}
               className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-              aria-label="Zoom out"
-              title="Zoom out (Cmd/Ctrl + -)"
-              disabled={!showToolbar}
+              aria-label="Decrease font size"
+              title="Decrease font size"
+              disabled={!showToolbar || fontSize <= 60}
             >
-              <ZoomOut className="w-4 h-4" />
+              <Minus className="w-4 h-4" />
             </button>
-            <span className="px-2 py-1 text-sm dark:text-[#ccc] min-w-[3rem] text-center">
-              {Math.round(zoom * 100)}%
+            <span className="px-2 py-1 text-xs dark:text-[#ccc] min-w-[3rem] text-center">
+              {fontSize}%
             </span>
             <button
-              onClick={handleZoomIn}
+              onClick={() => handleFontSizeChange(Math.min(200, fontSize + 10))}
               className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-              aria-label="Zoom in"
-              title="Zoom in (Cmd/Ctrl + +)"
-              disabled={!showToolbar}
+              aria-label="Increase font size"
+              title="Increase font size"
+              disabled={!showToolbar || fontSize >= 200}
             >
-              <ZoomIn className="w-4 h-4" />
+              <Plus className="w-4 h-4" />
             </button>
-            {zoom !== 1 && (
+            {fontSize !== 100 && (
               <button
-                onClick={handleZoomReset}
+                onClick={() => handleFontSizeChange(100)}
                 className="px-2 py-1 text-sm hover:bg-white dark:hover:bg-[#3a3a3a] rounded flex items-center dark:text-[#ccc]"
-                aria-label="Reset zoom"
-                title="Reset zoom (Cmd/Ctrl + 0)"
+                aria-label="Reset font size"
+                title="Reset font size"
                 disabled={!showToolbar}
               >
                 <RotateCcw className="w-4 h-4" />
@@ -538,7 +693,7 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
           <h2 className="text-lg font-semibold mb-4 dark:text-[#e0e0e0]">Table of Contents</h2>
           <div className="space-y-1">
             {toc.map((item, index) => (
-              <TocItem key={index} item={item} onNavigate={handleNavigate} />
+              <TocItem key={index} item={item} onNavigate={handleNavigate} activeHref={currentHref} />
             ))}
           </div>
         </div>
@@ -553,39 +708,62 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
         onMouseLeave={handleMouseUp}
         style={{ cursor: zoom > 1 ? (isPanning ? 'grabbing' : 'grab') : 'default' }}
       >
-        <div
-          ref={viewerRef}
-          className="relative bg-white dark:bg-[#1a1a1a] rounded-lg shadow-lg"
-          style={{
+        <div className="flex flex-col items-center">
+          <div className="relative" style={{
             aspectRatio: '7 / 9',
-            height: 'calc(100vh - 140px)',
-            maxWidth: 'calc((100vh - 140px) * 7 / 9)',
-            fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
-            transform: `scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px)`,
-            transformOrigin: 'center center',
-            opacity: isFlipping ? 0 : 1,
-            transition: 'opacity 0.4s ease',
-          }}
-        />
+            height: 'calc(100vh - 160px)',
+            maxWidth: 'calc((100vh - 160px) * 7 / 9)',
+          }}>
+            {/* Back to reading — pill button, top-left of the book */}
+            {sourceNavCfi && (
+              <button
+                onClick={onBackToReading}
+                className="absolute -left-14 top-0 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/80 dark:bg-[#252525]/80 backdrop-blur-sm border border-gray-200/60 dark:border-[#3a3a3a]/60 shadow-sm hover:bg-white dark:hover:bg-[#2e2e2e] hover:shadow-md transition-all duration-150 animate-fade-in"
+                aria-label="Back to reading position"
+                title="Back to reading position"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Return</span>
+              </button>
+            )}
+            <div
+              ref={viewerRef}
+              className="w-full h-full bg-white dark:bg-[#1a1a1a] rounded-lg shadow-lg"
+              style={{
+                fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+                transform: `scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px)`,
+                transformOrigin: 'center center',
+                opacity: isFlipping ? 0 : 1,
+                transition: isFlipping ? 'opacity 0.15s ease-out' : 'opacity 0.35s ease-in',
+              }}
+            />
+          </div>
+          {/* Page number */}
+          {isReady && displayedTotal > 0 && (
+            <span className="mt-2 text-[0.65rem] text-gray-400 dark:text-[#555] tabular-nums">
+              {displayedPage} / {displayedTotal}
+            </span>
+          )}
+        </div>
 
         {/* Navigation Arrows */}
         {isReady && (
           <>
             <button
               onClick={handlePrev}
-              className="fixed top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
+              className="fixed top-1/2 -translate-y-1/2 p-2 bg-white/40 dark:bg-[#2a2a2a]/40 backdrop-blur-sm rounded-full opacity-40 hover:opacity-100 hover:bg-white/80 dark:hover:bg-[#2a2a2a]/80 transition-all z-10"
               style={{ left: isWideScreen && showToc ? '22rem' : '2rem' }}
               aria-label="Previous page"
             >
-              <ChevronLeft className="w-6 h-6" />
+              <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               onClick={handleNext}
-              className="fixed top-1/2 -translate-y-1/2 p-4 bg-white dark:bg-[#2a2a2a] rounded-full shadow-lg hover:bg-gray-50 dark:hover:bg-[#333] transition-all z-10"
+              className="fixed top-1/2 -translate-y-1/2 p-2 bg-white/40 dark:bg-[#2a2a2a]/40 backdrop-blur-sm rounded-full opacity-40 hover:opacity-100 hover:bg-white/80 dark:hover:bg-[#2a2a2a]/80 transition-all z-10"
               style={{ right: isChatOpen ? 'calc(400px + 2rem)' : '2rem' }}
               aria-label="Next page"
             >
-              <ChevronRight className="w-6 h-6" />
+              <ChevronRight className="w-4 h-4" />
             </button>
           </>
         )}
@@ -593,6 +771,42 @@ export default function EpubReader({ epubData, fileName, isIndexing, isIndexed, 
 
     </div>
   )
+})
+
+export default EpubReader
+
+// Helper: find and highlight text in an iframe document
+function highlightTextInDoc(doc: Document, searchKey: string): HTMLElement | null {
+  // Try progressively shorter keys to handle text node boundaries
+  for (const len of [searchKey.length, 40, 25]) {
+    let key = searchKey.slice(0, Math.min(len, searchKey.length))
+    if (len < searchKey.length) {
+      const lastSpace = key.lastIndexOf(' ')
+      if (lastSpace > len * 0.5) key = key.slice(0, lastSpace)
+    }
+    if (key.length < 10) continue
+
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
+    let node: Text | null
+    while ((node = walker.nextNode() as Text | null)) {
+      const content = node.textContent || ''
+      const idx = content.indexOf(key)
+      if (idx !== -1) {
+        try {
+          const range = doc.createRange()
+          range.setStart(node, idx)
+          range.setEnd(node, idx + key.length)
+          const mark = doc.createElement('mark')
+          mark.className = 'boom-source-highlight'
+          range.surroundContents(mark)
+          return mark
+        } catch {
+          continue
+        }
+      }
+    }
+  }
+  return null
 }
 
 // Ready badge — shows briefly after indexing completes
@@ -612,20 +826,28 @@ function ReadyBadge() {
 }
 
 // TOC Item component
-function TocItem({ item, onNavigate, level = 0 }: { item: NavItem; onNavigate: (href: string) => void; level?: number }) {
+function TocItem({ item, onNavigate, activeHref, level = 0 }: { item: NavItem; onNavigate: (href: string) => void; activeHref?: string; level?: number }) {
+  const itemBase = item.href.split('#')[0]
+  const activeBase = (activeHref || '').split('#')[0]
+  const isActive = activeBase && (itemBase === activeBase || activeBase.endsWith('/' + itemBase) || itemBase.endsWith('/' + activeBase))
+
   return (
     <div>
       <button
         onClick={() => onNavigate(item.href)}
-        className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-sm dark:text-[#d4d4d4]"
+        className={`w-full text-left px-3 py-2 rounded-lg transition-colors text-sm ${
+          isActive
+            ? 'bg-accent/10 text-accent-foreground font-medium'
+            : 'hover:bg-gray-100 dark:hover:bg-[#2a2a2a] text-gray-800 dark:text-[#d4d4d4]'
+        }`}
         style={{ paddingLeft: `${12 + level * 16}px` }}
       >
-        <span className="text-gray-800 dark:text-[#d4d4d4]">{item.label}</span>
+        <span>{item.label}</span>
       </button>
       {item.subitems && item.subitems.length > 0 && (
         <div>
           {item.subitems.map((subitem, index) => (
-            <TocItem key={index} item={subitem} onNavigate={onNavigate} level={level + 1} />
+            <TocItem key={index} item={subitem} onNavigate={onNavigate} activeHref={activeHref} level={level + 1} />
           ))}
         </div>
       )}
