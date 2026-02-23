@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import DocumentViewer from '@/components/DocumentViewer'
-import EpubReader, { type TextSelection } from '@/components/EpubReader'
+import EpubReader, { type TextSelection, type EpubReaderHandle } from '@/components/EpubReader'
 import Sidebar from '@/components/Sidebar'
 import type { ViewType } from '@/components/Sidebar'
 import LibraryView from '@/components/LibraryView'
@@ -47,6 +47,9 @@ export default function Home() {
   const [loadingStatus, setLoadingStatus] = useState('')
   const streamAbortRef = useRef<(() => void) | null>(null)
   const streamSourcesRef = useRef<ChatMessage['sources']>(undefined)
+  const epubReaderRef = useRef<EpubReaderHandle>(null)
+  const [savedReadingCfi, setSavedReadingCfi] = useState<string | null>(null)
+  const [pendingSourceNav, setPendingSourceNav] = useState<NonNullable<ChatMessage['sources']>[0] | null>(null)
 
   // Loading transition state
   const [isLoadingBook, setIsLoadingBook] = useState(false)
@@ -227,12 +230,19 @@ export default function Home() {
         })
       },
       onToken: (text) => {
+        setLoadingStatus('')  // Clear pipeline status once generation starts
         setChatMessages(prev => {
           const last = prev[prev.length - 1]
           if (last?.id === assistantId) {
             return [...prev.slice(0, -1), { ...last, content: last.content + text }]
           }
-          return [...prev, { id: assistantId, role: 'assistant' as const, content: text }]
+          // First token — create message with sources from ref (onSources fires before tokens)
+          return [...prev, {
+            id: assistantId,
+            role: 'assistant' as const,
+            content: text,
+            sources: streamSourcesRef.current,
+          }]
         })
       },
       onDone: () => {
@@ -303,6 +313,28 @@ export default function Home() {
     }, assistantId)
   }, [bookId, readerPosition, startStreaming])
 
+  const handleSourceClick = useCallback((source: NonNullable<ChatMessage['sources']>[0]) => {
+    setPendingSourceNav(source)
+  }, [])
+
+  const handleConfirmSourceNav = useCallback(async () => {
+    if (!pendingSourceNav) return
+    const source = pendingSourceNav
+    setPendingSourceNav(null)
+    const currentCfi = epubReaderRef.current?.getCurrentCfi()
+    if (currentCfi) {
+      setSavedReadingCfi(currentCfi)
+    }
+    await epubReaderRef.current?.navigateToText(source.full_text)
+  }, [pendingSourceNav])
+
+  const handleBackToReading = useCallback(() => {
+    if (savedReadingCfi) {
+      epubReaderRef.current?.navigateToCfi(savedReadingCfi)
+      setSavedReadingCfi(null)
+    }
+  }, [savedReadingCfi])
+
   if (!historyLoaded && !document) {
     return <div className="h-screen bg-[#14120b]" />
   }
@@ -331,14 +363,17 @@ export default function Home() {
         ) : isEpub && epubData ? (
           <>
             <EpubReader
+              ref={epubReaderRef}
               epubData={epubData}
               fileName={fileName}
               isIndexing={isIndexing}
               isIndexed={isIndexed}
               isChatOpen={isChatOpen}
+              sourceNavCfi={savedReadingCfi}
               onCloseAction={handleBack}
               onTextSelect={handleTextSelect}
               onLocationChange={setReaderPosition}
+              onBackToReading={handleBackToReading}
             />
             {selection && (
               <QuestionPopup
@@ -357,6 +392,10 @@ export default function Home() {
                 loadingStatus={loadingStatus}
                 onSendMessage={handleChatMessage}
                 onClose={() => setIsChatOpen(false)}
+                onSourceClick={handleSourceClick}
+                pendingSourceNav={pendingSourceNav}
+                onConfirmSourceNav={handleConfirmSourceNav}
+                onCancelSourceNav={() => setPendingSourceNav(null)}
               />
             )}
           </>

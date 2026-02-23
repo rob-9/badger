@@ -10,7 +10,12 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   context?: string
-  sources?: Array<{ text: string; full_text: string; score: number; chunk_index: number; source_number: number; label: string }>
+  sources?: Array<{ text: string; full_text: string; score: number; chunk_index: number; source_number: number; label: string; chapter_title?: string }>
+}
+
+interface SourceNavTarget {
+  text: string
+  source_number: number
 }
 
 interface ChatPanelProps {
@@ -19,6 +24,10 @@ interface ChatPanelProps {
   loadingStatus?: string
   onSendMessage: (message: string) => void
   onClose: () => void
+  onSourceClick?: (source: NonNullable<ChatMessage['sources']>[0]) => void
+  pendingSourceNav?: SourceNavTarget | null
+  onConfirmSourceNav?: () => void
+  onCancelSourceNav?: () => void
 }
 
 const LABEL_COLORS: Record<string, string> = {
@@ -35,40 +44,15 @@ function truncate(text: string, maxLen: number): string {
   return (lastSpace > maxLen * 0.6 ? truncated.slice(0, lastSpace) : truncated) + '...'
 }
 
-export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose }: ChatPanelProps) {
+export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose, onSourceClick, pendingSourceNav, onConfirmSourceNav, onCancelSourceNav }: ChatPanelProps) {
   const [input, setInput] = useState('')
-  const [openPopover, setOpenPopover] = useState<string | null>(null)
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const popoverRef = useRef<HTMLDivElement>(null)
-  const citationBtnClass = 'citation-btn'
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
-
-  // Close popover on outside click or Escape
-  useEffect(() => {
-    if (!openPopover) return
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      // Ignore clicks on citation buttons — their onClick handles toggling
-      if (target.closest(`.${citationBtnClass}`)) return
-      if (popoverRef.current && !popoverRef.current.contains(target)) {
-        setOpenPopover(null)
-      }
-    }
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpenPopover(null)
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    document.addEventListener('keydown', handleEscape)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-      document.removeEventListener('keydown', handleEscape)
-    }
-  }, [openPopover])
 
   const toggleSources = useCallback((msgId: string) => {
     setExpandedSources(prev => {
@@ -77,6 +61,10 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
         next.delete(msgId)
       } else {
         next.add(msgId)
+        setTimeout(() => {
+          const el = document.getElementById(`sources-${msgId}`)
+          el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+        }, 50)
       }
       return next
     })
@@ -165,47 +153,34 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
 
                       const processNode = (node: React.ReactNode): React.ReactNode => {
                         if (typeof node !== 'string') return node
-                        const parts = node.split(/(\[Source \d+\])/)
+                        // Match citation patterns:
+                        //   [Source 1]            — single with label
+                        //   [Source 1, Source 2]  — multiple with labels
+                        //   [Source 1, 2]         — mixed: label on first, bare nums after
+                        //   [1] or [1, 2]         — bare bracketed numbers
+                        const parts = node.split(/(\[(?:Source\s+)?\d+(?:,\s*(?:Source\s+)?\d+)*\])/)
                         if (parts.length === 1) return node
                         return parts.map((part, i) => {
-                          const match = part.match(/^\[Source (\d+)\]$/)
-                          if (!match) return part
-                          const num = parseInt(match[1])
-                          const source = sources.find(s => s.source_number === num)
-                          const popoverKey = `${msg.id}-${num}`
-                          const isOpen = openPopover === popoverKey
+                          // Check for any citation bracket pattern
+                          const groupMatch = part.match(/^\[(?:Source\s+)?\d+(?:,\s*(?:Source\s+)?\d+)*\]$/)
+                          if (!groupMatch) return part
+                          // Extract all source numbers from the match
+                          const nums = (part.match(/\d+/g) || []).map(n => parseInt(n))
                           return (
-                            <span key={i} className="relative inline">
-                              <button
-                                onClick={() => setOpenPopover(isOpen ? null : popoverKey)}
-                                aria-label={`View source ${num}`}
-                                aria-haspopup="dialog"
-                                aria-expanded={isOpen}
-                                className={`${citationBtnClass} inline-flex items-center justify-center min-w-[1.1em] h-[1.1em] text-[0.6em] font-semibold bg-accent/20 text-accent-foreground rounded-full px-[0.3em] align-super cursor-pointer hover:bg-accent/40 transition-colors mx-[0.1em] leading-none`}
-                              >
-                                {num}
-                              </button>
-                              {isOpen && source && (
-                                <div
-                                  ref={popoverRef}
-                                  role="dialog"
-                                  aria-label={`Source ${num} details`}
-                                  className="absolute right-0 top-full mt-1 z-50 w-64 max-w-[calc(100vw-3rem)] bg-white dark:bg-[#2a2a2a] border border-gray-200 dark:border-[#444] rounded-lg shadow-lg p-3 text-left"
-                                  style={{ fontSize: '0.8rem' }}
-                                >
-                                  <div className="flex items-center gap-1.5 mb-1.5">
-                                    <span className={`text-[0.65rem] font-medium px-1.5 py-0.5 rounded ${LABEL_COLORS[source.label] || DEFAULT_LABEL_COLOR}`}>
-                                      {source.label}
-                                    </span>
-                                    <span className="text-[0.65rem] text-gray-400 dark:text-[#666]">
-                                      Chunk {source.chunk_index}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-gray-600 dark:text-[#bbb] leading-relaxed not-prose">
-                                    {truncate(source.text, 200)}
-                                  </p>
-                                </div>
-                              )}
+                            <span key={i} className="inline">
+                              {nums.map((num, j) => {
+                                const source = sources.find(s => s.source_number === num)
+                                return (
+                                  <button
+                                    key={j}
+                                    onClick={() => source && onSourceClick?.(source)}
+                                    aria-label={`Navigate to source ${num}`}
+                                    className="inline-flex items-center justify-center min-w-[1.1em] h-[1.1em] text-[0.6em] font-semibold bg-accent/20 text-accent-foreground rounded-full px-[0.3em] align-super cursor-pointer hover:bg-accent/40 transition-colors mx-[0.1em] leading-none"
+                                  >
+                                    {num}
+                                  </button>
+                                )
+                              })}
                             </span>
                           )
                         })
@@ -239,21 +214,31 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
                       {msg.sources.length} source{msg.sources.length !== 1 ? 's' : ''}
                     </button>
                     {expandedSources.has(msg.id) && (
-                      <div className="mt-1.5 space-y-1.5 border-t border-gray-100 dark:border-[#333] pt-2">
+                      <div id={`sources-${msg.id}`} className="mt-1.5 space-y-1.5 border-t border-gray-100 dark:border-[#333] pt-2">
                         {msg.sources.map((source) => (
-                          <div key={source.source_number} className="flex gap-2 text-xs">
+                          <button
+                            key={source.source_number}
+                            onClick={() => onSourceClick?.(source)}
+                            className="flex gap-2 text-xs w-full text-left hover:bg-gray-50 dark:hover:bg-[#2a2a2a] rounded-md p-1 -m-1 transition-colors cursor-pointer"
+                          >
                             <span className="inline-flex items-center justify-center min-w-[1.2em] h-[1.2em] text-[0.65rem] font-semibold bg-accent/20 text-accent-foreground rounded-full px-1 leading-none flex-shrink-0 mt-0.5">
                               {source.source_number}
                             </span>
                             <div className="min-w-0">
-                              <span className={`text-[0.6rem] font-medium px-1 py-0.5 rounded mr-1 ${LABEL_COLORS[source.label] || DEFAULT_LABEL_COLOR}`}>
-                                {source.label}
-                              </span>
-                              <span className="text-gray-500 dark:text-[#888] line-clamp-2">
-                                {truncate(source.text, 120)}
-                              </span>
+                              {source.chapter_title ? (
+                                <>
+                                  <span className="text-gray-700 dark:text-[#aaa] font-medium block">{source.chapter_title}</span>
+                                  <span className="text-gray-400 dark:text-[#666] line-clamp-1 text-[0.65rem]">
+                                    {truncate(source.text, 80)}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-gray-500 dark:text-[#888] line-clamp-2">
+                                  {truncate(source.text, 120)}
+                                </span>
+                              )}
                             </div>
-                          </div>
+                          </button>
                         ))}
                       </div>
                     )}
@@ -282,6 +267,34 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Source navigation confirmation bar */}
+      {pendingSourceNav && (
+        <div className="px-4 py-2.5 border-t border-gray-100 dark:border-[#2a2a2a] bg-gray-50/80 dark:bg-[#232323]/80">
+          <div className="flex items-center gap-2.5">
+            <span className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 text-[0.6rem] font-semibold bg-accent/20 text-accent-foreground rounded-full leading-none">
+              {pendingSourceNav.source_number}
+            </span>
+            <p className="text-[0.7rem] text-gray-500 dark:text-[#888] leading-snug line-clamp-1 min-w-0 flex-1">
+              {pendingSourceNav.text.slice(0, 100)}{pendingSourceNav.text.length > 100 ? '...' : ''}
+            </p>
+            <div className="flex-shrink-0 flex items-center gap-1.5">
+              <button
+                onClick={onCancelSourceNav}
+                className="px-2 py-1 text-[0.65rem] text-gray-400 dark:text-[#666] hover:text-gray-600 dark:hover:text-[#999] rounded-md transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onConfirmSourceNav}
+                className="px-2.5 py-1 text-[0.65rem] bg-accent text-[#14120b] rounded-lg hover:bg-accent-hover transition-colors font-semibold"
+              >
+                Go
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <div className="px-4 py-4 border-t border-gray-100 dark:border-[#2a2a2a] bg-white dark:bg-[#1e1e1e]">

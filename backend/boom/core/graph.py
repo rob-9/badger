@@ -32,10 +32,10 @@ VALID_TYPES = {"vocabulary", "context", "lookup", "analysis"}
 LOG_SEPARATOR = "──────────────────────────────────────────────"
 
 TOKEN_LIMITS = {
-    "vocabulary": 256,
-    "context": 512,
-    "lookup": 512,
-    "analysis": 1024,
+    "vocabulary": 128,
+    "context": 256,
+    "lookup": 256,
+    "analysis": 512,
 }
 
 
@@ -148,6 +148,7 @@ def label_chunks(results: list[SearchResult], reader_position: float, total_chun
             "chunk_index": r.chunk.metadata["chunk_index"],
             "score": r.score,
             "label": "PAST" if r.chunk.metadata["chunk_index"] <= reader_idx else "AHEAD",
+            "chapter_title": r.chunk.metadata.get("chapter_title", ""),
         }
         for r in results
     ]
@@ -246,6 +247,7 @@ def prepare_generate(state: QAState) -> dict:
             "chunk_index": c["chunk_index"],
             "source_number": i + 1,
             "label": c["label"],
+            "chapter_title": c.get("chapter_title", ""),
         }
         for i, c in enumerate(ordered)
     ]
