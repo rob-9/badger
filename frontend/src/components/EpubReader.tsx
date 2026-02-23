@@ -354,49 +354,63 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
           setToc(navigation.toc)
         }
 
-        // Calibrate page locations after first render:
-        // measure chars per visual page from the current section,
-        // then generate global locations so 1 page turn ≈ 1 location.
-        let locationsReady = false
+        // Build cumulative page counts per spine section:
+        // after first render, measure chars/page from the visible section,
+        // then load all sections to compute global page totals.
+        let cumulativePages: number[] | null = null
 
         rendition.on('relocated', async (location: any) => {
           if (location.start?.cfi) {
             currentCfiRef.current = location.start.cfi
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
-
-            // Update global page number once locations are generated
-            if (locationsReady) {
-              const loc = book.locations.locationFromCfi(location.start.cfi)
-              if (typeof loc === 'number') setCurrentPage(loc)
-            }
           }
-          if (spineLength > 0 && location.start?.index != null) {
+
+          const idx = location.start?.index
+          if (spineLength > 0 && idx != null) {
             const displayed = location.start.displayed || {}
             const page = displayed.page || 0
             const sectionTotal = displayed.total || 1
-            const pct = (location.start.index + page / sectionTotal) / spineLength
+            const pct = (idx + page / sectionTotal) / spineLength
             setPercentage(pct)
             if (onLocationChange) onLocationChange(pct)
 
-            // One-time calibration: measure chars per visual page, then generate locations
-            if (!locationsReady && sectionTotal > 0) {
+            // Update global page number
+            if (cumulativePages) {
+              setCurrentPage((cumulativePages[idx] || 0) + page)
+            }
+
+            // One-time: calibrate and compute all section page counts
+            if (!cumulativePages && sectionTotal > 0) {
+              // Prevent re-entry
+              cumulativePages = []
               try {
-                const section = book.spine.get(location.start.index)
+                const section = book.spine.get(idx)
                 if (section) {
                   await section.load(book.load.bind(book))
                   const text = (section as any).document?.body?.textContent || ''
                   const charsPerPage = Math.max(200, Math.round(text.length / sectionTotal))
-                  await book.locations.generate(charsPerPage)
-                  locationsReady = true
-                  const total = (book.locations as any).total || 0
-                  if (total > 0) setTotalPages(total)
-                  // Set initial page
-                  if (location.start.cfi) {
-                    const loc = book.locations.locationFromCfi(location.start.cfi)
-                    if (typeof loc === 'number') setCurrentPage(loc)
+
+                  // Load all sections and compute page counts
+                  const cumul = [0]
+                  let running = 0
+                  for (const item of spineItems) {
+                    const s = book.spine.get(item.index)
+                    if (s) {
+                      await s.load(book.load.bind(book))
+                      const t = (s as any).document?.body?.textContent || ''
+                      running += Math.max(1, Math.ceil(t.length / charsPerPage))
+                    } else {
+                      running += 1
+                    }
+                    cumul.push(running)
                   }
+                  cumulativePages = cumul
+                  setTotalPages(running)
+                  setCurrentPage((cumul[idx] || 0) + page)
                 }
-              } catch { /* page numbers unavailable */ }
+              } catch {
+                cumulativePages = null
+              }
             }
           }
           // Track current href for TOC highlighting
