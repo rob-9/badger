@@ -80,9 +80,9 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
   // Current chapter tracking
   const [currentHref, setCurrentHref] = useState('')
 
-  // Page display (per-section)
-  const [displayedPage, setDisplayedPage] = useState(0)
-  const [displayedTotal, setDisplayedTotal] = useState(0)
+  // Global page display
+  const [currentPage, setCurrentPage] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
 
   // Page transition
   const [isFlipping, setIsFlipping] = useState(false)
@@ -348,6 +348,11 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
         const spineItems = (book.spine as any).spineItems || []
         const spineLength = spineItems.length
 
+        // Generate global locations for page numbering (1024 chars ≈ 1 page)
+        await book.locations.generate(1024)
+        const locTotal = (book.locations as any).total || 0
+        if (locTotal > 0) setTotalPages(locTotal)
+
         // Load table of contents
         const navigation = await book.loaded.navigation
         if (navigation?.toc) {
@@ -358,6 +363,10 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
           if (location.start?.cfi) {
             currentCfiRef.current = location.start.cfi
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
+
+            // Global page number from pre-generated locations
+            const loc = book.locations.locationFromCfi(location.start.cfi)
+            if (typeof loc === 'number') setCurrentPage(loc)
           }
           if (spineLength > 0 && location.start?.index != null) {
             const displayed = location.start.displayed || {}
@@ -365,8 +374,6 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
             const sectionTotal = displayed.total || 1
             const pct = (location.start.index + page / sectionTotal) / spineLength
             setPercentage(pct)
-            setDisplayedPage(page)
-            setDisplayedTotal(sectionTotal)
             if (onLocationChange) onLocationChange(pct)
           }
           // Track current href for TOC highlighting
@@ -739,9 +746,9 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
             />
           </div>
           {/* Page number */}
-          {isReady && displayedTotal > 0 && (
+          {isReady && totalPages > 0 && (
             <span className="mt-2 text-[0.65rem] text-gray-400 dark:text-[#555] tabular-nums">
-              {displayedPage} / {displayedTotal}
+              {currentPage} / {totalPages}
             </span>
           )}
         </div>
