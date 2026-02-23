@@ -80,10 +80,6 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
   // Current chapter tracking
   const [currentHref, setCurrentHref] = useState('')
 
-  // Global page display
-  const [currentPage, setCurrentPage] = useState(0)
-  const [totalPages, setTotalPages] = useState(0)
-
   // Page transition
   const [isFlipping, setIsFlipping] = useState(false)
 
@@ -354,64 +350,19 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
           setToc(navigation.toc)
         }
 
-        // Build cumulative page counts per spine section:
-        // after first render, measure chars/page from the visible section,
-        // then load all sections to compute global page totals.
-        let cumulativePages: number[] | null = null
-
-        rendition.on('relocated', async (location: any) => {
+        rendition.on('relocated', (location: any) => {
           if (location.start?.cfi) {
             currentCfiRef.current = location.start.cfi
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
           }
 
-          const idx = location.start?.index
-          if (spineLength > 0 && idx != null) {
+          if (spineLength > 0 && location.start?.index != null) {
             const displayed = location.start.displayed || {}
             const page = displayed.page || 0
             const sectionTotal = displayed.total || 1
-            const pct = (idx + page / sectionTotal) / spineLength
+            const pct = (location.start.index + page / sectionTotal) / spineLength
             setPercentage(pct)
             if (onLocationChange) onLocationChange(pct)
-
-            // Update global page number
-            if (cumulativePages) {
-              setCurrentPage((cumulativePages[idx] || 0) + page)
-            }
-
-            // One-time: calibrate and compute all section page counts
-            if (!cumulativePages && sectionTotal > 0) {
-              // Prevent re-entry
-              cumulativePages = []
-              try {
-                const section = book.spine.get(idx)
-                if (section) {
-                  await section.load(book.load.bind(book))
-                  const text = (section as any).document?.body?.textContent || ''
-                  const charsPerPage = Math.max(200, Math.round(text.length / sectionTotal))
-
-                  // Load all sections and compute page counts
-                  const cumul = [0]
-                  let running = 0
-                  for (const item of spineItems) {
-                    const s = book.spine.get(item.index)
-                    if (s) {
-                      await s.load(book.load.bind(book))
-                      const t = (s as any).document?.body?.textContent || ''
-                      running += Math.max(1, Math.ceil(t.length / charsPerPage))
-                    } else {
-                      running += 1
-                    }
-                    cumul.push(running)
-                  }
-                  cumulativePages = cumul
-                  setTotalPages(running)
-                  setCurrentPage((cumul[idx] || 0) + page)
-                }
-              } catch {
-                cumulativePages = null
-              }
-            }
           }
           // Track current href for TOC highlighting
           if (location.start?.href) {
@@ -591,9 +542,11 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight') {
         e.preventDefault()
+        ;(document.activeElement as HTMLElement)?.blur()
         handleNext()
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
+        ;(document.activeElement as HTMLElement)?.blur()
         handlePrev()
       } else if ((e.metaKey || e.ctrlKey) && e.key === '+') {
         e.preventDefault()
@@ -782,10 +735,10 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
               }}
             />
           </div>
-          {/* Page number */}
-          {isReady && totalPages > 0 && (
+          {/* Progress indicator */}
+          {isReady && (
             <span className="mt-2 text-[0.65rem] text-gray-400 dark:text-[#555] tabular-nums">
-              {currentPage} / {totalPages}
+              {Math.round(percentage * 100)}%
             </span>
           )}
         </div>
