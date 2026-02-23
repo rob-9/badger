@@ -348,25 +348,27 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
         const spineItems = (book.spine as any).spineItems || []
         const spineLength = spineItems.length
 
-        // Generate global locations for page numbering (1024 chars ≈ 1 page)
-        await book.locations.generate(1024)
-        const locTotal = (book.locations as any).total || 0
-        if (locTotal > 0) setTotalPages(locTotal)
-
         // Load table of contents
         const navigation = await book.loaded.navigation
         if (navigation?.toc) {
           setToc(navigation.toc)
         }
 
-        rendition.on('relocated', (location: any) => {
+        // Calibrate page locations after first render:
+        // measure chars per visual page from the current section,
+        // then generate global locations so 1 page turn ≈ 1 location.
+        let locationsReady = false
+
+        rendition.on('relocated', async (location: any) => {
           if (location.start?.cfi) {
             currentCfiRef.current = location.start.cfi
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
 
-            // Global page number from pre-generated locations
-            const loc = book.locations.locationFromCfi(location.start.cfi)
-            if (typeof loc === 'number') setCurrentPage(loc)
+            // Update global page number once locations are generated
+            if (locationsReady) {
+              const loc = book.locations.locationFromCfi(location.start.cfi)
+              if (typeof loc === 'number') setCurrentPage(loc)
+            }
           }
           if (spineLength > 0 && location.start?.index != null) {
             const displayed = location.start.displayed || {}
@@ -375,6 +377,27 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
             const pct = (location.start.index + page / sectionTotal) / spineLength
             setPercentage(pct)
             if (onLocationChange) onLocationChange(pct)
+
+            // One-time calibration: measure chars per visual page, then generate locations
+            if (!locationsReady && sectionTotal > 0) {
+              try {
+                const section = book.spine.get(location.start.index)
+                if (section) {
+                  await section.load(book.load.bind(book))
+                  const text = (section as any).document?.body?.textContent || ''
+                  const charsPerPage = Math.max(200, Math.round(text.length / sectionTotal))
+                  await book.locations.generate(charsPerPage)
+                  locationsReady = true
+                  const total = (book.locations as any).total || 0
+                  if (total > 0) setTotalPages(total)
+                  // Set initial page
+                  if (location.start.cfi) {
+                    const loc = book.locations.locationFromCfi(location.start.cfi)
+                    if (typeof loc === 'number') setCurrentPage(loc)
+                  }
+                }
+              } catch { /* page numbers unavailable */ }
+            }
           }
           // Track current href for TOC highlighting
           if (location.start?.href) {
