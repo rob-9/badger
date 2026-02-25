@@ -12,23 +12,73 @@
 
 @layer base {
   html {
-    font-family: 'Cooper BT', Inter, system-ui, sans-serif;
-    @apply bg-paper;
+    font-family: 'Cooper BT', 'Plus Jakarta Sans', system-ui, sans-serif;
+    scroll-behavior: smooth;
     overscroll-behavior: none;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  html::-webkit-scrollbar {
+    display: none;
   }
 
   body {
-    @apply bg-paper text-ink;
+    background-color: #14120b;
+    color: #f7f7f4;
     overscroll-behavior: none;
   }
 }
 
-@layer components {
-  .reading-container {
-    @apply max-w-4xl mx-auto px-8 py-12;
-  }
+/* ── Noise Overlay ── */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.04;
+}
 
-  .highlight {
-    @apply bg-yellow-200 px-1 rounded;
-  }
+/* ── Magnetic Button ── */
+.btn-magnetic {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.btn-magnetic:hover {
+  transform: scale(1.03);
+}
+.btn-magnetic .btn-bg {
+  position: absolute;
+  inset: 0;
+  transform: translateY(100%);
+  transition: transform 0.45s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.btn-magnetic:hover .btn-bg {
+  transform: translateY(0);
+}
+
+/* ── Interactive Lift ── */
+.lift-hover {
+  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.lift-hover:hover {
+  transform: translateY(-1px);
+}
+
+/* ── Cursor Blink ── */
+@keyframes cursor-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+.animate-cursor-blink {
+  animation: cursor-blink 1s steps(1) infinite;
+}
+
+/* ── Pulse Dot ── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.5); }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
 }
