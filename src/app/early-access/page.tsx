@@ -84,7 +84,7 @@ export default function EarlyAccessPage() {
         <div className="bg-[#1a1812] rounded-xl border border-[#f7f7f4]/10 p-8 shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
           <h1 className="text-3xl font-bold mb-3 animate-in fade-in duration-700 delay-100">Get Early Access</h1>
           <p className="text-[#f7f7f4]/70 mb-8 animate-in fade-in duration-700 delay-200">
-             Be the first to experience BOOM.
+             Be the first to experience Badger.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off" noValidate>
