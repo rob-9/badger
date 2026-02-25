@@ -1088,50 +1088,12 @@ function useInView(ref: React.RefObject<HTMLElement | null>, threshold = 0.3) {
 
 function Features() {
   const sectionRef = useRef<HTMLElement>(null)
-  const titleRef = useRef<HTMLDivElement>(null)
-  const cardsRef = useRef<HTMLDivElement>(null)
   const visible = useInView(sectionRef, 0.15)
-  const [demosActive, setDemosActive] = useState(false)
-
-  useEffect(() => {
-    const scroller = document.querySelector('.snap-container')
-    const ctx = gsap.context(() => {
-      gsap.fromTo(titleRef.current, { y: 20, opacity: 0 }, {
-        y: 0,
-        opacity: 1,
-        duration: 1.2,
-        ease: 'power3.out',
-        scrollTrigger: {
-          trigger: titleRef.current,
-          start: 'top 70%',
-          scroller,
-        },
-      })
-
-      if (cardsRef.current) {
-        gsap.fromTo(cardsRef.current.children, { y: 30, opacity: 0 }, {
-          y: 0,
-          opacity: 1,
-          duration: 1.2,
-          stagger: 0.18,
-          ease: 'power3.out',
-          scrollTrigger: {
-            trigger: cardsRef.current,
-            start: 'top 70%',
-            scroller,
-            onEnter: () => setTimeout(() => setDemosActive(true), 900),
-          },
-        })
-      }
-    }, sectionRef)
-
-    return () => ctx.revert()
-  }, [])
 
   return (
     <section ref={sectionRef} id="features" className="relative py-20 px-8 md:px-16">
       <div className="max-w-6xl mx-auto">
-        <div ref={titleRef} className="text-center mb-8 opacity-0">
+        <div className="text-center mb-8">
           <h2 className="font-drama italic text-copper text-4xl md:text-6xl lg:text-7xl mb-4">
             Capabilities
           </h2>
@@ -1140,10 +1102,10 @@ function Features() {
           </p>
         </div>
 
-        <div ref={cardsRef} className="grid grid-cols-1 md:grid-cols-3 gap-6 md:grid-rows-[480px] [&>*]:opacity-0">
-          <SpoilerShieldDemo active={demosActive} />
-          <PatternDetectionDemo active={demosActive} />
-          <MemoryRecallDemo active={demosActive} />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:grid-rows-[480px]">
+          <SpoilerShieldDemo active={visible} />
+          <PatternDetectionDemo active={visible} />
+          <MemoryRecallDemo active={visible} />
         </div>
       </div>
     </section>
@@ -1155,46 +1117,8 @@ function Features() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function Philosophy() {
-  const sectionRef = useRef<HTMLElement>(null)
-  const line1Ref = useRef<HTMLParagraphElement>(null)
-  const line2Ref = useRef<HTMLParagraphElement>(null)
-
-  useEffect(() => {
-    const scroller = document.querySelector('.snap-container')
-    const ctx = gsap.context(() => {
-      gsap.fromTo(line1Ref.current, { y: 30, opacity: 0 }, {
-        y: 0,
-        opacity: 1,
-        duration: 1.6,
-        delay: 0.5,
-        ease: 'power3.out',
-        scrollTrigger: {
-          trigger: sectionRef.current,
-          start: 'top 70%',
-          scroller,
-        },
-      })
-
-      gsap.fromTo(line2Ref.current, { y: 30, opacity: 0 }, {
-        y: 0,
-        opacity: 1,
-        duration: 1.6,
-        delay: 0.9,
-        ease: 'power3.out',
-        scrollTrigger: {
-          trigger: sectionRef.current,
-          start: 'top 70%',
-          scroller,
-        },
-      })
-    }, sectionRef)
-
-    return () => ctx.revert()
-  }, [])
-
   return (
     <section
-      ref={sectionRef}
       id="about"
       className="relative min-h-screen flex items-center px-8 md:px-16 bg-charcoal overflow-hidden"
     >
@@ -1212,14 +1136,11 @@ function Philosophy() {
       <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-charcoal to-transparent z-[1]" />
 
       <div className="relative z-10 max-w-5xl mx-auto">
-        <p
-          ref={line1Ref}
-          className="text-cream/40 text-lg md:text-2xl leading-relaxed mb-8 opacity-0"
-        >
+        <p className="text-cream/40 text-lg md:text-2xl leading-relaxed mb-8">
           Most reading apps simply organize your library, track pages read, and
           gamify reading streaks. <em>They&apos;re not much better than physical books.</em>
         </p>
-        <p ref={line2Ref} className="text-cream text-3xl md:text-5xl lg:text-6xl leading-[1.1] opacity-0">
+        <p className="text-cream text-3xl md:text-5xl lg:text-6xl leading-[1.1]">
           Badger{' '}
           <span className="font-drama italic text-copper">improves understanding</span>
           {'  '}— an entirely new experience for readers.
@@ -1548,16 +1469,18 @@ function ChatVisual({ active }: { active: boolean }) {
           <p className="text-[9px] text-white/70 leading-[1.65]">
             {response.slice(0, streamChars)}
             {streamChars < response.length && (
-              <span className="inline-block w-[2px] h-[9px] bg-copper ml-[1px] animate-pulse rounded-full align-text-bottom" />
+              <>
+                <span className="inline-block w-[2px] h-[9px] bg-copper ml-[1px] animate-pulse rounded-full align-text-bottom" />
+                <span className="invisible">{response.slice(streamChars)}</span>
+              </>
             )}
           </p>
         </div>
 
         {/* Sources */}
         <div
-          className="pl-1 transition-all duration-400 overflow-hidden"
+          className="pl-1 transition-opacity duration-400"
           style={{
-            maxHeight: showSources ? '60px' : '0',
             opacity: showSources ? 1 : 0,
           }}
         >
@@ -1612,48 +1535,7 @@ const PROTOCOL_STEPS = [
 
 function Protocol() {
   const sectionRef = useRef<HTMLElement>(null)
-  const titleRef = useRef<HTMLDivElement>(null)
-  const cardsRef = useRef<HTMLDivElement>(null)
   const visible = useInView(sectionRef, 0.15)
-  const [animsActive, setAnimsActive] = useState(false)
-
-  useEffect(() => {
-    const scroller = document.querySelector('.snap-container')
-    const ctx = gsap.context(() => {
-      if (titleRef.current) {
-        gsap.fromTo(titleRef.current, { y: 20, opacity: 0 }, {
-          y: 0,
-          opacity: 1,
-          duration: 1.2,
-          delay: 0.2,
-          ease: 'power3.out',
-          scrollTrigger: {
-            trigger: titleRef.current,
-            start: 'top 75%',
-            scroller,
-          },
-        })
-      }
-
-      if (cardsRef.current) {
-        gsap.fromTo(cardsRef.current.children, { y: 40, opacity: 0 }, {
-          y: 0,
-          opacity: 1,
-          duration: 1.2,
-          delay: 0.3,
-          stagger: 0.25,
-          ease: 'power3.out',
-          scrollTrigger: {
-            trigger: cardsRef.current,
-            start: 'top 70%',
-            scroller,
-            onEnter: () => setTimeout(() => setAnimsActive(true), 1200),
-          },
-        })
-      }
-    }, sectionRef)
-    return () => ctx.revert()
-  }, [])
 
   return (
     <section
@@ -1662,19 +1544,19 @@ function Protocol() {
       className="relative py-24 md:py-32 px-8 md:px-16"
     >
       <div className="max-w-5xl mx-auto w-full">
-        <div ref={titleRef} className="text-center mb-14 opacity-0">
+        <div className="text-center mb-14">
           <h2 className="font-drama italic text-copper text-4xl md:text-6xl lg:text-7xl">
             How It Works
           </h2>
         </div>
 
-        <div ref={cardsRef} className="flex flex-col gap-8">
+        <div className="flex flex-col gap-8">
           {PROTOCOL_STEPS.map((step) => {
             const Visual = step.visual
             return (
               <div
                 key={step.number}
-                className="w-full bg-[#1e1c16] rounded-3xl border border-cream/[0.06] p-8 md:p-12 flex flex-col md:flex-row items-start gap-8 md:gap-16 opacity-0"
+                className="w-full bg-[#1e1c16] rounded-3xl border border-cream/[0.06] p-8 md:p-12 flex flex-col md:flex-row items-start gap-8 md:gap-16"
                 style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.2)' }}
               >
                 <div className="flex-1 self-center">
@@ -1687,7 +1569,7 @@ function Protocol() {
                   </p>
                 </div>
                 <div className="flex-shrink-0 flex justify-center self-center overflow-hidden md:max-h-[260px]">
-                  <Visual active={animsActive} />
+                  <Visual active={visible} />
                 </div>
               </div>
             )
@@ -1703,32 +1585,9 @@ function Protocol() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function GetStarted() {
-  const sectionRef = useRef<HTMLElement>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
-
-  useEffect(() => {
-    const scroller = document.querySelector('.snap-container')
-    const ctx = gsap.context(() => {
-      if (contentRef.current) {
-        gsap.fromTo(contentRef.current, { y: 30, opacity: 0 }, {
-          y: 0,
-          opacity: 1,
-          duration: 1.2,
-          delay: 0.2,
-          ease: 'power3.out',
-          scrollTrigger: {
-            trigger: contentRef.current,
-            start: 'top 75%',
-            scroller,
-          },
-        })
-      }
-    }, sectionRef)
-    return () => ctx.revert()
-  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1761,11 +1620,8 @@ function GetStarted() {
   }
 
   return (
-    <section ref={sectionRef} id="waitlist" className="relative py-28 md:py-36 px-8 md:px-16">
-      <div
-        ref={contentRef}
-        className="max-w-lg mx-auto text-center opacity-0"
-      >
+    <section id="waitlist" className="relative py-28 md:py-36 px-8 md:px-16">
+      <div className="max-w-lg mx-auto text-center">
         <h2 className="font-heading font-bold text-cream text-4xl md:text-6xl tracking-tight mb-8">
           Try Badger.
         </h2>
@@ -1808,33 +1664,9 @@ function GetStarted() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function Footer() {
-  const footerRef = useRef<HTMLElement>(null)
-  const innerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const scroller = document.querySelector('.snap-container')
-    const ctx = gsap.context(() => {
-      if (innerRef.current) {
-        gsap.fromTo(innerRef.current, { y: 20, opacity: 0 }, {
-          y: 0,
-          opacity: 1,
-          duration: 1.0,
-          delay: 0.2,
-          ease: 'power3.out',
-          scrollTrigger: {
-            trigger: innerRef.current,
-            start: 'top 85%',
-            scroller,
-          },
-        })
-      }
-    }, footerRef)
-    return () => ctx.revert()
-  }, [])
-
   return (
-    <footer ref={footerRef} className="bg-charcoal rounded-t-2xl px-8 md:px-16 pt-16 pb-10">
-      <div ref={innerRef} className="max-w-6xl mx-auto opacity-0">
+    <footer className="bg-charcoal rounded-t-2xl px-8 md:px-16 pt-16 pb-10">
+      <div className="max-w-6xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-16">
           {/* Brand */}
           <div className="md:col-span-2">
