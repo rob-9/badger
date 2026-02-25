@@ -367,11 +367,19 @@ function HeroReaderView() {
           <div className="border-t border-[#2a2a2a] px-2.5 py-2 shrink-0 space-y-0.5">
             <div className="flex items-center gap-2 px-3 py-[6px] rounded-lg text-[11px] text-[#d4d4d4]/50 cursor-default">
               <svg className="w-3.5 h-3.5 text-[#555] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 20c0-4.4-3.6-8-8-8s-8 3.6-8 8"/><circle cx="4" cy="8" r="2"/><circle cx="20" cy="8" r="2"/></svg>
-              Characters
+              Character Graph
             </div>
             <div className="flex items-center gap-2 px-3 py-[6px] rounded-lg text-[11px] text-[#d4d4d4]/50 cursor-default">
               <svg className="w-3.5 h-3.5 text-[#555] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><circle cx="12" cy="6" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="18" r="2"/><line x1="14" y1="6" x2="20" y2="6"/><line x1="14" y1="12" x2="20" y2="12"/><line x1="14" y1="18" x2="20" y2="18"/></svg>
               Timeline
+            </div>
+            <div className="flex items-center gap-2 px-3 py-[6px] rounded-lg text-[11px] text-[#d4d4d4]/50 cursor-default">
+              <svg className="w-3.5 h-3.5 text-[#555] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+              Bookmarks
+            </div>
+            <div className="flex items-center gap-2 px-3 py-[6px] rounded-lg text-[11px] text-[#d4d4d4]/50 cursor-default">
+              <svg className="w-3.5 h-3.5 text-[#555] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              Notes
             </div>
           </div>
         </div>
@@ -591,9 +599,9 @@ function Hero() {
     const ctx = gsap.context(() => {
       const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
 
-      tl.from(headlineRef.current, { y: 30, opacity: 0, duration: 0.8, delay: 0.2 })
-        .from(ctaRef.current, { y: 20, opacity: 0, duration: 0.7 }, '-=0.4')
-        .from(demoRef.current, { y: 40, opacity: 0, duration: 0.9 }, '-=0.3')
+      tl.fromTo(headlineRef.current, { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, delay: 0.2 })
+        .fromTo(ctaRef.current, { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7 }, '-=0.4')
+        .fromTo(demoRef.current, { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.9 }, '-=0.3')
     }, sectionRef)
 
     return () => ctx.revert()
@@ -606,7 +614,7 @@ function Hero() {
     >
       {/* Headline + CTA */}
       <div className="px-6 md:px-16 lg:px-[5rem] pt-28 pb-12 md:pt-32 md:pb-16">
-        <h1 ref={headlineRef} className="mb-8">
+        <h1 ref={headlineRef} className="mb-8 opacity-0">
           <span className="block font-heading font-bold text-[#edecec] text-xl md:text-2xl tracking-tight leading-tight mb-3">
             BADGER IS READING
           </span>
@@ -615,7 +623,7 @@ function Hero() {
           </span>
         </h1>
 
-        <div ref={ctaRef}>
+        <div ref={ctaRef} className="opacity-0">
           <a
             href="#waitlist"
             className="inline-flex items-center gap-2.5 px-6 py-3 text-sm font-medium rounded-full transition-all duration-200 hover:opacity-90"
@@ -631,7 +639,7 @@ function Hero() {
       <div className="relative px-6 md:px-16 lg:px-28 pt-10 pb-24">
         <div
           ref={demoRef}
-          className="relative max-w-6xl mx-auto"
+          className="relative max-w-6xl mx-auto opacity-0"
         >
           {/* Background rectangle — large, left edge near hero text */}
           <div className="absolute -bottom-12 -top-12 rounded-xl" style={{ backgroundColor: '#24221a', left: 'calc(-50vw + 50% + 5rem)', right: 'calc(-50vw + 50% + 5rem)' }} />
@@ -1064,9 +1072,9 @@ function Features() {
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      gsap.from(titleRef.current, {
-        y: 40,
-        opacity: 0,
+      gsap.fromTo(titleRef.current, { y: 40, opacity: 0 }, {
+        y: 0,
+        opacity: 1,
         duration: 0.9,
         ease: 'power3.out',
         scrollTrigger: {
@@ -1076,9 +1084,9 @@ function Features() {
       })
 
       if (cardsRef.current) {
-        gsap.from(cardsRef.current.children, {
-          y: 50,
-          opacity: 0,
+        gsap.fromTo(cardsRef.current.children, { y: 50, opacity: 0 }, {
+          y: 0,
+          opacity: 1,
           duration: 0.8,
           stagger: 0.15,
           ease: 'power3.out',
@@ -1096,19 +1104,16 @@ function Features() {
   return (
     <section ref={sectionRef} id="features" className="relative py-20 px-8 md:px-16">
       <div className="max-w-6xl mx-auto">
-        <div ref={titleRef} className="text-center mb-16">
-          <p className="font-drama italic text-copper text-2xl md:text-3xl mb-4">
+        <div ref={titleRef} className="text-center mb-16 opacity-0">
+          <h2 className="font-drama italic text-copper text-4xl md:text-6xl lg:text-7xl mb-4">
             Capabilities
-          </p>
-          <h2 className="font-heading font-bold text-cream text-4xl md:text-6xl tracking-tight mb-4">
-            Badger Reads With You
           </h2>
           <p className="text-cream/50 max-w-lg mx-auto text-base leading-relaxed">
-            It understands your context, respects your progress, and helps you make meaningful connections. 
+            Badger understands your context, respects your progress, and helps you make meaningful connections. 
           </p>
         </div>
 
-        <div ref={cardsRef} className="grid grid-cols-1 md:grid-cols-3 gap-6 md:grid-rows-[480px]">
+        <div ref={cardsRef} className="grid grid-cols-1 md:grid-cols-3 gap-6 md:grid-rows-[480px] [&>*]:opacity-0">
           <SpoilerShieldDemo />
           <PatternDetectionDemo />
           <MemoryRecallDemo />
@@ -1129,9 +1134,9 @@ function Philosophy() {
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      gsap.from(line1Ref.current, {
-        y: 50,
-        opacity: 0,
+      gsap.fromTo(line1Ref.current, { y: 50, opacity: 0 }, {
+        y: 0,
+        opacity: 1,
         duration: 1,
         ease: 'power3.out',
         scrollTrigger: {
@@ -1140,9 +1145,9 @@ function Philosophy() {
         },
       })
 
-      gsap.from(line2Ref.current, {
-        y: 50,
-        opacity: 0,
+      gsap.fromTo(line2Ref.current, { y: 50, opacity: 0 }, {
+        y: 0,
+        opacity: 1,
         duration: 1,
         delay: 0.3,
         ease: 'power3.out',
@@ -1178,12 +1183,12 @@ function Philosophy() {
       <div className="relative z-10 max-w-5xl mx-auto">
         <p
           ref={line1Ref}
-          className="text-cream/40 text-lg md:text-2xl leading-relaxed mb-8"
+          className="text-cream/40 text-lg md:text-2xl leading-relaxed mb-8 opacity-0"
         >
           Most reading apps simply organize your library, track pages read, and
           gamify reading streaks. <em>They&apos;re not much better than physical books.</em>
         </p>
-        <p ref={line2Ref} className="text-cream text-3xl md:text-5xl lg:text-6xl leading-[1.1]">
+        <p ref={line2Ref} className="text-cream text-3xl md:text-5xl lg:text-6xl leading-[1.1] opacity-0">
           Badger{' '}
           <span className="font-drama italic text-copper">improves understanding</span>
           {'  '}— an entirely new experience for readers.
@@ -1465,9 +1470,9 @@ function Protocol() {
       cardsRef.current.forEach((card) => {
         if (!card) return
 
-        gsap.from(card, {
-          y: 60,
-          opacity: 0,
+        gsap.fromTo(card, { y: 60, opacity: 0 }, {
+          y: 0,
+          opacity: 1,
           duration: 0.8,
           ease: 'power3.out',
           scrollTrigger: {
@@ -1483,12 +1488,9 @@ function Protocol() {
 
   return (
     <section ref={sectionRef} id="protocol" className="relative py-20 px-8 md:px-16">
-      <div className="max-w-5xl mx-auto mb-12 text-center">
-        <p className="font-drama italic text-copper text-2xl md:text-3xl mb-4">
+      <div className="max-w-5xl mx-auto mb-6 text-center">
+        <h2 className="font-drama italic text-copper text-4xl md:text-6xl lg:text-7xl">
           How It Works
-        </p>
-        <h2 className="font-heading font-bold text-cream text-4xl md:text-6xl tracking-tight">
-          Steps To Get Started
         </h2>
       </div>
 
@@ -1499,7 +1501,7 @@ function Protocol() {
             <div
               key={step.number}
               ref={(el) => { cardsRef.current[i] = el }}
-              className="w-full bg-[#1e1c16] rounded-5xl border border-cream/[0.06] p-8 md:p-12 mb-8 flex flex-col md:flex-row items-start gap-8 md:gap-16 md:h-[340px]"
+              className="w-full bg-[#1e1c16] rounded-5xl border border-cream/[0.06] p-8 md:p-12 mb-8 flex flex-col md:flex-row items-start gap-8 md:gap-16 md:h-[340px] opacity-0"
               style={{ boxShadow: '0 8px 40px rgba(0,0,0,0.2)' }}
             >
               <div className="flex-1 self-center">
@@ -1535,14 +1537,14 @@ function GetStarted() {
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      gsap.from(contentRef.current, {
-        y: 60,
-        opacity: 0,
+      gsap.fromTo(contentRef.current, { y: 60, opacity: 0 }, {
+        y: 0,
+        opacity: 1,
         duration: 1,
         ease: 'power3.out',
         scrollTrigger: {
           trigger: contentRef.current,
-          start: 'top 80%',
+          start: 'top 95%',
         },
       })
     }, sectionRef)
@@ -1584,7 +1586,7 @@ function GetStarted() {
     <section ref={sectionRef} id="waitlist" className="relative py-16 px-8 md:px-16">
       <div
         ref={contentRef}
-        className="max-w-lg mx-auto text-center"
+        className="max-w-lg mx-auto text-center opacity-0"
       >
         <h2 className="font-heading font-bold text-cream text-4xl md:text-6xl tracking-tight mb-8">
           Try Badger.
@@ -1699,6 +1701,11 @@ function Footer() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function HomeScreen() {
+  useEffect(() => {
+    window.history.scrollRestoration = 'manual'
+    window.scrollTo(0, 0)
+  }, [])
+
   return (
     <div className="min-h-screen bg-charcoal text-cream overflow-x-hidden relative">
       <NoiseOverlay />
