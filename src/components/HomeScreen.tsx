@@ -403,7 +403,7 @@ function HeroReaderView() {
               {/* Book text — overflow clipped with bottom fade */}
               {currentPage.map((para, i) => {
                 const hl = chapter.highlight
-                if (hl && showHighlight && pageIdx === hl.pageIdx && i === hl.paraIdx) {
+                if (hl && pageIdx === hl.pageIdx && i === hl.paraIdx) {
                   const idx = para.indexOf(hl.text)
                   if (idx !== -1) {
                     const before = para.slice(0, idx)
@@ -417,17 +417,18 @@ function HeroReaderView() {
                       >
                         {before}
                         <span
-                          className="transition-all duration-700 ease-out"
                           style={{
-                            color: 'rgba(212,212,212,0.9)',
-                            backgroundColor: 'rgba(217, 149, 95, 0.12)',
-                            borderRadius: '3px',
-                            padding: '2px 3px',
-                            boxShadow: '0 0 16px rgba(217, 149, 95, 0.06)',
+                            background: 'linear-gradient(to right, rgba(217,149,95,0.12) 100%, transparent 100%)',
+                            backgroundSize: showHighlight ? '100% 100%' : '0% 100%',
+                            backgroundRepeat: 'no-repeat',
+                            transition: 'background-size 800ms ease-out, color 400ms ease-out, text-decoration-color 400ms ease-out',
+                            color: showHighlight ? 'rgba(212,212,212,0.9)' : 'rgba(212,212,212,0.5)',
                             textDecoration: 'underline',
-                            textDecorationColor: 'rgba(217, 149, 95, 0.35)',
+                            textDecorationColor: showHighlight ? 'rgba(217, 149, 95, 0.35)' : 'transparent',
                             textUnderlineOffset: '3px',
                             textDecorationThickness: '1.5px',
+                            borderRadius: '3px',
+                            padding: '2px 3px',
                           }}
                         >
                           {target}
@@ -733,31 +734,33 @@ function SpoilerShieldDemo({ active }: { active: boolean }) {
 
         {/* Book text */}
         <div className="flex-1 px-3 py-2.5 space-y-1.5 overflow-hidden">
-          {bookLines.map((line, i) => (
-            <p
-              key={i}
-              className="text-[10px] leading-[1.7] transition-all duration-500"
-              style={{
-                fontFamily: 'Georgia, serif',
-                color: i === 0 && (phase === 'highlight' || phase === 'question' || phase === 'warning')
-                  ? '#d4d4d4'
-                  : 'rgba(212,212,212,0.6)',
-                backgroundColor: i === 0 && (phase === 'highlight' || phase === 'question' || phase === 'warning')
-                  ? 'rgba(217,149,95,0.15)'
-                  : 'transparent',
-                borderRadius: '3px',
-                padding: i === 0 ? '1px 3px' : '0',
-                textDecorationLine: i === 0 && (phase === 'highlight' || phase === 'question' || phase === 'warning')
-                  ? 'underline'
-                  : 'none',
-                textDecorationStyle: 'solid' as const,
-                textDecorationColor: 'rgba(217,149,95,0.4)',
-                textUnderlineOffset: '2px',
-              }}
-            >
-              {line}
-            </p>
-          ))}
+          {bookLines.map((line, i) => {
+            const isHl = i === 0 && (phase === 'highlight' || phase === 'question' || phase === 'warning')
+            return (
+              <p
+                key={i}
+                className="text-[10px] leading-[1.7]"
+                style={{
+                  fontFamily: 'Georgia, serif',
+                  background: i === 0
+                    ? 'linear-gradient(to right, rgba(217,149,95,0.15) 100%, transparent 100%)'
+                    : 'none',
+                  backgroundSize: isHl ? '100% 100%' : '0% 100%',
+                  backgroundRepeat: 'no-repeat',
+                  transition: 'background-size 800ms ease-out, color 400ms ease-out, text-decoration-color 400ms ease-out',
+                  color: isHl ? '#d4d4d4' : 'rgba(212,212,212,0.6)',
+                  borderRadius: '3px',
+                  padding: i === 0 ? '1px 3px' : '0',
+                  textDecorationLine: i === 0 ? 'underline' : 'none',
+                  textDecorationStyle: 'solid' as const,
+                  textDecorationColor: isHl ? 'rgba(217,149,95,0.4)' : 'transparent',
+                  textUnderlineOffset: '2px',
+                }}
+              >
+                {line}
+              </p>
+            )
+          })}
         </div>
 
         {/* User question bubble */}
@@ -865,27 +868,32 @@ function PatternDetectionDemo({ active }: { active: boolean }) {
 
         {/* Book text with progressive highlights */}
         <div className="flex-1 px-3 py-3 space-y-2 overflow-hidden">
-          {bookLines.map((line, i) => (
-            <p key={i} className="text-[11px] leading-[1.8]" style={{ fontFamily: 'Georgia, serif' }}>
-              <span className="text-[#d4d4d4]/60">{line.text}</span>
-              <span
-                className="transition-all duration-500"
-                style={{
-                  color: highlighted.includes(i) ? '#d4d4d4' : 'rgba(212,212,212,0.6)',
-                  backgroundColor: highlighted.includes(i) ? 'rgba(217,149,95,0.15)' : 'transparent',
-                  borderRadius: '3px',
-                  padding: '1px 3px',
-                  textDecorationLine: highlighted.includes(i) ? 'underline' : 'none',
-                  textDecorationStyle: 'solid' as const,
-                  textDecorationColor: 'rgba(217,149,95,0.4)',
-                  textUnderlineOffset: '2px',
-                }}
-              >
-                {line.highlight}
-              </span>
-              <span className="text-[#d4d4d4]/60">{line.rest}</span>
-            </p>
-          ))}
+          {bookLines.map((line, i) => {
+            const isHl = highlighted.includes(i)
+            return (
+              <p key={i} className="text-[11px] leading-[1.8]" style={{ fontFamily: 'Georgia, serif' }}>
+                <span className="text-[#d4d4d4]/60">{line.text}</span>
+                <span
+                  style={{
+                    background: 'linear-gradient(to right, rgba(217,149,95,0.15) 100%, transparent 100%)',
+                    backgroundSize: isHl ? '100% 100%' : '0% 100%',
+                    backgroundRepeat: 'no-repeat',
+                    transition: 'background-size 800ms ease-out, color 400ms ease-out, text-decoration-color 400ms ease-out',
+                    color: isHl ? '#d4d4d4' : 'rgba(212,212,212,0.6)',
+                    borderRadius: '3px',
+                    padding: '1px 3px',
+                    textDecorationLine: 'underline',
+                    textDecorationStyle: 'solid' as const,
+                    textDecorationColor: isHl ? 'rgba(217,149,95,0.4)' : 'transparent',
+                    textUnderlineOffset: '2px',
+                  }}
+                >
+                  {line.highlight}
+                </span>
+                <span className="text-[#d4d4d4]/60">{line.rest}</span>
+              </p>
+            )
+          })}
         </div>
 
         {/* AI pattern insight */}
@@ -1341,15 +1349,17 @@ function ReaderVisual({ active }: { active: boolean }) {
         <p className="text-[10px] leading-[1.85] text-white/50" style={{ fontFamily: 'Georgia, serif' }}>
           He stretched out his arms toward the dark water, and I could have sworn{' '}
           <span
-            className="transition-all duration-400"
             style={{
+              background: 'linear-gradient(to right, rgba(217,149,95,0.15) 100%, transparent 100%)',
+              backgroundSize: showHighlight ? '100% 100%' : '0% 100%',
+              backgroundRepeat: 'no-repeat',
+              transition: 'background-size 800ms ease-out, color 400ms ease-out, text-decoration-color 400ms ease-out',
               color: showHighlight ? '#d4d4d4' : 'rgba(255,255,255,0.5)',
-              backgroundColor: showHighlight ? 'rgba(217,149,95,0.15)' : 'transparent',
               borderRadius: '2px',
               padding: '0 2px',
-              textDecorationLine: showHighlight ? 'underline' : 'none',
+              textDecorationLine: 'underline',
               textDecorationStyle: 'solid' as const,
-              textDecorationColor: 'rgba(217,149,95,0.4)',
+              textDecorationColor: showHighlight ? 'rgba(217,149,95,0.4)' : 'transparent',
               textUnderlineOffset: '2px',
             }}
           >
