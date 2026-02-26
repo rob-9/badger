@@ -1742,7 +1742,7 @@ export default function HomeScreen() {
   useEffect(() => {
     const container = document.querySelector('.snap-container')
     if (!container) return
-    const handleClick = (e: MouseEvent) => {
+    const handleClick = (e: Event) => {
       const link = (e.target as HTMLElement).closest('a[href^="#"]')
       if (!link) return
       const id = link.getAttribute('href')?.slice(1)
