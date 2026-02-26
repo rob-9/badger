@@ -1102,7 +1102,7 @@ function Features() {
     <section ref={sectionRef} id="features" className="relative py-20 px-8 md:px-16">
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-8">
-          <h2 className="font-drama italic text-4xl md:text-6xl lg:text-7xl mb-4 bg-gradient-to-r from-copper via-amber-300 to-copper bg-clip-text text-transparent">
+          <h2 className="font-drama italic text-4xl md:text-6xl lg:text-7xl mb-4 text-copper">
             Capabilities
           </h2>
           <p className="text-cream/50 max-w-lg mx-auto text-base leading-relaxed">
@@ -1150,7 +1150,7 @@ function Philosophy() {
         </p>
         <p className="text-cream text-3xl md:text-5xl lg:text-6xl leading-[1.1]">
           Badger{' '}
-          <span className="font-drama italic bg-gradient-to-r from-copper via-amber-300 to-copper bg-clip-text text-transparent">improves understanding</span>
+          <span className="font-drama italic text-copper">improves understanding</span>
           {'  '}— an entirely new experience for readers.
         </p>
       </div>
@@ -1555,7 +1555,7 @@ function Protocol() {
     >
       <div className="max-w-5xl mx-auto w-full">
         <div className="text-center mb-8">
-          <h2 className="font-drama italic text-4xl md:text-6xl lg:text-7xl bg-gradient-to-r from-copper via-amber-300 to-copper bg-clip-text text-transparent">
+          <h2 className="font-drama italic text-4xl md:text-6xl lg:text-7xl text-copper">
             How It Works
           </h2>
         </div>
