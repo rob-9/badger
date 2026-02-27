@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   FileText,
   X,
+  Menu,
 } from 'lucide-react'
 import { GATSBY_CHAPTERS } from '@/data/gatsby'
 import { supabase } from '@/lib/supabase'
@@ -43,6 +44,7 @@ function NoiseOverlay() {
 
 function Navbar() {
   const [morphed, setMorphed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
     const container = document.querySelector('.snap-container')
@@ -52,14 +54,16 @@ function Navbar() {
     return () => container.removeEventListener('scroll', handleScroll)
   }, [])
 
+  const navItems = ['About', 'Features', 'Protocol']
+
   return (
     <nav
       className="fixed top-0 left-0 right-0 z-50 transition-all duration-300 ease-out"
       style={{
-        backgroundColor: morphed ? 'rgba(20, 18, 11, 0.8)' : 'transparent',
-        backdropFilter: morphed ? 'blur(16px) saturate(1.6)' : 'none',
-        WebkitBackdropFilter: morphed ? 'blur(16px) saturate(1.6)' : 'none',
-        borderBottom: morphed ? '1px solid rgba(242, 240, 233, 0.06)' : '1px solid transparent',
+        backgroundColor: morphed || mobileOpen ? 'rgba(20, 18, 11, 0.8)' : 'transparent',
+        backdropFilter: morphed || mobileOpen ? 'blur(16px) saturate(1.6)' : 'none',
+        WebkitBackdropFilter: morphed || mobileOpen ? 'blur(16px) saturate(1.6)' : 'none',
+        borderBottom: morphed || mobileOpen ? '1px solid rgba(242, 240, 233, 0.06)' : '1px solid transparent',
       }}
     >
       <div className="relative flex items-center justify-between px-6 md:px-16 lg:px-[4.7rem] py-2.5">
@@ -74,7 +78,7 @@ function Navbar() {
         </div>
 
         <div className="hidden sm:flex items-center gap-8 absolute left-1/2 -translate-x-1/2">
-          {['About', 'Features', 'Protocol'].map((item) => (
+          {navItems.map((item) => (
             <a
               key={item}
               href={`#${item.toLowerCase()}`}
@@ -86,12 +90,45 @@ function Navbar() {
           ))}
         </div>
 
-        <a
-          href="#waitlist"
-          className="text-sm text-copper transition-all duration-200 hover:opacity-80 mr-2 focus:outline-none focus:ring-2 focus:ring-copper focus:ring-offset-2 focus:ring-offset-[#14120b] rounded-sm"
-        >
-          Join Waitlist
-        </a>
+        <div className="flex items-center gap-3">
+          <a
+            href="#waitlist"
+            className="text-sm text-copper transition-all duration-200 hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-copper focus:ring-offset-2 focus:ring-offset-[#14120b] rounded-sm"
+          >
+            Join Waitlist
+          </a>
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="sm:hidden p-1.5 rounded-md transition-colors hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-copper"
+            aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={mobileOpen}
+          >
+            {mobileOpen ? <X className="w-5 h-5 text-[#edecec]" /> : <Menu className="w-5 h-5 text-[#edecec]" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile slide-down menu */}
+      <div
+        className="sm:hidden overflow-hidden transition-all duration-300 ease-out"
+        style={{
+          maxHeight: mobileOpen ? '200px' : '0',
+          opacity: mobileOpen ? 1 : 0,
+        }}
+      >
+        <div className="flex flex-col gap-1 px-6 pb-4 pt-2">
+          {navItems.map((item) => (
+            <a
+              key={item}
+              href={`#${item.toLowerCase()}`}
+              onClick={() => setMobileOpen(false)}
+              className="text-sm py-2 transition-colors duration-200 hover:text-[#edecec]"
+              style={{ color: 'rgba(237,236,236,0.5)' }}
+            >
+              {item}
+            </a>
+          ))}
+        </div>
       </div>
     </nav>
   )
