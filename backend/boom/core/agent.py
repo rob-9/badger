@@ -23,8 +23,8 @@ from anthropic import Anthropic, AsyncAnthropic
 
 from boom import config
 from .prompts import AGENT_SYSTEM_PROMPT, EVALUATE_PROMPT
-from .graph import label_chunks, _adaptive_cutoff, strip_code_fences
-from .vector_store import VectorStore, SearchResult, reciprocal_rank_fusion
+from .graph import label_chunks, strip_code_fences
+from .vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,30 @@ LOG_DIR = Path(".data/logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_TURNS = 5
+
+
+def _adaptive_cutoff(chunks: list[dict], floor: int = 3, ceiling: int = 10) -> list[dict]:
+    """Select chunks using score drop-off: keep chunks before the largest gap."""
+    if len(chunks) <= floor:
+        return chunks
+
+    scores = [c["score"] for c in chunks]
+    limit = min(len(scores) - 1, ceiling)
+
+    max_drop = 0
+    cut_at = limit  # default: keep up to ceiling
+
+    for i in range(floor - 1, limit):
+        drop = scores[i] - scores[i + 1]
+        if drop > max_drop:
+            max_drop = drop
+            cut_at = i + 1
+
+    kept = chunks[:cut_at]
+    logger.info("  Adaptive cutoff: %d → %d chunks (max drop=%.4f at position %d)",
+                len(chunks), len(kept), max_drop, cut_at)
+    return kept
+
 
 # ---------------------------------------------------------------------------
 # Tool schemas (for Claude's `tools` parameter)
@@ -176,17 +200,17 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
 
         total_chunks = await vector_store.get_total_chunks(book_id)
 
-        embedding = await _embed_query(query)
-
         if strategy == "keyword":
             bm25 = await vector_store._get_bm25(book_id)
             results = bm25.search(query, top_k=top_k) if bm25 else []
-        elif strategy == "semantic":
-            results = await vector_store.search(book_id, embedding, top_k=top_k)
-        else:  # hybrid
-            results = await vector_store.hybrid_search(
-                book_id, embedding, query_text=query, top_k=top_k,
-            )
+        else:
+            embedding = await _embed_query(query)
+            if strategy == "semantic":
+                results = await vector_store.search(book_id, embedding, top_k=top_k)
+            else:  # hybrid
+                results = await vector_store.hybrid_search(
+                    book_id, embedding, query_text=query, top_k=top_k,
+                )
 
         labeled = label_chunks(results, reader_position, total_chunks)
 
@@ -316,6 +340,7 @@ async def run_agent(
     all_chunks: list[dict] = []
     tool_calls_log: list[dict] = []
     seen_chunk_indices: set[int] = set()
+    answer = ""
 
     for turn in range(MAX_TURNS):
         response = await asyncio.to_thread(
@@ -546,13 +571,12 @@ async def run_agent_streaming(
         gen_tokens_out = final_response.usage.output_tokens
         gen_stop_reason = final_response.stop_reason
     else:
-        # Stream the final answer via AsyncAnthropic
+        # Stream the final answer via AsyncAnthropic (no tools — force text answer)
         full_answer = []
         async with async_anthropic.messages.stream(
             model=config.CLAUDE_MODEL,
             max_tokens=1024,
             system=AGENT_SYSTEM_PROMPT,
-            tools=TOOL_SCHEMAS,
             messages=messages,
         ) as stream:
             async for text in stream.text_stream:
