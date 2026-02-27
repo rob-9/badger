@@ -192,11 +192,12 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         reader_position: float,
         selected_text: str | None,
         source_counter: int,
+        seen_chunk_indices: set[int],
     ) -> tuple[str, list[dict], int]:
         """Execute search_book tool. Returns (formatted_text, raw_chunks, new_counter)."""
         query = tool_input["query"]
         strategy = tool_input.get("strategy", "hybrid")
-        top_k = tool_input.get("top_k", 20)
+        top_k = max(1, min(int(tool_input.get("top_k", 20)), 50))
 
         total_chunks = await vector_store.get_total_chunks(book_id)
 
@@ -217,15 +218,19 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         # Rerank
         reranked = await _rerank_and_cutoff(labeled, query, selected_text)
 
-        # Filter to PAST only
-        past_only = [c for c in reranked if c["label"] == "PAST"]
+        # Filter to PAST only, dedup before numbering
+        past_only = [
+            c for c in reranked
+            if c["label"] == "PAST" and c["chunk_index"] not in seen_chunk_indices
+        ]
 
         if not past_only:
             return "No relevant passages found in content you've already read.", [], source_counter
 
-        # Format with global source numbering
+        # Format with global source numbering (post-dedup, so numbers are stable)
         parts = []
         for c in past_only:
+            seen_chunk_indices.add(c["chunk_index"])
             c["source_number"] = source_counter
             chapter = c.get("chapter_title", "")
             header = f"[Source {source_counter}]"
@@ -243,10 +248,11 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         book_id: str,
         reader_position: float,
         source_counter: int,
+        seen_chunk_indices: set[int],
     ) -> tuple[str, list[dict], int]:
         """Execute get_surrounding_context tool."""
         chunk_index = tool_input["chunk_index"]
-        window = tool_input.get("window", 3)
+        window = max(0, min(int(tool_input.get("window", 3)), 8))
 
         total_chunks = await vector_store.get_total_chunks(book_id)
         start = max(0, chunk_index - window)
@@ -255,14 +261,18 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         results = await vector_store.get_chunks_by_range(book_id, start, end)
         labeled = label_chunks(results, reader_position, total_chunks)
 
-        # Filter to PAST only
-        past_only = [c for c in labeled if c["label"] == "PAST"]
+        # Filter to PAST only, dedup before numbering
+        past_only = [
+            c for c in labeled
+            if c["label"] == "PAST" and c["chunk_index"] not in seen_chunk_indices
+        ]
 
         if not past_only:
             return "No surrounding context available in content you've already read.", [], source_counter
 
         parts = []
         for c in past_only:
+            seen_chunk_indices.add(c["chunk_index"])
             c["source_number"] = source_counter
             chapter = c.get("chapter_title", "")
             header = f"[Source {source_counter}]"
@@ -280,23 +290,28 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         book_id: str,
         reader_position: float,
         source_counter: int,
+        seen_chunk_indices: set[int],
     ) -> tuple[str, list[dict], int]:
         """Execute get_chapter_summary tool."""
         query = tool_input["query"]
-        top_k = tool_input.get("top_k", 3)
+        top_k = max(1, min(int(tool_input.get("top_k", 3)), 10))
 
         embedding = await _embed_query(query)
         total_chunks = await vector_store.get_total_chunks(book_id)
         results = await vector_store.search_summaries(book_id, embedding, top_k=top_k)
 
         labeled = label_chunks(results, reader_position, total_chunks)
-        past_only = [c for c in labeled if c["label"] == "PAST"]
+        past_only = [
+            c for c in labeled
+            if c["label"] == "PAST" and c["chunk_index"] not in seen_chunk_indices
+        ]
 
         if not past_only:
             return "No chapter summaries available for content you've already read.", [], source_counter
 
         parts = []
         for c in past_only:
+            seen_chunk_indices.add(c["chunk_index"])
             c["source_number"] = source_counter
             chapter = c.get("chapter_title", "")
             header = f"[Source {source_counter}]"
@@ -375,26 +390,22 @@ async def run_agent(
 
             if tool_name == "search_book":
                 formatted, chunks, source_counter = await executors["search_book"](
-                    tool_input, book_id, reader_position, selected_text, source_counter,
+                    tool_input, book_id, reader_position, selected_text, source_counter, seen_chunk_indices,
                 )
             elif tool_name == "get_surrounding_context":
                 formatted, chunks, source_counter = await executors["get_surrounding_context"](
-                    tool_input, book_id, reader_position, source_counter,
+                    tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
                 )
             elif tool_name == "get_chapter_summary":
                 formatted, chunks, source_counter = await executors["get_chapter_summary"](
-                    tool_input, book_id, reader_position, source_counter,
+                    tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
                 )
             else:
                 formatted = f"Unknown tool: {tool_name}"
                 chunks = []
 
-            # Deduplicate chunks
-            for c in chunks:
-                idx = c["chunk_index"]
-                if idx not in seen_chunk_indices:
-                    seen_chunk_indices.add(idx)
-                    all_chunks.append(c)
+            # Chunks already deduped inside executors
+            all_chunks.extend(chunks)
 
             tool_calls_log.append({
                 "tool": tool_name,
@@ -504,25 +515,22 @@ async def run_agent_streaming(
 
             if tool_name == "search_book":
                 formatted, chunks, source_counter = await executors["search_book"](
-                    tool_input, book_id, reader_position, selected_text, source_counter,
+                    tool_input, book_id, reader_position, selected_text, source_counter, seen_chunk_indices,
                 )
             elif tool_name == "get_surrounding_context":
                 formatted, chunks, source_counter = await executors["get_surrounding_context"](
-                    tool_input, book_id, reader_position, source_counter,
+                    tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
                 )
             elif tool_name == "get_chapter_summary":
                 formatted, chunks, source_counter = await executors["get_chapter_summary"](
-                    tool_input, book_id, reader_position, source_counter,
+                    tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
                 )
             else:
                 formatted = f"Unknown tool: {tool_name}"
                 chunks = []
 
-            for c in chunks:
-                idx = c["chunk_index"]
-                if idx not in seen_chunk_indices:
-                    seen_chunk_indices.add(idx)
-                    all_chunks.append(c)
+            # Chunks already deduped inside executors
+            all_chunks.extend(chunks)
 
             tool_calls_log.append({
                 "tool": tool_name,
