@@ -171,12 +171,19 @@ async def query_book(request: QueryBookRequest):
 
     try:
         if request.use_rag and request.book_id:
+            logger.info("RAG query: %s | book=%s | position=%.0f%%",
+                        request.question[:80], request.book_id[:20],
+                        (request.reader_position or 0) * 100)
             result = await agent["run_agent"](
                 book_id=request.book_id,
                 question=request.question,
                 selected_text=request.selected_text,
                 reader_position=request.reader_position or 0.0,
             )
+            tool_calls = result.get("tool_calls", [])
+            logger.info("RAG done: %d tool calls, %d sources | %s",
+                        len(tool_calls), len(result.get("sources", [])),
+                        ", ".join(f"{tc['tool']}→{tc['chunks_returned']}ch" for tc in tool_calls) or "no tools")
             return QueryResponse(
                 answer=result["answer"],
                 sources=result.get("sources", []),
@@ -211,6 +218,10 @@ async def query_book_stream(request: QueryBookRequest):
     if request.book_id:
         validate_book_id(request.book_id)
 
+    logger.info("RAG stream: %s | book=%s | position=%.0f%%",
+                request.question[:80], request.book_id[:20] if request.book_id else "none",
+                (request.reader_position or 0) * 100)
+
     async def event_generator():
         try:
             if request.use_rag and request.book_id:
@@ -234,6 +245,10 @@ async def query_book_stream(request: QueryBookRequest):
 
                 # Evaluate + log after streaming completes
                 if state:
+                    tool_calls = state.get("tool_calls", [])
+                    logger.info("RAG stream done: %d tool calls, %d sources | %s",
+                                len(tool_calls), len(state.get("sources", [])),
+                                ", ".join(f"{tc['tool']}→{tc['chunks_returned']}ch" for tc in tool_calls) or "no tools")
                     try:
                         eval_result = await agent["evaluate"](state)
                         state.update(eval_result)
