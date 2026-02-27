@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import json
 import logging
+import re
 import sys
 import time
 from datetime import datetime
@@ -97,6 +98,20 @@ def filter_cases(
 
 # === Retrieval Metrics ===
 
+_QUOTE_MAP = {
+    '\u2018': "'", '\u2019': "'",   # smart single quotes
+    '\u201c': '"', '\u201d': '"',   # smart double quotes
+    '\u2014': '--', '\u2013': '-',  # em/en dashes
+    '\u2026': '...',                # ellipsis
+}
+
+
+def _normalize_quotes(text: str) -> str:
+    """Normalize smart quotes and dashes for comparison (mirrors VectorStore._normalize_quotes)."""
+    for src, dst in _QUOTE_MAP.items():
+        text = text.replace(src, dst)
+    return re.sub(r'\s+', ' ', text).strip()
+
 
 def compute_retrieval_metrics(state: dict) -> dict:
     """Compute retrieval metrics from agent sources (no API call)."""
@@ -106,9 +121,9 @@ def compute_retrieval_metrics(state: dict) -> dict:
 
     selected_in_sources = False
     if selected:
-        needle = selected.lower()
+        needle = _normalize_quotes(selected).lower()
         selected_in_sources = any(
-            needle in s.get("full_text", s.get("text", "")).lower()
+            needle in _normalize_quotes(s.get("full_text", s.get("text", ""))).lower()
             for s in sources
         )
 
@@ -131,19 +146,26 @@ def compute_diagnostics(case: dict, state: dict, judge: dict, metrics: dict) -> 
     """Flag specific problems for easy scanning."""
     flags = []
 
+    # Skip all threshold checks if judge had a parse error (scores are -1)
+    spoiler = judge.get("spoiler_safety", 3)
+    accuracy = judge.get("accuracy", 3)
+    conciseness = judge.get("conciseness", 3)
+
     # Spoiler leak
-    if judge.get("spoiler_safety", 3) <= 1:
+    if 0 <= spoiler <= 1:
         ahead = metrics.get("ahead_chunk_count", 0)
         total = metrics.get("num_chunks_retrieved", 0)
-        flags.append(f"SPOILER LEAK: score={judge['spoiler_safety']}/3, ahead_chunks={ahead}/{total}")
+        flags.append(f"SPOILER LEAK: score={spoiler}/3, ahead_chunks={ahead}/{total}")
 
     # Fabrication (accuracy=0 or 1 with judge noting fabrication)
-    if judge.get("accuracy", 3) <= 1:
+    if 0 <= accuracy <= 1:
         notes = judge.get("notes", "").lower()
-        if "fabricat" in notes or "unsupported" in notes or "not in" in notes:
-            flags.append(f"FABRICATION: accuracy={judge['accuracy']}/3 — {judge.get('notes', '')[:80]}")
+        acc_note = judge.get("accuracy_note", "").lower()
+        combined = notes + " " + acc_note
+        if "fabricat" in combined or "unsupported" in combined or "not in source" in combined:
+            flags.append(f"FABRICATION: accuracy={accuracy}/3 — {judge.get('accuracy_note') or judge.get('notes', '')[:80]}")
         else:
-            flags.append(f"LOW ACCURACY: score={judge['accuracy']}/3")
+            flags.append(f"LOW ACCURACY: score={accuracy}/3")
 
     # Retrieval miss — selected text not found in chunks
     if case.get("selected_text") and not metrics.get("selected_text_in_chunks"):
@@ -154,9 +176,9 @@ def compute_diagnostics(case: dict, state: dict, judge: dict, metrics: dict) -> 
         flags.append("ALL CHUNKS AHEAD: no PAST content retrieved")
 
     # Verbose response
-    if judge.get("conciseness", 3) <= 1:
+    if 0 <= conciseness <= 1:
         answer_len = len(state.get("answer", ""))
-        flags.append(f"VERBOSE: conciseness={judge['conciseness']}/3, answer_length={answer_len} chars")
+        flags.append(f"VERBOSE: conciseness={conciseness}/3, answer_length={answer_len} chars")
 
     return flags
 
@@ -378,7 +400,9 @@ def generate_report(
         # Answer
         answer = state.get("answer", "")
         lines.append("**Answer:**")
-        lines.append(f"> {answer[:500]}{'...' if len(answer) > 500 else ''}")
+        answer_preview = answer[:500] + ("..." if len(answer) > 500 else "")
+        for answer_line in answer_preview.split("\n"):
+            lines.append(f"> {answer_line}")
         lines.append("")
 
         # Scores + judge reasoning
@@ -579,9 +603,10 @@ async def main():
     # Tee console output to file
     tee = TeeOutput(console_path)
     sys.stdout = tee
-    detail_file = open(detail_path, "w")
+    detail_file = None
 
     try:
+        detail_file = open(detail_path, "w")
         print(f"Output: {output_dir}")
         print()
 
@@ -680,7 +705,8 @@ async def main():
         print()
 
     finally:
-        detail_file.close()
+        if detail_file:
+            detail_file.close()
         sys.stdout = tee.stdout
         tee.close()
 
