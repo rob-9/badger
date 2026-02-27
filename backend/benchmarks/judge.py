@@ -7,6 +7,7 @@ Calls Haiku to score each response on four dimensions (0-3 scale):
 
 import json
 import logging
+import re
 
 from anthropic import Anthropic
 
@@ -125,14 +126,25 @@ def score_response(
         try:
             parsed = json.loads(cleaned.strip())
         except json.JSONDecodeError:
-            logger.warning("  Failed to parse judge response: %s", raw)
-            parsed = {
-                "relevance": -1,
-                "conciseness": -1,
-                "accuracy": -1,
-                "spoiler_safety": -1,
-                "notes": f"PARSE ERROR: {raw[:100]}",
-            }
+            # Final fallback: extract first {...} block via regex
+            match = re.search(r'\{[^{}]+\}', raw, re.DOTALL)
+            if match:
+                try:
+                    parsed = json.loads(match.group())
+                except json.JSONDecodeError:
+                    parsed = None
+            else:
+                parsed = None
+
+            if parsed is None:
+                logger.warning("  Failed to parse judge response: %s", raw)
+                parsed = {
+                    "relevance": -1,
+                    "conciseness": -1,
+                    "accuracy": -1,
+                    "spoiler_safety": -1,
+                    "notes": f"PARSE ERROR: {raw[:100]}",
+                }
 
     return {
         "relevance": parsed.get("relevance", -1),

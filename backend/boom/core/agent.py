@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 LOG_DIR = Path(".data/logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-MAX_TURNS = 5
+MAX_TURNS = 3
 
 
 def _adaptive_cutoff(chunks: list[dict], floor: int = 3, ceiling: int = 10) -> list[dict]:
@@ -334,11 +334,78 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
 # Agent loop
 # ---------------------------------------------------------------------------
 
-def _build_user_message(question: str, selected_text: str | None) -> str:
+async def _anchor_lookup(
+    vector_store: VectorStore,
+    book_id: str,
+    selected_text: str,
+    reader_position: float,
+) -> tuple[str, list[dict], int]:
+    """Find the chunk containing selected_text and return +-1 context as ANCHOR sources.
+
+    Returns (anchor_text, anchor_chunks, next_source_number) where anchor_text
+    is formatted source blocks to prepend to the user message.
+    """
+    idx = await vector_store.find_chunk_containing(book_id, selected_text)
+    if idx == 0 and selected_text:
+        # find_chunk_containing returns 0 on miss AND when found at index 0.
+        # Double-check by verifying the text is actually in chunk 0.
+        entries = vector_store.entries.get(book_id)
+        if entries and selected_text[:50].lower() not in entries[0].chunk.text.lower():
+            return "", [], 1
+
+    total_chunks = await vector_store.get_total_chunks(book_id)
+    start = max(0, idx - 1)
+    end = idx + 1
+    results = await vector_store.get_chunks_by_range(book_id, start, end)
+    labeled = label_chunks(results, reader_position, total_chunks)
+
+    # The reader selected text from chunk idx, so they've definitively read
+    # up to that point — but only if the chunk is close to reader_position.
+    # A large gap (>5% of book) means the text matched a distant section
+    # and forcing it to PAST could leak spoilers.
+    reader_idx = int(reader_position * total_chunks) if total_chunks > 0 else 0
+    tolerance = max(10, int(total_chunks * 0.05))
+    if idx - reader_idx <= tolerance:
+        for c in labeled:
+            if c["chunk_index"] <= idx:
+                c["label"] = "PAST"
+
+    past_only = [c for c in labeled if c["label"] == "PAST"]
+    if not past_only:
+        return "", [], 1
+
+    parts = []
+    source_counter = 1
+    anchor_chunks = []
+    for c in past_only:
+        c["source_number"] = source_counter
+        chapter = c.get("chapter_title", "")
+        header = f"[Source {source_counter}]"
+        if chapter:
+            header += f" (Chapter: {chapter})"
+        header += f" [chunk {c['chunk_index']}]"
+        parts.append(f"{header}\n{c['text']}")
+        anchor_chunks.append(c)
+        source_counter += 1
+
+    anchor_text = "\n\n---\n\n".join(parts)
+    return anchor_text, anchor_chunks, source_counter
+
+
+def _build_user_message(
+    question: str,
+    selected_text: str | None,
+    anchor_text: str = "",
+) -> str:
     """Build the initial user message for the agent."""
+    parts = []
+    if anchor_text:
+        parts.append(f"[ANCHOR — passage around the reader's selection]\n\n{anchor_text}")
     if selected_text:
-        return f'The reader selected this text: "{selected_text}"\n\nTheir question: {question}'
-    return f"The reader's question: {question}"
+        parts.append(f'The reader selected this text: "{selected_text}"')
+    prefix = "Their question" if selected_text else "The reader's question"
+    parts.append(f"{prefix}: {question}")
+    return "\n\n".join(parts)
 
 
 async def run_agent(
@@ -348,14 +415,30 @@ async def run_agent(
     question: str,
     selected_text: str | None = None,
     reader_position: float = 0.0,
+    vector_store: VectorStore | None = None,
 ) -> dict:
     """Run the agent loop (non-streaming). Returns {answer, sources, tool_calls, ...}."""
-    messages = [{"role": "user", "content": _build_user_message(question, selected_text)}]
     source_counter = 1
     all_chunks: list[dict] = []
-    tool_calls_log: list[dict] = []
     seen_chunk_indices: set[int] = set()
+    anchor_text = ""
+
+    # Anchor lookup: find the chunk containing selected_text before the tool loop
+    if selected_text and book_id and vector_store:
+        anchor_text, anchor_chunks, source_counter = await _anchor_lookup(
+            vector_store, book_id, selected_text, reader_position,
+        )
+        if anchor_chunks:
+            all_chunks.extend(anchor_chunks)
+            for c in anchor_chunks:
+                seen_chunk_indices.add(c["chunk_index"])
+            logger.info("  Anchor lookup: %d chunks (indices %s)",
+                        len(anchor_chunks), [c["chunk_index"] for c in anchor_chunks])
+
+    messages = [{"role": "user", "content": _build_user_message(question, selected_text, anchor_text)}]
+    tool_calls_log: list[dict] = []
     answer = ""
+    empty_streak = 0
 
     for turn in range(MAX_TURNS):
         response = await asyncio.to_thread(
@@ -403,6 +486,16 @@ async def run_agent(
             else:
                 formatted = f"Unknown tool: {tool_name}"
                 chunks = []
+
+            # Track consecutive empty results
+            if len(chunks) == 0:
+                empty_streak += 1
+            else:
+                empty_streak = 0
+
+            # After 2 consecutive empty searches, nudge Claude to stop
+            if empty_streak >= 2:
+                formatted += "\n\nTwo searches returned no results. Answer with what you have or tell the reader to keep reading."
 
             # Chunks already deduped inside executors
             all_chunks.extend(chunks)
@@ -464,6 +557,7 @@ async def run_agent_streaming(
     question: str,
     selected_text: str | None = None,
     reader_position: float = 0.0,
+    vector_store: VectorStore | None = None,
 ):
     """Async generator yielding SSE-compatible events.
 
@@ -474,16 +568,31 @@ async def run_agent_streaming(
       {"type": "done"}
       {"type": "result", "state": dict}  # internal, for eval/logging
     """
-    messages = [{"role": "user", "content": _build_user_message(question, selected_text)}]
     source_counter = 1
     all_chunks: list[dict] = []
     tool_calls_log: list[dict] = []
     seen_chunk_indices: set[int] = set()
+    anchor_text = ""
+
+    # Anchor lookup: find the chunk containing selected_text before the tool loop
+    if selected_text and book_id and vector_store:
+        anchor_text, anchor_chunks, source_counter = await _anchor_lookup(
+            vector_store, book_id, selected_text, reader_position,
+        )
+        if anchor_chunks:
+            all_chunks.extend(anchor_chunks)
+            for c in anchor_chunks:
+                seen_chunk_indices.add(c["chunk_index"])
+            logger.info("  Anchor lookup: %d chunks (indices %s)",
+                        len(anchor_chunks), [c["chunk_index"] for c in anchor_chunks])
+
+    messages = [{"role": "user", "content": _build_user_message(question, selected_text, anchor_text)}]
 
     # Phase 1: Tool-calling loop (non-streaming)
     yield {"type": "status", "stage": "thinking"}
 
     final_response = None
+    empty_streak = 0
     for turn in range(MAX_TURNS):
         response = await asyncio.to_thread(
             anthropic.messages.create,
@@ -528,6 +637,16 @@ async def run_agent_streaming(
             else:
                 formatted = f"Unknown tool: {tool_name}"
                 chunks = []
+
+            # Track consecutive empty results
+            if len(chunks) == 0:
+                empty_streak += 1
+            else:
+                empty_streak = 0
+
+            # After 2 consecutive empty searches, nudge Claude to stop
+            if empty_streak >= 2:
+                formatted += "\n\nTwo searches returned no results. Answer with what you have or tell the reader to keep reading."
 
             # Chunks already deduped inside executors
             all_chunks.extend(chunks)
@@ -801,6 +920,7 @@ def build_agent(
     ) -> dict:
         return await run_agent(
             anthropic, executors, book_id, question, selected_text, reader_position,
+            vector_store=vector_store,
         )
 
     async def _run_agent_streaming(
@@ -812,6 +932,7 @@ def build_agent(
         async for event in run_agent_streaming(
             anthropic, async_anthropic, executors,
             book_id, question, selected_text, reader_position,
+            vector_store=vector_store,
         ):
             yield event
 

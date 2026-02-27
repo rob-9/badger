@@ -5,7 +5,8 @@ Runs test cases through the tool-calling agent, scores with an LLM judge,
 and produces a detailed diagnostic report.
 
 Usage:
-    python -m benchmarks.run                          # all cases
+    python -m benchmarks.run                          # all 49 cases
+    python -m benchmarks.run --quick                   # curated 12-case subset
     python -m benchmarks.run --tags vocabulary         # filter by tag
     python -m benchmarks.run --ids vocab-canton        # specific cases
     python -m benchmarks.run --dry-run                 # validate only
@@ -43,6 +44,27 @@ BOOK_ALIASES = {
     "cloud-atlas": "1771736822957-fjia2yspy",
     "gone-girl": "1771737236835-15c8dfryt",
 }
+
+# Curated 12-case subset for quick iteration (~75% faster than full suite).
+# Covers all 3 books, all question types, and key failure modes:
+#   vocab(3), lookup(2), context(1), analysis(3), spoiler(3)
+QUICK_CASE_IDS = [
+    # Babel — vocab, lookup, spoiler, analysis
+    "baseline-vocab-chinese",
+    "baseline-lookup-evie",
+    "spoiler-direct-death",
+    "theme-colonialism",
+    # Cloud Atlas — vocab, lookup+position, spoiler, cross-story analysis
+    "dialect-vocab-zachry",
+    "nonlinear-zachry-past-at-midpoint",
+    "spoiler-goose-poisoning",
+    "cross-story-birthmark-luisa",
+    # Gone Girl — vocab, context, spoiler, post-twist analysis
+    "gg-amazing-amy-vocab",
+    "gg-who-is-narrating",
+    "gg-what-happened-to-amy",
+    "gg-cool-girl-monologue",
+]
 
 
 # === Loading & Filtering ===
@@ -284,25 +306,109 @@ def generate_report(
             lines.append(f"- **{case_id}**: {flag}")
         lines.append("")
 
-    # Per-case results
-    lines.append("## Per-Case Results")
-    lines.append("| ID | Tools | Rel | Con | Acc | Spoil | Avg | Flags | Notes |")
-    lines.append("|----|-------|-----|-----|-----|-------|-----|-------|-------|")
+    # Scorecard — quick overview
+    lines.append("## Scorecard")
+    lines.append("| ID | Rel | Con | Acc | Spoil | Avg | Status |")
+    lines.append("|----|-----|-----|-----|-------|-----|--------|")
     for r in results:
         j = r["judge"]
         scores = [j[d] for d in dims if j.get(d, -1) >= 0]
         avg = round(sum(scores) / len(scores), 1) if scores else 0
-        tool_calls = r["state"].get("tool_calls", [])
-        tools_display = str(len(tool_calls))
         flag_count = len(r["diagnostics"])
-        flag_str = f"{flag_count} issue{'s' if flag_count != 1 else ''}" if flag_count else "clean"
-        notes = j.get("notes", "")[:50]
+        status = "clean" if not flag_count else f"{flag_count} issue{'s' if flag_count != 1 else ''}"
         lines.append(
-            f"| {r['case']['id']} | {tools_display} "
+            f"| {r['case']['id']} "
             f"| {j['relevance']} | {j['conciseness']} | {j['accuracy']} | {j['spoiler_safety']} "
-            f"| {avg} | {flag_str} | {notes} |"
+            f"| {avg} | {status} |"
         )
     lines.append("")
+
+    # Detailed per-case results
+    lines.append("## Case Details")
+    lines.append("")
+    for r in results:
+        case = r["case"]
+        j = r["judge"]
+        state = r["state"]
+        m = r["retrieval_metrics"]
+        scores = [j[d] for d in dims if j.get(d, -1) >= 0]
+        avg = round(sum(scores) / len(scores), 1) if scores else 0
+
+        lines.append(f"### {case['id']}  —  {avg}/3")
+        lines.append("")
+
+        # Input
+        lines.append(f"**Question:** {case['question']}  ")
+        if case.get("selected_text"):
+            sel = case["selected_text"]
+            display = sel[:120] + "..." if len(sel) > 120 else sel
+            lines.append(f'**Selected text:** "{display}"  ')
+        lines.append(f"**Position:** {case.get('reader_position', 0):.0%} through book  ")
+        lines.append(f"**Expected:** {case['expected_gist']}")
+        lines.append("")
+
+        # Tool calls
+        tool_calls = state.get("tool_calls", [])
+        if tool_calls:
+            lines.append("**Tool calls:**")
+            for i, tc in enumerate(tool_calls):
+                tool_name = tc["tool"]
+                inp = tc["input"]
+                query = inp.get("query", inp.get("chunk_index", ""))
+                strategy = inp.get("strategy", "")
+                detail = f'"{query}"' if query else json.dumps(inp)
+                if strategy:
+                    detail += f" ({strategy})"
+                lines.append(f"{i+1}. `{tool_name}` {detail} → {tc['chunks_returned']} chunks")
+        else:
+            lines.append("**Tool calls:** none (answered from anchor context)")
+        lines.append("")
+
+        # Retrieval
+        found = "Yes" if m["selected_text_in_chunks"] else "No"
+        if not case.get("selected_text"):
+            found = "N/A"
+        lines.append(f"**Retrieval:** {m['num_chunks_retrieved']} sources "
+                      f"({m['past_chunk_count']} PAST, {m['ahead_chunk_count']} AHEAD) "
+                      f"| avg_score={m['avg_score']} | selected_found={found}")
+        lines.append("")
+
+        # Answer
+        answer = state.get("answer", "")
+        lines.append("**Answer:**")
+        lines.append(f"> {answer[:500]}{'...' if len(answer) > 500 else ''}")
+        lines.append("")
+
+        # Scores + judge reasoning
+        lines.append("**Scores:**")
+        lines.append(f"| Relevance | Conciseness | Accuracy | Spoiler Safety |")
+        lines.append(f"|-----------|-------------|----------|----------------|")
+        lines.append(f"| {j['relevance']}/3 | {j['conciseness']}/3 | {j['accuracy']}/3 | {j['spoiler_safety']}/3 |")
+        lines.append("")
+
+        judge_notes = j.get("notes", "")
+        if judge_notes:
+            lines.append(f"**Judge:** {judge_notes}")
+        relevance_note = j.get("relevance_note", "")
+        accuracy_note = j.get("accuracy_note", "")
+        spoiler_note = j.get("spoiler_note", "")
+        if relevance_note:
+            lines.append(f"- **Relevance:** {relevance_note}")
+        if accuracy_note:
+            lines.append(f"- **Accuracy:** {accuracy_note}")
+        if spoiler_note:
+            lines.append(f"- **Spoiler:** {spoiler_note}")
+
+        # Diagnostics
+        if r["diagnostics"]:
+            lines.append("")
+            lines.append("**Issues:**")
+            for flag in r["diagnostics"]:
+                lines.append(f"- {flag}")
+
+        lines.append("")
+        lines.append("---")
+        lines.append("")
 
     # Token usage
     lines.append("## Token Usage")
@@ -311,24 +417,6 @@ def generate_report(
     judge_in = sum(r["judge"].get("judge_tokens_in", 0) for r in results)
     judge_out = sum(r["judge"].get("judge_tokens_out", 0) for r in results)
     lines.append(f"| Judge (Haiku) | {judge_in:,} | {judge_out:,} |")
-    lines.append("")
-
-    # Retrieval statistics
-    lines.append("## Retrieval Statistics")
-    lines.append("| ID | Tool Calls | Sources | PAST/AHEAD | Avg Score | Selected Found |")
-    lines.append("|----|------------|---------|------------|-----------|----------------|")
-    for r in results:
-        m = r["retrieval_metrics"]
-        tool_calls = r["state"].get("tool_calls", [])
-        tool_summary = ", ".join(tc["tool"].replace("_", " ") for tc in tool_calls) if tool_calls else "none"
-        found = "Yes" if m["selected_text_in_chunks"] else "No"
-        if not r["case"].get("selected_text"):
-            found = "N/A"
-        past_ahead = f"{m['past_chunk_count']}/{m['ahead_chunk_count']}"
-        lines.append(
-            f"| {r['case']['id']} | {tool_summary} | {m['num_chunks_retrieved']} "
-            f"| {past_ahead} | {m['avg_score']} | {found} |"
-        )
     lines.append("")
 
     report = "\n".join(lines)
@@ -422,6 +510,7 @@ async def main():
     parser.add_argument("--ids", nargs="+", help="Run specific case IDs")
     parser.add_argument("--tags", nargs="+", help="Filter by tags")
     parser.add_argument("--book", nargs="+", dest="books", help="Filter by book ID or substring (e.g. cloud-atlas, gone-girl)")
+    parser.add_argument("--quick", action="store_true", help="Run curated 12-case subset (covers all types, ~75%% faster)")
     parser.add_argument("--dry-run", action="store_true", help="Validate only, don't run")
     parser.add_argument("--delay", type=float, default=1, help="Seconds between cases")
     parser.add_argument("--cases-file", type=str, help="Path to test cases JSON")
@@ -436,7 +525,11 @@ async def main():
     cases_path = Path(args.cases_file) if args.cases_file else CASES_FILE
     suite = load_cases(cases_path)
     suite_name = suite.get("suite_name", "unknown")
-    cases = filter_cases(suite["cases"], ids=args.ids, tags=args.tags, books=args.books)
+    ids = args.ids
+    if args.quick:
+        ids = QUICK_CASE_IDS
+        suite_name += " (quick)"
+    cases = filter_cases(suite["cases"], ids=ids, tags=args.tags, books=args.books)
 
     if not cases:
         print("No cases matched filters.")
