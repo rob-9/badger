@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   FileText,
   X,
+  Menu,
 } from 'lucide-react'
 import { GATSBY_CHAPTERS } from '@/data/gatsby'
 import { supabase } from '@/lib/supabase'
@@ -43,6 +44,7 @@ function NoiseOverlay() {
 
 function Navbar() {
   const [morphed, setMorphed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
     const container = document.querySelector('.snap-container')
@@ -52,14 +54,16 @@ function Navbar() {
     return () => container.removeEventListener('scroll', handleScroll)
   }, [])
 
+  const navItems = ['About', 'Features', 'Protocol']
+
   return (
     <nav
       className="fixed top-0 left-0 right-0 z-50 transition-all duration-300 ease-out"
       style={{
-        backgroundColor: morphed ? 'rgba(20, 18, 11, 0.8)' : 'transparent',
-        backdropFilter: morphed ? 'blur(16px) saturate(1.6)' : 'none',
-        WebkitBackdropFilter: morphed ? 'blur(16px) saturate(1.6)' : 'none',
-        borderBottom: morphed ? '1px solid rgba(242, 240, 233, 0.06)' : '1px solid transparent',
+        backgroundColor: morphed || mobileOpen ? 'rgba(20, 18, 11, 0.8)' : 'transparent',
+        backdropFilter: morphed || mobileOpen ? 'blur(16px) saturate(1.6)' : 'none',
+        WebkitBackdropFilter: morphed || mobileOpen ? 'blur(16px) saturate(1.6)' : 'none',
+        borderBottom: morphed || mobileOpen ? '1px solid rgba(242, 240, 233, 0.06)' : '1px solid transparent',
       }}
     >
       <div className="relative flex items-center justify-between px-6 md:px-16 lg:px-[4.7rem] py-2.5">
@@ -74,7 +78,7 @@ function Navbar() {
         </div>
 
         <div className="hidden sm:flex items-center gap-8 absolute left-1/2 -translate-x-1/2">
-          {['About', 'Features', 'Protocol'].map((item) => (
+          {navItems.map((item) => (
             <a
               key={item}
               href={`#${item.toLowerCase()}`}
@@ -86,12 +90,45 @@ function Navbar() {
           ))}
         </div>
 
-        <a
-          href="#waitlist"
-          className="text-sm text-copper transition-colors duration-200 hover:opacity-80 mr-2"
-        >
-          Join Waitlist
-        </a>
+        <div className="flex items-center gap-3">
+          <a
+            href="#waitlist"
+            className="text-sm text-copper transition-all duration-200 hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-copper focus:ring-offset-2 focus:ring-offset-[#14120b] rounded-sm"
+          >
+            Join Waitlist
+          </a>
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="sm:hidden p-1.5 rounded-md transition-colors hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-copper"
+            aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={mobileOpen}
+          >
+            {mobileOpen ? <X className="w-5 h-5 text-[#edecec]" /> : <Menu className="w-5 h-5 text-[#edecec]" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile slide-down menu */}
+      <div
+        className="sm:hidden overflow-hidden transition-all duration-300 ease-out"
+        style={{
+          maxHeight: mobileOpen ? '200px' : '0',
+          opacity: mobileOpen ? 1 : 0,
+        }}
+      >
+        <div className="flex flex-col gap-1 px-6 pb-4 pt-2">
+          {navItems.map((item) => (
+            <a
+              key={item}
+              href={`#${item.toLowerCase()}`}
+              onClick={() => setMobileOpen(false)}
+              className="text-sm py-2 transition-colors duration-200 hover:text-[#edecec]"
+              style={{ color: 'rgba(237,236,236,0.5)' }}
+            >
+              {item}
+            </a>
+          ))}
+        </div>
       </div>
     </nav>
   )
@@ -114,8 +151,8 @@ const DEMO_CHAPTERS = GATSBY_CHAPTERS as unknown as {
 const AGENT_CONVERSATIONS: Record<number, { context: string; question: string; response: string; sources: { label: string }[] } | null> = {
   0: {
     context: '\u201Ca single green light, minute and far away\u201D',
-    question: 'What does the green light symbolize?',
-    response: 'At this point it\u2019s deliberately ambiguous \u2014 Nick doesn\u2019t know what Gatsby reaches for, and neither do we.\u00B9 Fitzgerald introduces it as pure sensory detail: a trembling man, an outstretched arm, a distant light. The trembling establishes unreliable optics \u2014 we\u2019re watching someone watch something we can\u2019t see clearly. Its meaning will accrue retroactively as Gatsby\u2019s desire comes into focus.\u00B2',
+    question: 'Why is Gatsby trembling? He\u2019s just looking at a light.',
+    response: 'Because he\u2019s not looking at a light \u2014 he\u2019s performing devotion, and Nick is catching him mid-ritual.\u00B9 The trembling tells you the green light is already sacred to Gatsby before we know why. Fitzgerald gives us the body before the explanation: outstretched arms, fine tremor, a tiny light across the water. It\u2019s staged like a religious gesture witnessed by accident. That gap \u2014 between what Nick sees and what it means \u2014 is the engine of the entire novel.\u00B2',
     sources: [
       { label: 'Chapter 1 \u2014 green light on Daisy\u2019s dock' },
       { label: 'Chapter 5 \u2014 the light\u2019s meaning revealed' },
@@ -123,8 +160,8 @@ const AGENT_CONVERSATIONS: Record<number, { context: string; question: string; r
   },
   1: {
     context: '\u201Cthe eyes of Doctor T. J. Eckleburg\u201D',
-    question: 'Why does Fitzgerald describe these billboard eyes so vividly?',
-    response: 'A commercial advertisement functioning as a godlike gaze over a moral wasteland.\u00B9 "No face" \u2014 only enormous retinas behind yellow spectacles \u2014 means there\u2019s no moral authority behind the watching, only the residue of commerce. George Wilson will later conflate these eyes with the eyes of God. The valley of ashes is where American prosperity becomes waste, and Eckleburg\u2019s blind stare presides over it.\u00B2',
+    question: 'Is Fitzgerald being ironic putting a billboard ad in the middle of this wasteland?',
+    response: 'Deeply.\u00B9 The billboard is commerce outliving its own purpose \u2014 the ad has faded, the oculist is gone, but the eyes remain, presiding over a landscape of industrial ruin. "No face" \u2014 only enormous retinas behind yellow spectacles \u2014 means there\u2019s surveillance without conscience, observation without judgment. Later, Wilson will mistake these eyes for God\u2019s. That confusion is Fitzgerald\u2019s sharpest move: in this world, the only omniscience left is advertising.\u00B2',
     sources: [
       { label: 'Chapter 2 \u2014 valley of ashes' },
       { label: 'Chapter 8 \u2014 Wilson\u2019s confession' },
@@ -132,8 +169,8 @@ const AGENT_CONVERSATIONS: Record<number, { context: string; question: string; r
   },
   2: {
     context: '\u201Cone of those rare smiles with a quality of eternal reassurance\u201D',
-    question: 'Why does Nick describe Gatsby\u2019s smile this way?',
-    response: 'This is the novel\u2019s central act of seduction \u2014 not romantic, but into belief itself.\u00B9 "Eternal reassurance" describes what Gatsby\u2019s entire self-invention is designed to provide. And the key phrase \u2014 "understood you just as far as you wanted to be understood" \u2014 reveals the smile as a mirror, not a window. It reflects your desires back at you. That\u2019s Gatsby\u2019s genius and his tragedy: he\u2019s perfected the art of becoming what others want to see.\u00B2',
+    question: 'I don\u2019t trust this. Is Nick falling for a performance here?',
+    response: 'You\u2019re reading it exactly right.\u00B9 Nick is falling for it \u2014 and he half-knows it. The key phrase is "understood you just as far as you wanted to be understood." That\u2019s not intimacy, it\u2019s salesmanship. The smile is a mirror, not a window \u2014 it reflects your desires back at you. Gatsby has perfected the art of becoming what others need to see. Nick\u2019s seduction here mirrors the reader\u2019s: we want Gatsby to be real, so we accept the performance too.\u00B2',
     sources: [
       { label: 'Chapter 3 \u2014 Gatsby\u2019s introduction' },
       { label: 'Chapter 6 \u2014 Jay Gatz\u2019s invention' },
@@ -141,8 +178,8 @@ const AGENT_CONVERSATIONS: Record<number, { context: string; question: string; r
   },
   3: {
     context: '\u201CIt was a rich cream color, bright with nickel\u201D',
-    question: 'Why does Fitzgerald spend so long describing the car?',
-    response: 'The car is Gatsby\u2019s self-portrait in chrome.\u00B9 Every detail \u2014 cream color, bright nickel, monstrous length \u2014 is excess made physical. It\u2019s the American Dream as consumer object: beautiful, powerful, and ultimately lethal. This same car will kill Myrtle Wilson. Fitzgerald is showing you the murder weapon chapters before the crime.\u00B2',
+    question: 'This feels like Fitzgerald wants me to admire and distrust this car at the same time.',
+    response: 'Exactly \u2014 the prose performs the seduction it\u2019s warning you about.\u00B9 Every detail \u2014 cream color, bright nickel, "monstrous length" \u2014 makes the car gorgeous and grotesque simultaneously. Fitzgerald is training your eye to see beauty and violence in the same object. This is the car that will kill Myrtle Wilson. He\u2019s showing you the murder weapon chapters before the crime, and making you admire it.\u00B2',
     sources: [
       { label: 'Chapter 4 \u2014 the drive to New York' },
       { label: 'Chapter 7 \u2014 the accident' },
@@ -150,8 +187,8 @@ const AGENT_CONVERSATIONS: Record<number, { context: string; question: string; r
   },
   4: {
     context: '\u201CDaisy tumbled short of his dreams\u201D',
-    question: 'What does Nick mean here?',
-    response: 'This is the novel\u2019s quiet thesis statement.\u00B9 Gatsby\u2019s dream was never really about Daisy the person \u2014 it was about Daisy as vessel for an impossible ideal. "Tumbled short" implies the gap was always there; no real person could match five years of obsessive imagination. Nick sees this clearly even as Gatsby cannot. The tragedy isn\u2019t that Gatsby doesn\u2019t get Daisy \u2014 it\u2019s that getting her wouldn\u2019t have been enough.\u00B2',
+    question: 'If Gatsby finally has Daisy in the room, why does Nick say she falls short?',
+    response: 'Because Nick sees what Gatsby can\u2019t: the dream was never about Daisy.\u00B9 It was about the longing itself \u2014 five years of obsessive imagination had built something no human being could inhabit. "Tumbled short" is devastating because it\u2019s not Daisy\u2019s failure, it\u2019s the failure of reality to compete with fantasy. The green light worked precisely because it was across the water. The tragedy isn\u2019t that Gatsby can\u2019t have Daisy \u2014 it\u2019s that having her was always going to be a diminishment.\u00B2',
     sources: [
       { label: 'Chapter 5 \u2014 the reunion' },
       { label: 'Chapter 1 \u2014 the green light\u2019s promise' },
@@ -159,8 +196,8 @@ const AGENT_CONVERSATIONS: Record<number, { context: string; question: string; r
   },
   5: {
     context: '\u201CHe wanted nothing less of Daisy than that she should say: I never loved you\u201D',
-    question: 'Why does Gatsby need Daisy to deny her entire past?',
-    response: 'Because Gatsby\u2019s project isn\u2019t romance \u2014 it\u2019s the annihilation of time.\u00B9 If Daisy admits she ever loved Tom, then the five years Gatsby spent rebuilding himself were real, and irreversible. He needs those years to not have happened. "Can\u2019t repeat the past? Why of course you can!" isn\u2019t na\u00EFvet\u00E9 \u2014 it\u2019s the foundational delusion his entire identity depends on.\u00B2',
+    question: 'This demand feels unhinged. Does Gatsby realize what he\u2019s asking?',
+    response: 'He does \u2014 and that\u2019s what makes it terrifying.\u00B9 Gatsby\u2019s project isn\u2019t romance, it\u2019s the annihilation of time. If Daisy ever loved Tom, then the five years Gatsby spent remaking himself actually happened \u2014 they\u2019re irreversible. He needs those years erased. "Can\u2019t repeat the past? Why of course you can!" isn\u2019t na\u00EFvet\u00E9 \u2014 it\u2019s the foundational delusion his entire identity depends on. He\u2019s not asking Daisy to love him. He\u2019s asking her to unmake history.\u00B2',
     sources: [
       { label: 'Chapter 6 \u2014 Gatsby\u2019s demand' },
       { label: 'Chapter 6 \u2014 Jay Gatz\u2019s invention' },
@@ -168,8 +205,8 @@ const AGENT_CONVERSATIONS: Record<number, { context: string; question: string; r
   },
   6: {
     context: '\u201CHer voice is full of money\u201D',
-    question: 'Why is this line so famous?',
-    response: 'It\u2019s the single sentence where Gatsby sees clearly.\u00B9 For the entire novel he\u2019s mystified Daisy into a grail figure. Here, in five words, he accidentally reveals what actually enchants him: not Daisy herself, but the sound of inherited wealth \u2014 the thing he can imitate but never authentically possess. Nick immediately recognizes the insight: "That was it. I\u2019d never understood before." It\u2019s the novel\u2019s most compressed critique of the American Dream.\u00B2',
+    question: 'Wait \u2014 does Gatsby actually understand what he\u2019s chasing here?',
+    response: 'For exactly one sentence, yes.\u00B9 This is the only moment in the novel where Gatsby sees Daisy clearly \u2014 and he does it by accident. Five words collapse the entire romance into a class confession: what enchants him isn\u2019t Daisy, it\u2019s the sound of inherited wealth, the thing he can imitate but never authentically possess. Nick\u2019s reaction is instant: "That was it. I\u2019d never understood before." Then the insight passes, and Gatsby goes right back to the fantasy. He touched the truth and couldn\u2019t hold it.\u00B2',
     sources: [
       { label: 'Chapter 7 \u2014 the Plaza Hotel' },
       { label: 'Chapter 1 \u2014 Daisy\u2019s "low, thrilling voice"' },
@@ -177,8 +214,8 @@ const AGENT_CONVERSATIONS: Record<number, { context: string; question: string; r
   },
   7: {
     context: '\u201Cthe holocaust was complete\u201D',
-    question: 'Why does Fitzgerald use such extreme language here?',
-    response: 'The word "holocaust" in 1925 meant total destruction by fire \u2014 a burnt offering.\u00B9 Fitzgerald is invoking the sacrificial: Gatsby\u2019s death completes a ritual pattern. He was consumed by his own dream, burned up by the intensity of wanting. Wilson\u2019s act is almost incidental \u2014 the real destruction was already done. Gatsby was dead the moment Daisy chose Tom in the Plaza.\u00B2',
+    question: 'This word feels too big for what just happened. Is Fitzgerald being dramatic?',
+    response: 'In 1925, "holocaust" meant a burnt offering \u2014 total destruction by fire, specifically a sacrifice.\u00B9 Fitzgerald is choosing a ritual word, not a dramatic one. Gatsby\u2019s death completes a pattern of self-immolation that began when James Gatz invented Jay Gatsby. He was consumed by his own dream, burned up by the intensity of wanting. Wilson pulling the trigger is almost beside the point \u2014 the real destruction happened at the Plaza, when Daisy chose Tom and the dream collapsed inward.\u00B2',
     sources: [
       { label: 'Chapter 8 \u2014 Gatsby\u2019s death' },
       { label: 'Chapter 7 \u2014 the Plaza confrontation' },
@@ -186,8 +223,8 @@ const AGENT_CONVERSATIONS: Record<number, { context: string; question: string; r
   },
   8: {
     context: '\u201CSo we beat on, boats against the current\u201D',
-    question: 'What makes this ending so powerful?',
-    response: 'Fitzgerald shifts from "he" to "we" \u2014 suddenly it\u2019s not just Gatsby\u2019s tragedy, it\u2019s everyone\u2019s.\u00B9 The metaphor works in both directions: we\u2019re propelled forward by desire but pulled backward by time. The green light, Gatsby\u2019s dock, Daisy \u2014 they collapse into a single image of longing that can never be satisfied. "Borne back ceaselessly" means the current always wins. The beauty of the sentence is that it makes you feel the pull even as it tells you it\u2019s futile.\u00B2',
+    question: 'Why does this ending feel like it\u2019s about me and not just Gatsby?',
+    response: 'Because Fitzgerald engineered exactly that shift.\u00B9 The pronoun moves from "he" to "we" in the final lines \u2014 suddenly this isn\u2019t a story about one deluded man, it\u2019s a diagnosis of how all desire works. The metaphor cuts both ways: propelled forward by want, dragged backward by time. "Borne back ceaselessly" means the current always wins. And the sentence itself proves its own point \u2014 its rhythm pulls you forward through beauty while telling you that forward motion is an illusion. You feel the futility and the longing in the same breath.\u00B2',
     sources: [
       { label: 'Chapter 9 \u2014 final passage' },
       { label: 'Chapter 1 \u2014 the green light' },
@@ -265,18 +302,17 @@ function HeroReaderView() {
     // Phase 3: Stream the answer character by character
     schedule(() => {
       const total = conversation.response.length
-      const perTick = Math.ceil(total / 120)
       let chars = 0
       const interval = setInterval(() => {
         if (cancelled) { clearInterval(interval); return }
-        chars += perTick
+        chars += 3
         if (chars >= total) {
           setStreamedChars(total)
           clearInterval(interval)
         } else {
           setStreamedChars(chars)
         }
-      }, 25)
+      }, 20)
       intervals.push(interval)
     }, 4400)
 
@@ -299,7 +335,7 @@ function HeroReaderView() {
   // Scroll chat to bottom when streaming
   useEffect(() => {
     if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
+      chatScrollRef.current.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' })
     }
   }, [streamedChars, showSources, showQuestion])
 
@@ -418,17 +454,10 @@ function HeroReaderView() {
                         {before}
                         <span
                           style={{
-                            background: 'linear-gradient(to right, rgba(217,149,95,0.12) 100%, transparent 100%)',
-                            backgroundSize: showHighlight ? '100% 100%' : '0% 100%',
-                            backgroundRepeat: 'no-repeat',
-                            transition: 'background-size 800ms ease-out, color 400ms ease-out, text-decoration-color 400ms ease-out',
-                            color: showHighlight ? 'rgba(212,212,212,0.9)' : 'rgba(212,212,212,0.5)',
-                            textDecoration: 'underline',
-                            textDecorationColor: showHighlight ? 'rgba(217, 149, 95, 0.35)' : 'transparent',
+                            ...getHighlightStyle(showHighlight),
+                            padding: '2px 3px',
                             textUnderlineOffset: '3px',
                             textDecorationThickness: '1.5px',
-                            borderRadius: '3px',
-                            padding: '2px 3px',
                           }}
                         >
                           {target}
@@ -510,7 +539,7 @@ function HeroReaderView() {
                 <div
                   className="flex justify-end"
                   style={{
-                    maxHeight: showQuestion ? '50px' : '0',
+                    maxHeight: showQuestion ? '80px' : '0',
                     opacity: showQuestion ? 1 : 0,
                     transform: showQuestion ? 'translateY(0)' : 'translateY(8px)',
                     transition: 'all 600ms cubic-bezier(0.16, 1, 0.3, 1)',
@@ -629,7 +658,7 @@ function Hero() {
         <div ref={ctaRef} className="opacity-0">
           <a
             href="#waitlist"
-            className="inline-flex items-center gap-2.5 px-6 py-3 text-sm font-medium rounded-full transition-all duration-200 hover:opacity-90"
+            className="inline-flex items-center gap-2.5 px-6 py-3 text-sm font-medium rounded-full transition-all duration-200 hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-copper focus:ring-offset-2 focus:ring-offset-[#14120b] active:scale-[0.98]"
             style={{ backgroundColor: '#edecec', color: '#14120b' }}
           >
             Waitlist
@@ -687,9 +716,9 @@ function SpoilerShieldDemo({ active }: { active: boolean }) {
   const [cycle, setCycle] = useState(0)
 
   const bookLines = [
-    'He stretched out his arms toward the dark water, and I could have sworn he was trembling.',
-    'A single green light, minute and far away, that might have been the end of a dock.',
-    'When I looked once more for Gatsby he had vanished, and I was alone again in the unquiet darkness.',
+    { text: 'He stretched out his arms toward the dark water, and I could have sworn ', highlight: 'he was trembling', rest: '.' },
+    { text: 'A single green light, minute and far away, that might have been the end of a dock.', highlight: '', rest: '' },
+    { text: 'When I looked once more for Gatsby he had vanished, and I was alone again in the unquiet darkness.', highlight: '', rest: '' },
   ]
 
   useEffect(() => {
@@ -742,22 +771,16 @@ function SpoilerShieldDemo({ active }: { active: boolean }) {
                 className="text-[10px] leading-[1.7]"
                 style={{
                   fontFamily: 'Georgia, serif',
-                  background: i === 0
-                    ? 'linear-gradient(to right, rgba(217,149,95,0.15) 100%, transparent 100%)'
-                    : 'none',
-                  backgroundSize: isHl ? '100% 100%' : '0% 100%',
-                  backgroundRepeat: 'no-repeat',
-                  transition: 'background-size 800ms ease-out, color 400ms ease-out, text-decoration-color 400ms ease-out',
-                  color: isHl ? '#d4d4d4' : 'rgba(212,212,212,0.6)',
-                  borderRadius: '3px',
-                  padding: i === 0 ? '1px 3px' : '0',
-                  textDecorationLine: i === 0 ? 'underline' : 'none',
-                  textDecorationStyle: 'solid' as const,
-                  textDecorationColor: isHl ? 'rgba(217,149,95,0.4)' : 'transparent',
-                  textUnderlineOffset: '2px',
+                  color: 'rgba(212,212,212,0.6)',
                 }}
               >
-                {line}
+                <span>{line.text}</span>
+                {line.highlight && (
+                  <span style={getHighlightStyle(isHl)}>
+                    {line.highlight}
+                  </span>
+                )}
+                <span>{line.rest}</span>
               </p>
             )
           })}
@@ -767,14 +790,14 @@ function SpoilerShieldDemo({ active }: { active: boolean }) {
         <div
           className="mx-3 transition-all duration-300 overflow-hidden"
           style={{
-            maxHeight: phase === 'question' || phase === 'warning' ? '40px' : '0',
+            maxHeight: phase === 'question' || phase === 'warning' ? '60px' : '0',
             opacity: phase === 'question' || phase === 'warning' ? 1 : 0,
             marginBottom: phase === 'question' || phase === 'warning' ? '6px' : '0',
           }}
         >
           <div className="flex justify-end">
             <div className="px-2.5 py-1.5 bg-copper rounded-2xl rounded-br-sm">
-              <p className="text-[10px] text-[#14120b] font-medium">Who is the man reaching toward the water?</p>
+              <p className="text-[10px] text-[#14120b] font-medium">Why does Nick notice Gatsby&apos;s trembling before anything else?</p>
             </div>
           </div>
         </div>
@@ -783,7 +806,7 @@ function SpoilerShieldDemo({ active }: { active: boolean }) {
         <div
           className="mx-3 mb-3 transition-all duration-500 overflow-hidden"
           style={{
-            maxHeight: phase === 'warning' ? '80px' : '0',
+            maxHeight: phase === 'warning' ? '120px' : '0',
             opacity: phase === 'warning' ? 1 : 0,
           }}
         >
@@ -791,7 +814,7 @@ function SpoilerShieldDemo({ active }: { active: boolean }) {
             <div className="flex items-start gap-1.5">
               <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 shrink-0" />
               <p className="text-[10px] text-[#d4d4d4]/80 leading-[1.6]">
-                Gatsby&apos;s identity unfolds through <span className="text-copper font-medium">chapters 4–5</span>. You&apos;re on chapter 1. Focus on what Nick observes — distance, trembling, the single green light.
+                The trembling is doing important narrative work, but the full answer involves <span className="text-copper font-medium">chapters 4–5</span>. You&apos;re on chapter 1. For now, notice what Nick can&apos;t explain yet — the intensity feels disproportionate to a distant light.
               </p>
             </div>
           </div>
@@ -817,8 +840,8 @@ function PatternDetectionDemo({ active }: { active: boolean }) {
   const activeHighlights = {
     idle: [] as number[],
     highlight1: [0],
-    highlight2: [0, 1],
-    highlight3: [0, 1, 2],
+    highlight2: [1],
+    highlight3: [2],
     connect: [0, 1, 2],
   }
 
@@ -829,13 +852,13 @@ function PatternDetectionDemo({ active }: { active: boolean }) {
       await wait(600)
       if (cancelled) return
       setPhase('highlight1')
-      await wait(800)
+      await wait(1200)
       if (cancelled) return
       setPhase('highlight2')
-      await wait(800)
+      await wait(1200)
       if (cancelled) return
       setPhase('highlight3')
-      await wait(1000)
+      await wait(1200)
       if (cancelled) return
       setPhase('connect')
       await wait(4500)
@@ -873,21 +896,7 @@ function PatternDetectionDemo({ active }: { active: boolean }) {
             return (
               <p key={i} className="text-[11px] leading-[1.8]" style={{ fontFamily: 'Georgia, serif' }}>
                 <span className="text-[#d4d4d4]/60">{line.text}</span>
-                <span
-                  style={{
-                    background: 'linear-gradient(to right, rgba(217,149,95,0.15) 100%, transparent 100%)',
-                    backgroundSize: isHl ? '100% 100%' : '0% 100%',
-                    backgroundRepeat: 'no-repeat',
-                    transition: 'background-size 800ms ease-out, color 400ms ease-out, text-decoration-color 400ms ease-out',
-                    color: isHl ? '#d4d4d4' : 'rgba(212,212,212,0.6)',
-                    borderRadius: '3px',
-                    padding: '1px 3px',
-                    textDecorationLine: 'underline',
-                    textDecorationStyle: 'solid' as const,
-                    textDecorationColor: isHl ? 'rgba(217,149,95,0.4)' : 'transparent',
-                    textUnderlineOffset: '2px',
-                  }}
-                >
+                <span style={getHighlightStyle(isHl)}>
                   {line.highlight}
                 </span>
                 <span className="text-[#d4d4d4]/60">{line.rest}</span>
@@ -927,7 +936,7 @@ function MemoryRecallDemo({ active }: { active: boolean }) {
   const [cycle, setCycle] = useState(0)
   const [streamedChars, setStreamedChars] = useState(0)
 
-  const aiResponse = 'In chapter 1, you highlighted Tom\u2019s description: "a sturdy straw-haired man" with "two shining arrogant eyes." Now Gatsby is an "elegant young roughneck." Fitzgerald is mapping a class study through physical contrast \u2014 old money\u2019s brute confidence vs. new money\u2019s studied performance.'
+  const aiResponse = 'Yes \u2014 and it\u2019s deliberate. You highlighted Tom in chapter 1: "a sturdy straw-haired man" with "cruel body" and "arrogant eyes." His power is inherited, worn carelessly. Now Gatsby is an "elegant young roughneck" \u2014 strength made graceful by effort. Fitzgerald is encoding the novel\u2019s entire class argument into how these two men occupy physical space: Tom\u2019s body dominates, Gatsby\u2019s performs.'
 
   useEffect(() => {
     if (!active) return
@@ -945,18 +954,17 @@ function MemoryRecallDemo({ active }: { active: boolean }) {
       setPhase('recall')
       // Stream the response
       const total = aiResponse.length
-      const perTick = Math.ceil(total / 80)
       let chars = 0
       const interval = setInterval(() => {
         if (cancelled) { clearInterval(interval); return }
-        chars += perTick
+        chars += 3
         if (chars >= total) {
           setStreamedChars(total)
           clearInterval(interval)
         } else {
           setStreamedChars(chars)
         }
-      }, 30)
+      }, 20)
       await wait(4500)
       if (cancelled) return
       clearInterval(interval)
@@ -1017,7 +1025,7 @@ function MemoryRecallDemo({ active }: { active: boolean }) {
             }}
           >
             <div className="px-2.5 py-1.5 bg-copper rounded-2xl rounded-br-sm">
-              <p className="text-[10px] text-[#14120b] font-medium">How does this connect to earlier?</p>
+              <p className="text-[10px] text-[#14120b] font-medium">Is Fitzgerald drawing a contrast between Tom and Gatsby&apos;s physicality?</p>
             </div>
           </div>
 
@@ -1078,6 +1086,22 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function getHighlightStyle(active: boolean): React.CSSProperties {
+  return {
+    background: 'linear-gradient(to right, rgba(217,149,95,0.15) 100%, transparent 100%)',
+    backgroundSize: active ? '100% 100%' : '0% 100%',
+    backgroundRepeat: 'no-repeat',
+    transition: 'background-size 800ms ease-out, color 400ms ease-out, text-decoration-color 400ms ease-out',
+    color: active ? '#d4d4d4' : 'rgba(212,212,212,0.6)',
+    borderRadius: '3px',
+    padding: '1px 3px',
+    textDecorationLine: 'underline',
+    textDecorationStyle: 'solid',
+    textDecorationColor: active ? 'rgba(217,149,95,0.4)' : 'transparent',
+    textUnderlineOffset: '2px',
+  }
+}
+
 function useInView(ref: React.RefObject<HTMLElement | null>, threshold = 0.3) {
   const [inView, setInView] = useState(false)
   useEffect(() => {
@@ -1110,7 +1134,7 @@ function Features() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:grid-rows-[480px]">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:grid-cols-2 lg:auto-rows-[480px]">
           <SpoilerShieldDemo active={visible} />
           <PatternDetectionDemo active={visible} />
           <MemoryRecallDemo active={visible} />
@@ -1348,21 +1372,7 @@ function ReaderVisual({ active }: { active: boolean }) {
       <div className="px-3 py-2.5 relative">
         <p className="text-[10px] leading-[1.85] text-white/50" style={{ fontFamily: 'Georgia, serif' }}>
           He stretched out his arms toward the dark water, and I could have sworn{' '}
-          <span
-            style={{
-              background: 'linear-gradient(to right, rgba(217,149,95,0.15) 100%, transparent 100%)',
-              backgroundSize: showHighlight ? '100% 100%' : '0% 100%',
-              backgroundRepeat: 'no-repeat',
-              transition: 'background-size 800ms ease-out, color 400ms ease-out, text-decoration-color 400ms ease-out',
-              color: showHighlight ? '#d4d4d4' : 'rgba(255,255,255,0.5)',
-              borderRadius: '2px',
-              padding: '0 2px',
-              textDecorationLine: 'underline',
-              textDecorationStyle: 'solid' as const,
-              textDecorationColor: showHighlight ? 'rgba(217,149,95,0.4)' : 'transparent',
-              textUnderlineOffset: '2px',
-            }}
-          >
+          <span style={getHighlightStyle(showHighlight)}>
             he was trembling
           </span>.
           A single green light, minute and far away.
@@ -1383,7 +1393,7 @@ function ReaderVisual({ active }: { active: boolean }) {
               <span className="text-[7px] uppercase tracking-widest text-white/30">Quick Ask</span>
             </div>
             <div className="flex flex-wrap gap-1">
-              {['What does this mean?', 'Why significant?', 'Connect to theory'].map((p, i) => (
+              {['Why does this matter?', 'Feels deliberate — why?', 'Seen this before?'].map((p, i) => (
                 <span
                   key={i}
                   className="text-[8px] px-1.5 py-[2px] rounded-full transition-all duration-150"
@@ -1427,14 +1437,13 @@ function ChatVisual({ active }: { active: boolean }) {
       await wait(500)
       // Stream
       const total = response.length
-      const perTick = Math.ceil(total / 60)
       let chars = 0
       const interval = setInterval(() => {
         if (cancelled) { clearInterval(interval); return }
-        chars += perTick
+        chars += 3
         if (chars >= total) { setStreamChars(total); clearInterval(interval) }
         else setStreamChars(chars)
-      }, 35)
+      }, 20)
       await wait(2500)
       if (cancelled) return
       clearInterval(interval)
@@ -1650,18 +1659,20 @@ function GetStarted() {
                 onChange={(e) => { setEmail(e.target.value); setErrorMsg('') }}
                 placeholder="you@example.com"
                 autoComplete="off"
+                aria-invalid={status === 'error'}
+                aria-describedby={errorMsg ? 'waitlist-error' : undefined}
                 className="flex-1 px-4 py-2.5 bg-transparent border border-cream/10 rounded-xl text-sm text-cream placeholder:text-cream/25 focus:outline-none focus:border-copper/50 transition-colors [&:-webkit-autofill]:[-webkit-text-fill-color:#f2f0e9] [&:-webkit-autofill]:[font-family:inherit] [&:-webkit-autofill]:[-webkit-box-shadow:0_0_0_1000px_#14120b_inset] [&:-webkit-autofill]:[transition:background-color_9999s_ease-in-out_0s]"
               />
               <button
                 type="submit"
                 disabled={status === 'submitting'}
-                className="px-5 py-2.5 bg-cream text-charcoal text-sm font-semibold rounded-xl hover:bg-cream/90 transition-colors shrink-0 disabled:opacity-50"
+                className="px-5 py-2.5 bg-cream text-charcoal text-sm font-semibold rounded-xl hover:bg-cream/90 transition-all shrink-0 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-copper focus:ring-offset-2 focus:ring-offset-[#14120b] active:scale-[0.98]"
               >
                 {status === 'submitting' ? '...' : 'Join'}
               </button>
             </form>
             {errorMsg && (
-              <p className="text-xs text-red-400 mt-2 text-left pl-1">{errorMsg}</p>
+              <p id="waitlist-error" role="alert" className="text-xs text-red-400 mt-2 text-left pl-1">{errorMsg}</p>
             )}
           </div>
         )}
@@ -1761,7 +1772,7 @@ export default function HomeScreen() {
       const target = document.getElementById(id)
       if (!target) return
       e.preventDefault()
-      container.scrollTo({ top: target.offsetTop, behavior: 'smooth' })
+      container.scrollTo({ top: target.getBoundingClientRect().top + container.scrollTop, behavior: 'smooth' })
     }
     container.addEventListener('click', handleClick)
     return () => container.removeEventListener('click', handleClick)
