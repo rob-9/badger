@@ -644,7 +644,7 @@ function Hero() {
           className="relative max-w-6xl mx-auto opacity-0"
         >
           {/* Background rectangle — large, left edge near hero text */}
-          <div className="absolute -bottom-12 -top-12 rounded-xl" style={{ backgroundColor: '#24221a', left: 'calc(-50vw + 50% + 5rem)', right: 'calc(-50vw + 50% + 5rem)' }} />
+          <div className="absolute -bottom-12 -top-12 rounded-xl" style={{ backgroundColor: '#24221a', left: 'max(-1rem, calc(-50vw + 50% + 5rem))', right: 'max(-1rem, calc(-50vw + 50% + 5rem))' }} />
           {/* Window */}
           <div
             className="relative rounded-xl overflow-hidden border border-[#ffffff]/[0.06]"
