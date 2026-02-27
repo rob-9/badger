@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 language: "en-US"
 tone_instructions: "Be direct and concise. Focus on correctness, security, and performance."
 early_access: false
@@ -12,8 +13,7 @@ reviews:
       - "WIP"
       - "Draft"
   path_instructions:
-    - patterns:
-        - "backend/**/*.py"
+    - path: "backend/**/*.py"
       instructions: |
         Python/FastAPI backend. Check for:
         - Proper async/await usage (no blocking calls in async functions)
@@ -21,27 +21,22 @@ reviews:
         - SQL injection / path traversal in any user-provided input
         - Correct use of Anthropic and Voyage AI client APIs
         - Spoiler prevention: AHEAD chunks must never leak to the reader
-    - patterns:
-        - "backend/boom/core/agent.py"
+    - path: "backend/boom/core/agent.py"
       instructions: |
         This is the tool-calling agent that replaced a LangGraph DAG.
         Pay special attention to:
         - Tool executor correctness (source numbering, chunk dedup)
         - Agent loop termination (MAX_TURNS, fallback behavior)
         - Streaming vs non-streaming code paths staying in sync
-    - patterns:
-        - "frontend/src/**/*.tsx"
-        - "frontend/src/**/*.ts"
+    - path: "frontend/src/**/*.{tsx,ts}"
       instructions: |
         Next.js 14 App Router frontend. Check for:
         - React hook dependency arrays
         - Memory leaks (unsubscribed listeners, dangling refs)
         - SSE stream handling and cleanup on unmount
-    - patterns:
-        - "backend/tests/**"
+    - path: "backend/tests/**"
       instructions: "Verify mock shapes match actual function signatures. Check edge cases."
-    - patterns:
-        - "backend/benchmarks/**"
+    - path: "backend/benchmarks/**"
       instructions: "Benchmark runner for RAG quality. Ensure metrics and judge scoring are consistent."
   tools:
     ruff:
