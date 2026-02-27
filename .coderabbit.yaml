@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+tone_instructions: "Be direct and concise. Focus on correctness, security, and performance."
+early_access: false
+
+reviews:
+  profile: "assertive"
+  review_status: true
+  auto_review:
+    enabled: true
+    ignore_draft_prs: true
+    ignore_title_prefixes:
+      - "WIP"
+      - "Draft"
+  path_instructions:
+    - path: "backend/**/*.py"
+      instructions: |
+        Python/FastAPI backend. Check for:
+        - Proper async/await usage (no blocking calls in async functions)
+        - Input validation and error handling on API endpoints
+        - SQL injection / path traversal in any user-provided input
+        - Correct use of Anthropic and Voyage AI client APIs
+        - Spoiler prevention: AHEAD chunks must never leak to the reader
+    - path: "backend/boom/core/agent.py"
+      instructions: |
+        This is the tool-calling agent that replaced a LangGraph DAG.
+        Pay special attention to:
+        - Tool executor correctness (source numbering, chunk dedup)
+        - Agent loop termination (MAX_TURNS, fallback behavior)
+        - Streaming vs non-streaming code paths staying in sync
+    - path: "frontend/src/**/*.{tsx,ts}"
+      instructions: |
+        Next.js 14 App Router frontend. Check for:
+        - React hook dependency arrays
+        - Memory leaks (unsubscribed listeners, dangling refs)
+        - SSE stream handling and cleanup on unmount
+    - path: "backend/tests/**"
+      instructions: "Verify mock shapes match actual function signatures. Check edge cases."
+    - path: "backend/benchmarks/**"
+      instructions: "Benchmark runner for RAG quality. Ensure metrics and judge scoring are consistent."
+  tools:
+    ruff:
+      enabled: true
+    eslint:
+      enabled: true
+    biome:
+      enabled: true
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    paths:
+      - "CLAUDE.md"
