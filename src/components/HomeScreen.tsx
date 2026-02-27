@@ -265,18 +265,17 @@ function HeroReaderView() {
     // Phase 3: Stream the answer character by character
     schedule(() => {
       const total = conversation.response.length
-      const perTick = Math.ceil(total / 120)
       let chars = 0
       const interval = setInterval(() => {
         if (cancelled) { clearInterval(interval); return }
-        chars += perTick
+        chars += 3
         if (chars >= total) {
           setStreamedChars(total)
           clearInterval(interval)
         } else {
           setStreamedChars(chars)
         }
-      }, 25)
+      }, 20)
       intervals.push(interval)
     }, 4400)
 
@@ -953,18 +952,17 @@ function MemoryRecallDemo({ active }: { active: boolean }) {
       setPhase('recall')
       // Stream the response
       const total = aiResponse.length
-      const perTick = Math.ceil(total / 80)
       let chars = 0
       const interval = setInterval(() => {
         if (cancelled) { clearInterval(interval); return }
-        chars += perTick
+        chars += 3
         if (chars >= total) {
           setStreamedChars(total)
           clearInterval(interval)
         } else {
           setStreamedChars(chars)
         }
-      }, 30)
+      }, 20)
       await wait(4500)
       if (cancelled) return
       clearInterval(interval)
@@ -1435,14 +1433,13 @@ function ChatVisual({ active }: { active: boolean }) {
       await wait(500)
       // Stream
       const total = response.length
-      const perTick = Math.ceil(total / 60)
       let chars = 0
       const interval = setInterval(() => {
         if (cancelled) { clearInterval(interval); return }
-        chars += perTick
+        chars += 3
         if (chars >= total) { setStreamChars(total); clearInterval(interval) }
         else setStreamChars(chars)
-      }, 35)
+      }, 20)
       await wait(2500)
       if (cancelled) return
       clearInterval(interval)
