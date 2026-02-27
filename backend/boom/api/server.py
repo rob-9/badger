@@ -163,6 +163,8 @@ async def query_book(request: QueryBookRequest):
     """
     if not rag_service:
         raise HTTPException(status_code=503, detail="RAG service not initialized")
+    if not agent:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
 
     if request.book_id:
         validate_book_id(request.book_id)
@@ -203,6 +205,8 @@ async def query_book_stream(request: QueryBookRequest):
     """Stream a RAG query response via Server-Sent Events."""
     if not rag_service:
         raise HTTPException(status_code=503, detail="RAG service not initialized")
+    if not agent:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
 
     if request.book_id:
         validate_book_id(request.book_id)
