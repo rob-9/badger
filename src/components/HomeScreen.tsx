@@ -298,7 +298,7 @@ function HeroReaderView() {
   // Scroll chat to bottom when streaming
   useEffect(() => {
     if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
+      chatScrollRef.current.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' })
     }
   }, [streamedChars, showSources, showQuestion])
 
