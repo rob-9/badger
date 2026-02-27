@@ -14,12 +14,15 @@ import { indexBook, isBookIndexed, queryBookStream } from '@/lib/api'
 import { extractCover, extractText, extractStructuredText } from '@/lib/parseEpub'
 
 const STATUS_LABELS: Record<string, string> = {
+  thinking: 'Thinking...',
+  searching: 'Searching the book...',
+  generating: 'Writing answer...',
+  // Legacy graph pipeline stages (fallback compatibility)
   classifying: 'Classifying question...',
   retrieving: 'Retrieving context...',
   reranking: 'Reranking results...',
   filtering: 'Filtering results...',
   sanitizing: 'Checking for spoilers...',
-  generating: 'Generating answer...',
 }
 
 export default function Home() {
@@ -212,7 +215,7 @@ export default function Home() {
     assistantId: string,
   ) => {
     setIsChatLoading(true)
-    setLoadingStatus('Classifying question...')
+    setLoadingStatus('Thinking...')
     streamSourcesRef.current = undefined
 
     const handle = queryBookStream(params, {
