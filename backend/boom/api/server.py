@@ -25,7 +25,7 @@ from anthropic import Anthropic, AsyncAnthropic
 
 from boom import config
 from boom.core.rag import RAGService
-from boom.core.graph import build_qa_graph, prepare_generate, log_query
+from boom.core.agent import build_agent, log_agent_query
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +33,7 @@ logger = logging.getLogger(__name__)
 rag_service: Optional[RAGService] = None
 anthropic_client: Optional[Anthropic] = None
 async_anthropic_client: Optional[AsyncAnthropic] = None
-qa_graph = None
-qa_run_pre_generate = None
-qa_evaluate = None
+agent = None
 
 BOOK_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 MAX_BOOK_ID_LENGTH = 200
@@ -53,7 +51,7 @@ def validate_book_id(book_id: str) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize services on startup."""
-    global rag_service, anthropic_client, async_anthropic_client, qa_graph, qa_run_pre_generate, qa_evaluate
+    global rag_service, anthropic_client, async_anthropic_client, agent
 
     logging.basicConfig(
         level=logging.INFO,
@@ -67,15 +65,13 @@ async def lifespan(app: FastAPI):
     anthropic_client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
     async_anthropic_client = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
     rag_service = RAGService(storage_dir=config.VECTOR_STORAGE_DIR)
-    qa_pipeline = build_qa_graph(
+    agent = build_agent(
         anthropic=anthropic_client,
+        async_anthropic=async_anthropic_client,
         vector_store=rag_service.vector_store,
         voyage_client=rag_service.voyage,
     )
-    qa_graph = qa_pipeline["graph"]
-    qa_run_pre_generate = qa_pipeline["run_pre_generate"]
-    qa_evaluate = qa_pipeline["evaluate"]
-    logger.info("Server ready (LangGraph pipeline active)")
+    logger.info("Server ready (tool-calling agent active)")
     yield
     logger.info("Shutting down")
 
@@ -173,13 +169,12 @@ async def query_book(request: QueryBookRequest):
 
     try:
         if request.use_rag and request.book_id:
-            # Use LangGraph pipeline (classify → retrieve → generate → log)
-            result = await qa_graph.ainvoke({
-                "question": request.question,
-                "selected_text": request.selected_text,
-                "reader_position": request.reader_position or 0.0,
-                "book_id": request.book_id,
-            })
+            result = await agent["run_agent"](
+                book_id=request.book_id,
+                question=request.question,
+                selected_text=request.selected_text,
+                reader_position=request.reader_position or 0.0,
+            )
             return QueryResponse(
                 answer=result["answer"],
                 sources=result.get("sources", []),
@@ -215,59 +210,32 @@ async def query_book_stream(request: QueryBookRequest):
     async def event_generator():
         try:
             if request.use_rag and request.book_id:
-                params = {
-                    "question": request.question,
-                    "selected_text": request.selected_text,
-                    "reader_position": request.reader_position or 0.0,
-                    "book_id": request.book_id,
-                }
-
-                # Run pre-generation pipeline with status events
                 state = None
-                async for item in qa_run_pre_generate(params):
-                    if isinstance(item, str):
-                        yield f"event: status\ndata: {json.dumps({'stage': item})}\n\n"
-                    else:
-                        state = item
-
-                # Prepare generation prompts
-                prepared = prepare_generate(state)
-                yield f"event: sources\ndata: {json.dumps(prepared['sources'])}\n\n"
-
-                # Stream tokens
-                full_answer = []
-                async with async_anthropic_client.messages.stream(
-                    model=config.CLAUDE_MODEL,
-                    max_tokens=prepared["max_tokens"],
-                    system=prepared["system_prompt"],
-                    messages=[{"role": "user", "content": prepared["user_prompt"]}],
-                ) as stream:
-                    async for text in stream.text_stream:
-                        full_answer.append(text)
-                        yield f"event: token\ndata: {json.dumps({'text': text})}\n\n"
-
-                    final_message = await stream.get_final_message()
-
-                yield "event: done\ndata: {}\n\n"
+                async for event in agent["run_agent_streaming"](
+                    book_id=request.book_id,
+                    question=request.question,
+                    selected_text=request.selected_text,
+                    reader_position=request.reader_position or 0.0,
+                ):
+                    if event["type"] == "status":
+                        yield f"event: status\ndata: {json.dumps({'stage': event['stage']})}\n\n"
+                    elif event["type"] == "sources":
+                        yield f"event: sources\ndata: {json.dumps(event['sources'])}\n\n"
+                    elif event["type"] == "token":
+                        yield f"event: token\ndata: {json.dumps({'text': event['text']})}\n\n"
+                    elif event["type"] == "done":
+                        yield "event: done\ndata: {}\n\n"
+                    elif event["type"] == "result":
+                        state = event["state"]
 
                 # Evaluate + log after streaming completes
-                try:
-                    state.update({
-                        "answer": "".join(full_answer),
-                        "sources": prepared["sources"],
-                        "gen_max_tokens": prepared["max_tokens"],
-                        "gen_model": final_message.model,
-                        "gen_tokens_in": final_message.usage.input_tokens,
-                        "gen_tokens_out": final_message.usage.output_tokens,
-                        "gen_stop_reason": final_message.stop_reason,
-                        "gen_system_prompt": prepared["system_prompt"],
-                        "gen_user_prompt": prepared["user_prompt"],
-                    })
-                    eval_result = await qa_evaluate(state)
-                    state.update(eval_result)
-                    log_query(state)
-                except Exception:
-                    logger.warning("Failed to evaluate/log streaming query", exc_info=True)
+                if state:
+                    try:
+                        eval_result = await agent["evaluate"](state)
+                        state.update(eval_result)
+                        log_agent_query(state)
+                    except Exception:
+                        logger.warning("Failed to evaluate/log streaming query", exc_info=True)
 
             elif request.selected_text:
                 # Simple path: stream without RAG pipeline
