@@ -17,7 +17,7 @@ cleanup() {
 trap cleanup INT TERM
 
 # Start backend in background
-cd "$SCRIPT_DIR/backend" && uvicorn boom.api.server:app --reload --port 8000 &
+cd "$SCRIPT_DIR/backend" && uvicorn boom.api.server:app --reload --port 8000 --log-level info 2>&1 | sed 's/^/[backend] /' &
 BACKEND_PID=$!
 
 # Start frontend in foreground
