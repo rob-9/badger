@@ -1,7 +1,7 @@
 """
 RAG benchmark runner.
 
-Runs test cases through the full LangGraph pipeline, scores with an LLM judge,
+Runs test cases through the tool-calling agent, scores with an LLM judge,
 and produces a detailed diagnostic report.
 
 Usage:
@@ -25,11 +25,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from anthropic import Anthropic
+from anthropic import Anthropic, AsyncAnthropic
 
 from boom import config
 from boom.core.rag import RAGService
-from boom.core.graph import build_qa_graph, _build_log_entry
+from boom.core.agent import build_agent
 from benchmarks.judge import score_response
 
 logger = logging.getLogger(__name__)
@@ -77,30 +77,28 @@ def filter_cases(
 
 
 def compute_retrieval_metrics(state: dict) -> dict:
-    """Compute retrieval metrics from pipeline state (no API call)."""
-    chunks = state.get("chunks", [])
-    scores = [c.get("score", 0) for c in chunks]
+    """Compute retrieval metrics from agent sources (no API call)."""
+    sources = state.get("sources", [])
+    scores = [s.get("score", 0) for s in sources]
     selected = state.get("selected_text") or ""
-    total = state.get("total_chunks", 0)
-    position = state.get("reader_position", 0)
-    reader_chunk = int(position * total) if total else 0
 
-    selected_in_chunks = False
+    selected_in_sources = False
     if selected:
         needle = selected.lower()
-        selected_in_chunks = any(needle in c.get("text", "").lower() for c in chunks)
+        selected_in_sources = any(
+            needle in s.get("full_text", s.get("text", "")).lower()
+            for s in sources
+        )
 
     return {
-        "num_chunks_retrieved": len(chunks),
+        "num_chunks_retrieved": len(sources),
         "avg_score": round(sum(scores) / len(scores), 4) if scores else 0,
         "max_score": round(max(scores), 4) if scores else 0,
         "min_score": round(min(scores), 4) if scores else 0,
-        "past_chunk_count": sum(1 for c in chunks if c.get("label") == "PAST"),
-        "ahead_chunk_count": sum(1 for c in chunks if c.get("label") == "AHEAD"),
-        "selected_text_in_chunks": selected_in_chunks,
-        "reader_chunk_index": reader_chunk,
-        "total_chunks": total,
-        "chunk_indices": [c.get("chunk_index", -1) for c in chunks],
+        "past_chunk_count": sum(1 for s in sources if s.get("label") == "PAST"),
+        "ahead_chunk_count": sum(1 for s in sources if s.get("label") == "AHEAD"),
+        "selected_text_in_chunks": selected_in_sources,
+        "chunk_indices": [s.get("chunk_index", -1) for s in sources],
     }
 
 
@@ -110,12 +108,6 @@ def compute_retrieval_metrics(state: dict) -> dict:
 def compute_diagnostics(case: dict, state: dict, judge: dict, metrics: dict) -> list[str]:
     """Flag specific problems for easy scanning."""
     flags = []
-
-    # Classification mismatch
-    expected_type = case.get("question_type")
-    actual_type = state.get("question_type")
-    if expected_type and expected_type != actual_type:
-        flags.append(f"MISCLASSIFIED: expected={expected_type}, got={actual_type}")
 
     # Spoiler leak
     if judge.get("spoiler_safety", 3) <= 1:
@@ -183,60 +175,34 @@ def write_detailed_trace(f, case: dict, state: dict, judge: dict, metrics: dict,
     section("Input")
     f.write(f"  Question:        {case['question']}\n")
     f.write(f"  Selected text:   \"{case.get('selected_text', '')}\"\n")
-    f.write(f"  Reader position: {case.get('reader_position', 0):.0%} (chunk {metrics['reader_chunk_index']}/{metrics['total_chunks']})\n")
+    f.write(f"  Reader position: {case.get('reader_position', 0):.0%}\n")
     f.write(f"  Expected type:   {case.get('question_type', '(not specified)')}\n")
     f.write(f"  Expected gist:   {case['expected_gist']}\n")
     f.write(f"  Tags:            {', '.join(case.get('tags', []))}\n")
 
-    # Classification
-    section("Classification")
-    f.write(f"  Model:     {config.CLAUDE_HAIKU_MODEL}\n")
-    f.write(f"  Result:    {state.get('question_type')}\n")
-    expected = case.get("question_type")
-    if expected:
-        match = "✓ MATCH" if expected == state.get("question_type") else f"✗ MISMATCH (expected {expected})"
-        f.write(f"  Match:     {match}\n")
-    f.write(f"  Entities:  {state.get('entities', [])}\n")
-    f.write(f"  Raw:       {state.get('classify_raw_response', '')}\n")
-    f.write(f"  Tokens:    {state.get('classify_tokens_in', 0)} in / {state.get('classify_tokens_out', 0)} out\n")
+    # Tool calls
+    tool_calls = state.get("tool_calls", [])
+    section(f"Tool Calls ({len(tool_calls)})")
+    for i, tc in enumerate(tool_calls):
+        f.write(f"\n  [{i+1}] {tc['tool']}({json.dumps(tc['input'])[:200]})\n")
+        f.write(f"      → {tc['chunks_returned']} chunks\n")
 
-    # Retrieval
-    section("Retrieval")
-    f.write(f"  Strategy:        {state.get('retrieval_strategy')}\n")
-    if state.get("retrieval_query"):
-        f.write(f"  Query:           {state['retrieval_query'][:200]}\n")
-    if state.get("retrieval_center_chunk") is not None:
-        f.write(f"  Center chunk:    {state['retrieval_center_chunk']}\n")
-        f.write(f"  Range:           [{state.get('retrieval_range_start')}, {state.get('retrieval_range_end')}]\n")
-        f.write(f"  Chunk match:     {state.get('retrieval_chunk_match')}\n")
-    f.write(f"  Chunks:          {metrics['num_chunks_retrieved']} ({metrics['past_chunk_count']} PAST, {metrics['ahead_chunk_count']} AHEAD)\n")
+    # Sources
+    sources = state.get("sources", [])
+    section(f"Sources ({len(sources)})")
+    f.write(f"  Total:           {metrics['num_chunks_retrieved']} ({metrics['past_chunk_count']} PAST, {metrics['ahead_chunk_count']} AHEAD)\n")
     f.write(f"  Scores:          avg={metrics['avg_score']}, max={metrics['max_score']}, min={metrics['min_score']}\n")
     f.write(f"  Selected found:  {'Yes' if metrics['selected_text_in_chunks'] else 'No'}\n")
 
-    # Full chunk dump
-    chunks = state.get("chunks", [])
-    f.write(f"\n  --- Retrieved Chunks ({len(chunks)}) ---\n")
-    for i, c in enumerate(chunks):
-        f.write(f"\n  [{i+1}] chunk_index={c.get('chunk_index')} | score={c.get('score', 0):.4f} | {c.get('label', '?')}\n")
-        text = c.get("text", "")
-        # Show full text, indented
+    f.write(f"\n  --- Source Passages ({len(sources)}) ---\n")
+    for i, s in enumerate(sources):
+        f.write(f"\n  [Source {s.get('source_number', i+1)}] chunk_index={s.get('chunk_index')} | score={s.get('score', 0):.4f} | {s.get('label', '?')}\n")
+        text = s.get("full_text", s.get("text", ""))
         for line in text.split("\n"):
             f.write(f"      {line}\n")
 
-    # Generation
-    section("Generation")
-    f.write(f"  Model:   {state.get('gen_model')}\n")
-    f.write(f"  Tokens:  {state.get('gen_tokens_in', 0)} in / {state.get('gen_tokens_out', 0)} out\n")
-    f.write(f"  Stop:    {state.get('gen_stop_reason')}\n")
-
-    f.write(f"\n  --- System Prompt ({len(state.get('gen_system_prompt', ''))} chars) ---\n")
-    for line in (state.get("gen_system_prompt") or "").split("\n"):
-        f.write(f"      {line}\n")
-
-    f.write(f"\n  --- User Prompt ({len(state.get('gen_user_prompt', ''))} chars) ---\n")
-    for line in (state.get("gen_user_prompt") or "").split("\n"):
-        f.write(f"      {line}\n")
-
+    # Answer
+    section("Answer")
     f.write(f"\n  --- AI Response ({len(state.get('answer', ''))} chars) ---\n")
     for line in (state.get("answer") or "").split("\n"):
         f.write(f"      {line}\n")
@@ -318,45 +284,21 @@ def generate_report(
             lines.append(f"- **{case_id}**: {flag}")
         lines.append("")
 
-    # Classification accuracy
-    correct = 0
-    total_classified = 0
-    mismatches = []
-    for r in results:
-        expected = r["case"].get("question_type")
-        actual = r["state"].get("question_type")
-        if expected:
-            total_classified += 1
-            if expected == actual:
-                correct += 1
-            else:
-                mismatches.append(f"{r['case']['id']}: expected={expected}, got={actual}")
-    if total_classified:
-        lines.append("## Classification Accuracy")
-        lines.append(f"{correct}/{total_classified} ({100 * correct // total_classified}%)")
-        if mismatches:
-            for m in mismatches:
-                lines.append(f"- {m}")
-        lines.append("")
-
     # Per-case results
     lines.append("## Per-Case Results")
-    lines.append("| ID | Type | Rel | Con | Acc | Spoil | Avg | Flags | Notes |")
-    lines.append("|----|------|-----|-----|-----|-------|-----|-------|-------|")
+    lines.append("| ID | Tools | Rel | Con | Acc | Spoil | Avg | Flags | Notes |")
+    lines.append("|----|-------|-----|-----|-----|-------|-----|-------|-------|")
     for r in results:
         j = r["judge"]
         scores = [j[d] for d in dims if j.get(d, -1) >= 0]
         avg = round(sum(scores) / len(scores), 1) if scores else 0
-        q_type = r["state"].get("question_type", "?")
-        expected_type = r["case"].get("question_type")
-        type_display = q_type
-        if expected_type and expected_type != q_type:
-            type_display = f"~~{expected_type}~~→{q_type}"
+        tool_calls = r["state"].get("tool_calls", [])
+        tools_display = str(len(tool_calls))
         flag_count = len(r["diagnostics"])
         flag_str = f"{flag_count} issue{'s' if flag_count != 1 else ''}" if flag_count else "clean"
         notes = j.get("notes", "")[:50]
         lines.append(
-            f"| {r['case']['id']} | {type_display} "
+            f"| {r['case']['id']} | {tools_display} "
             f"| {j['relevance']} | {j['conciseness']} | {j['accuracy']} | {j['spoiler_safety']} "
             f"| {avg} | {flag_str} | {notes} |"
         )
@@ -366,33 +308,25 @@ def generate_report(
     lines.append("## Token Usage")
     lines.append("| Stage | Input | Output |")
     lines.append("|-------|-------|--------|")
-    classify_in = sum(r["state"].get("classify_tokens_in", 0) for r in results)
-    classify_out = sum(r["state"].get("classify_tokens_out", 0) for r in results)
-    gen_in = sum(r["state"].get("gen_tokens_in", 0) for r in results)
-    gen_out = sum(r["state"].get("gen_tokens_out", 0) for r in results)
     judge_in = sum(r["judge"].get("judge_tokens_in", 0) for r in results)
     judge_out = sum(r["judge"].get("judge_tokens_out", 0) for r in results)
-    lines.append(f"| Classify (Haiku) | {classify_in:,} | {classify_out:,} |")
-    lines.append(f"| Generate (Sonnet) | {gen_in:,} | {gen_out:,} |")
     lines.append(f"| Judge (Haiku) | {judge_in:,} | {judge_out:,} |")
-    total_in = classify_in + gen_in + judge_in
-    total_out = classify_out + gen_out + judge_out
-    lines.append(f"| **Total** | **{total_in:,}** | **{total_out:,}** |")
     lines.append("")
 
     # Retrieval statistics
     lines.append("## Retrieval Statistics")
-    lines.append("| ID | Strategy | Chunks | PAST/AHEAD | Avg Score | Selected Found |")
-    lines.append("|----|----------|--------|------------|-----------|----------------|")
+    lines.append("| ID | Tool Calls | Sources | PAST/AHEAD | Avg Score | Selected Found |")
+    lines.append("|----|------------|---------|------------|-----------|----------------|")
     for r in results:
         m = r["retrieval_metrics"]
-        strategy = r["state"].get("retrieval_strategy", "?")
+        tool_calls = r["state"].get("tool_calls", [])
+        tool_summary = ", ".join(tc["tool"].replace("_", " ") for tc in tool_calls) if tool_calls else "none"
         found = "Yes" if m["selected_text_in_chunks"] else "No"
         if not r["case"].get("selected_text"):
             found = "N/A"
         past_ahead = f"{m['past_chunk_count']}/{m['ahead_chunk_count']}"
         lines.append(
-            f"| {r['case']['id']} | {strategy} | {m['num_chunks_retrieved']} "
+            f"| {r['case']['id']} | {tool_summary} | {m['num_chunks_retrieved']} "
             f"| {past_ahead} | {m['avg_score']} | {found} |"
         )
     lines.append("")
@@ -408,39 +342,56 @@ def generate_report(
 
 async def run_case(
     case: dict,
-    graph,
+    agent: dict,
     anthropic: Anthropic,
 ) -> dict:
-    """Run a single test case through the pipeline and score it."""
+    """Run a single test case through the agent and score it."""
     case_id = case["id"]
     logger.info("Running case: %s", case_id)
 
-    params = {
-        "question": case["question"],
+    result = await agent["run_agent"](
+        book_id=case["book_id"],
+        question=case["question"],
+        selected_text=case.get("selected_text"),
+        reader_position=case.get("reader_position", 0),
+    )
+
+    # Build state dict for metrics / diagnostics / trace
+    state = {
+        "answer": result["answer"],
+        "sources": result["sources"],
+        "tool_calls": result["tool_calls"],
+        "selected_text": case.get("selected_text"),
         "book_id": case["book_id"],
         "reader_position": case.get("reader_position", 0),
+        "question": case["question"],
     }
-    if case.get("selected_text"):
-        params["selected_text"] = case["selected_text"]
 
-    state = await graph.ainvoke(params)
-
-    trace = _build_log_entry(state)
     retrieval_metrics = compute_retrieval_metrics(state)
+
+    # Convert sources to chunks format for the judge
+    judge_chunks = [
+        {
+            "text": s.get("full_text", s.get("text", "")),
+            "label": s.get("label", "?"),
+            "chunk_index": s.get("chunk_index"),
+            "score": s.get("score", 0),
+        }
+        for s in result["sources"]
+    ]
 
     judge_scores = score_response(
         anthropic=anthropic,
         case=case,
-        chunks=state.get("chunks", []),
-        response=state.get("answer", ""),
+        chunks=judge_chunks,
+        response=result["answer"],
     )
 
     diagnostics = compute_diagnostics(case, state, judge_scores, retrieval_metrics)
 
     return {
         "case": case,
-        "state": dict(state),
-        "trace": trace,
+        "state": state,
         "retrieval_metrics": retrieval_metrics,
         "judge": judge_scores,
         "diagnostics": diagnostics,
@@ -496,14 +447,15 @@ async def main():
     config.validate_keys()
     rag_service = RAGService(storage_dir=config.VECTOR_STORAGE_DIR)
     anthropic = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    async_anthropic = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
     vector_store = rag_service.vector_store
 
-    pipeline = build_qa_graph(
+    agent = build_agent(
         anthropic=anthropic,
+        async_anthropic=async_anthropic,
         vector_store=vector_store,
         voyage_client=rag_service.voyage,
     )
-    graph = pipeline["graph"]
 
     book_ids = {c["book_id"] for c in cases}
     missing = [bid for bid in book_ids if not vector_store.has_book(bid)]
@@ -551,14 +503,17 @@ async def main():
         print(f"[{i+1}/{len(cases)}] {case['id']}...", end=" ", flush=True)
         t0 = time.time()
 
-        result = await run_case(case, graph, anthropic)
+        result = await run_case(case, agent, anthropic)
         results.append(result)
         elapsed = time.time() - t0
 
         # Append JSONL trace
         trace_entry = {
             "case_id": case["id"],
-            **result["trace"],
+            "question": case["question"],
+            "answer": result["state"].get("answer", ""),
+            "tool_calls": result["state"].get("tool_calls", []),
+            "sources_count": len(result["state"].get("sources", [])),
             "retrieval_metrics": result["retrieval_metrics"],
             "judge": result["judge"],
             "diagnostics": result["diagnostics"],
