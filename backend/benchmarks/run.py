@@ -308,18 +308,19 @@ def generate_report(
 
     # Scorecard — quick overview
     lines.append("## Scorecard")
-    lines.append("| ID | Rel | Con | Acc | Spoil | Avg | Status |")
-    lines.append("|----|-----|-----|-----|-------|-----|--------|")
+    lines.append("| ID | Rel | Con | Acc | Spoil | Avg | Time | Status |")
+    lines.append("|----|-----|-----|-----|-------|-----|------|--------|")
     for r in results:
         j = r["judge"]
         scores = [j[d] for d in dims if j.get(d, -1) >= 0]
         avg = round(sum(scores) / len(scores), 1) if scores else 0
         flag_count = len(r["diagnostics"])
         status = "clean" if not flag_count else f"{flag_count} issue{'s' if flag_count != 1 else ''}"
+        elapsed = r.get("elapsed", 0)
         lines.append(
             f"| {r['case']['id']} "
             f"| {j['relevance']} | {j['conciseness']} | {j['accuracy']} | {j['spoiler_safety']} "
-            f"| {avg} | {status} |"
+            f"| {avg} | {elapsed}s | {status} |"
         )
     lines.append("")
 
@@ -334,7 +335,8 @@ def generate_report(
         scores = [j[d] for d in dims if j.get(d, -1) >= 0]
         avg = round(sum(scores) / len(scores), 1) if scores else 0
 
-        lines.append(f"### {case['id']}  —  {avg}/3")
+        elapsed = r.get("elapsed", 0)
+        lines.append(f"### {case['id']}  —  {avg}/3  ({elapsed}s)")
         lines.append("")
 
         # Input
@@ -598,8 +600,9 @@ async def main():
             t0 = time.time()
 
             result = await run_case(case, agent, anthropic)
-            results.append(result)
             elapsed = time.time() - t0
+            result["elapsed"] = round(elapsed, 1)
+            results.append(result)
 
             # Append JSONL trace
             trace_entry = {
@@ -611,6 +614,7 @@ async def main():
                 "retrieval_metrics": result["retrieval_metrics"],
                 "judge": result["judge"],
                 "diagnostics": result["diagnostics"],
+                "elapsed": result["elapsed"],
             }
             with open(traces_path, "a") as f:
                 f.write(json.dumps(trace_entry, default=str) + "\n")
@@ -664,10 +668,15 @@ async def main():
         print(f"  {'overall':18s} {'█' * int(overall)}{'░' * (3 - int(overall))} {overall}/3")
         print()
 
-        # Problem summary
+        # Problem + timing summary
         total_issues = sum(len(r["diagnostics"]) for r in results)
         clean = sum(1 for r in results if not r["diagnostics"])
+        times = [r.get("elapsed", 0) for r in results]
+        total_time = sum(times)
+        max_time = max(times) if times else 0
+        median_time = sorted(times)[len(times) // 2] if times else 0
         print(f"  {clean}/{len(results)} cases clean, {total_issues} issues total")
+        print(f"  Timing: {total_time:.0f}s total, {median_time:.1f}s median, {max_time:.1f}s max")
         print()
 
     finally:
