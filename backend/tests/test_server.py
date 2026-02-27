@@ -107,64 +107,71 @@ def mock_services():
         ["Test ", "streaming ", "answer"]
     )
 
-    mock_graph = AsyncMock()
-    mock_graph.ainvoke.return_value = {
+    # Mock agent dict (replaces old qa_graph / qa_run_pre_generate / qa_evaluate)
+    mock_run_agent = AsyncMock(return_value={
         "answer": "RAG answer",
         "sources": [{"text": "source...", "score": 0.9, "chunk_index": 0}],
+        "tool_calls": [],
+    })
+
+    async def mock_run_agent_streaming(
+        book_id="", question="", selected_text=None, reader_position=0.0,
+    ):
+        yield {"type": "status", "stage": "thinking"}
+        yield {"type": "status", "stage": "searching", "detail": "search_book: test"}
+        yield {"type": "sources", "sources": [
+            {"text": "chunk text...", "full_text": "chunk text from book",
+             "score": 0.9, "chunk_index": 0, "source_number": 1, "label": "PAST",
+             "chapter_title": ""},
+        ]}
+        yield {"type": "status", "stage": "generating"}
+        for token in ["Test ", "streaming ", "answer"]:
+            yield {"type": "token", "text": token}
+        yield {"type": "done"}
+        yield {"type": "result", "state": {
+            "question": question, "book_id": book_id,
+            "answer": "Test streaming answer",
+            "sources": [], "tool_calls": [],
+            "gen_model": "claude-sonnet-4-20250514",
+            "gen_tokens_in": 100, "gen_tokens_out": 50,
+            "gen_stop_reason": "end_turn",
+        }}
+
+    mock_evaluate = AsyncMock(return_value={
+        "eval_relevance": 4,
+        "eval_grounding": 5,
+        "eval_flags": [],
+        "eval_low_confidence": False,
+        "eval_tokens_in": 80,
+        "eval_tokens_out": 15,
+    })
+
+    mock_agent = {
+        "run_agent": mock_run_agent,
+        "run_agent_streaming": mock_run_agent_streaming,
+        "evaluate": mock_evaluate,
+        "log": MagicMock(),  # log_agent_query is sync
     }
-
-    async def mock_pre_generate(params):
-        yield "classifying"
-        yield "retrieving"
-        yield "reranking"
-        yield "filtering"
-        yield "sanitizing"
-        yield {
-            "question": params["question"],
-            "selected_text": params.get("selected_text"),
-            "reader_position": params.get("reader_position", 0),
-            "book_id": params["book_id"],
-            "question_type": "context",
-            "chunks": [
-                {"text": "chunk text from book", "label": "PAST", "chunk_index": 0, "score": 0.9},
-            ],
-            "total_chunks": 100,
-            "classify_tokens_in": 50,
-            "classify_tokens_out": 10,
-        }
-
-    async def mock_evaluate(state):
-        return {
-            "eval_relevance": 4,
-            "eval_grounding": 5,
-            "eval_flags": [],
-            "eval_low_confidence": False,
-            "eval_tokens_in": 80,
-            "eval_tokens_out": 15,
-        }
 
     # Inject mocks
     server_mod.rag_service = mock_rag
     server_mod.anthropic_client = mock_anthropic
     server_mod.async_anthropic_client = mock_async_anthropic
-    server_mod.qa_graph = mock_graph
-    server_mod.qa_run_pre_generate = mock_pre_generate
-    server_mod.qa_evaluate = mock_evaluate
+    server_mod.agent = mock_agent
 
     yield {
         "rag": mock_rag,
         "anthropic": mock_anthropic,
         "async_anthropic": mock_async_anthropic,
-        "graph": mock_graph,
+        "agent": mock_agent,
+        "run_agent": mock_run_agent,
     }
 
     # Cleanup
     server_mod.rag_service = None
     server_mod.anthropic_client = None
     server_mod.async_anthropic_client = None
-    server_mod.qa_graph = None
-    server_mod.qa_run_pre_generate = None
-    server_mod.qa_evaluate = None
+    server_mod.agent = None
 
 
 @pytest.fixture
@@ -275,11 +282,11 @@ class TestQueryEndpoint:
                 "use_rag": True,
             },
         )
-        call_args = mock_services["graph"].ainvoke.call_args[0][0]
-        assert call_args["question"] == "What?"
-        assert call_args["selected_text"] == "text"
-        assert call_args["reader_position"] == 0.5
-        assert call_args["book_id"] == "b1"
+        call_kwargs = mock_services["run_agent"].call_args[1]
+        assert call_kwargs["question"] == "What?"
+        assert call_kwargs["selected_text"] == "text"
+        assert call_kwargs["reader_position"] == 0.5
+        assert call_kwargs["book_id"] == "b1"
 
     def test_simple_query_with_selected_text(self, client, mock_services):
         resp = client.post(
@@ -306,10 +313,10 @@ class TestQueryEndpoint:
             json={"book_id": "b1", "question": "What?"},
         )
         assert resp.status_code == 200
-        mock_services["graph"].ainvoke.assert_called()
+        mock_services["run_agent"].assert_called()
 
     def test_query_error_returns_500(self, client, mock_services):
-        mock_services["graph"].ainvoke.side_effect = RuntimeError("LLM error")
+        mock_services["run_agent"].side_effect = RuntimeError("LLM error")
         resp = client.post(
             "/api/rag/query",
             json={"book_id": "b1", "question": "What?"},
@@ -348,7 +355,7 @@ class TestStreamEndpoint:
         )
         events = parse_sse(resp.text)
         stages = [e["data"]["stage"] for e in events if e["event"] == "status"]
-        assert stages == ["classifying", "retrieving", "reranking", "filtering", "sanitizing"]
+        assert stages == ["thinking", "searching", "generating"]
 
     def test_rag_stream_tokens_concatenate(self, client, mock_services):
         resp = client.post(
