@@ -484,103 +484,103 @@ async def main():
     # Tee console output to file
     tee = TeeOutput(console_path)
     sys.stdout = tee
-
-    print(f"Output: {output_dir}")
-    print()
-
-    # Run cases
-    results = []
     detail_file = open(detail_path, "w")
-    detail_file.write(f"Benchmark Run: {suite_name}\n")
-    detail_file.write(f"Run ID: {run_id}\n")
-    detail_file.write(f"Cases: {len(cases)}\n")
-    detail_file.write(f"Started: {datetime.now().isoformat()}\n")
-    detail_file.write(f"\n{'=' * W}\n\n")
 
-    dims = ["relevance", "conciseness", "accuracy", "spoiler_safety"]
+    try:
+        print(f"Output: {output_dir}")
+        print()
 
-    for i, case in enumerate(cases):
-        print(f"[{i+1}/{len(cases)}] {case['id']}...", end=" ", flush=True)
-        t0 = time.time()
+        # Run cases
+        results = []
+        detail_file.write(f"Benchmark Run: {suite_name}\n")
+        detail_file.write(f"Run ID: {run_id}\n")
+        detail_file.write(f"Cases: {len(cases)}\n")
+        detail_file.write(f"Started: {datetime.now().isoformat()}\n")
+        detail_file.write(f"\n{'=' * W}\n\n")
 
-        result = await run_case(case, agent, anthropic)
-        results.append(result)
-        elapsed = time.time() - t0
+        dims = ["relevance", "conciseness", "accuracy", "spoiler_safety"]
 
-        # Append JSONL trace
-        trace_entry = {
-            "case_id": case["id"],
-            "question": case["question"],
-            "answer": result["state"].get("answer", ""),
-            "tool_calls": result["state"].get("tool_calls", []),
-            "sources_count": len(result["state"].get("sources", [])),
-            "retrieval_metrics": result["retrieval_metrics"],
-            "judge": result["judge"],
-            "diagnostics": result["diagnostics"],
-        }
-        with open(traces_path, "a") as f:
-            f.write(json.dumps(trace_entry, default=str) + "\n")
+        for i, case in enumerate(cases):
+            print(f"[{i+1}/{len(cases)}] {case['id']}...", end=" ", flush=True)
+            t0 = time.time()
 
-        # Write detailed trace
-        write_detailed_trace(detail_file, case, result["state"], result["judge"], result["retrieval_metrics"], result["diagnostics"], elapsed)
-        detail_file.flush()
+            result = await run_case(case, agent, anthropic)
+            results.append(result)
+            elapsed = time.time() - t0
 
-        # Console summary
-        j = result["judge"]
-        score_vals = [j[d] for d in dims if j.get(d, -1) >= 0]
-        avg_score = round(sum(score_vals) / len(score_vals), 1) if score_vals else 0
-        flag_str = ""
-        if result["diagnostics"]:
-            flag_str = f" [{len(result['diagnostics'])} issue{'s' if len(result['diagnostics']) != 1 else ''}]"
-        print(f"avg={avg_score}/3 ({elapsed:.1f}s){flag_str}")
+            # Append JSONL trace
+            trace_entry = {
+                "case_id": case["id"],
+                "question": case["question"],
+                "answer": result["state"].get("answer", ""),
+                "tool_calls": result["state"].get("tool_calls", []),
+                "sources_count": len(result["state"].get("sources", [])),
+                "retrieval_metrics": result["retrieval_metrics"],
+                "judge": result["judge"],
+                "diagnostics": result["diagnostics"],
+            }
+            with open(traces_path, "a") as f:
+                f.write(json.dumps(trace_entry, default=str) + "\n")
 
-        if result["diagnostics"]:
-            for flag in result["diagnostics"]:
-                print(f"    ⚠  {flag}")
+            # Write detailed trace
+            write_detailed_trace(detail_file, case, result["state"], result["judge"], result["retrieval_metrics"], result["diagnostics"], elapsed)
+            detail_file.flush()
 
-        if i < len(cases) - 1:
-            time.sleep(args.delay)
+            # Console summary
+            j = result["judge"]
+            score_vals = [j[d] for d in dims if j.get(d, -1) >= 0]
+            avg_score = round(sum(score_vals) / len(score_vals), 1) if score_vals else 0
+            flag_str = ""
+            if result["diagnostics"]:
+                flag_str = f" [{len(result['diagnostics'])} issue{'s' if len(result['diagnostics']) != 1 else ''}]"
+            print(f"avg={avg_score}/3 ({elapsed:.1f}s){flag_str}")
 
-    detail_file.close()
+            if result["diagnostics"]:
+                for flag in result["diagnostics"]:
+                    print(f"    ⚠  {flag}")
 
-    # Generate report
-    report = generate_report(suite_name, run_id, results, output_dir)
+            if i < len(cases) - 1:
+                await asyncio.sleep(args.delay)
 
-    print()
-    print(f"Output:")
-    print(f"  {output_dir / 'report.md'}")
-    print(f"  {output_dir / 'traces.jsonl'}")
-    print(f"  {detail_path}")
-    print(f"  {console_path}")
-    print()
+        # Generate report
+        report = generate_report(suite_name, run_id, results, output_dir)
 
-    # Print summary
-    print("── Summary ─────────────────────────────")
-    for d in dims:
-        vals = [r["judge"][d] for r in results if r["judge"].get(d, -1) >= 0]
-        mean = round(sum(vals) / len(vals), 2) if vals else 0
-        bar = "█" * int(mean) + "░" * (3 - int(mean))
-        print(f"  {d:18s} {bar} {mean}/3")
+        print()
+        print(f"Output:")
+        print(f"  {output_dir / 'report.md'}")
+        print(f"  {output_dir / 'traces.jsonl'}")
+        print(f"  {detail_path}")
+        print(f"  {console_path}")
+        print()
 
-    all_vals = []
-    for r in results:
+        # Print summary
+        print("── Summary ─────────────────────────────")
         for d in dims:
-            v = r["judge"].get(d, -1)
-            if v >= 0:
-                all_vals.append(v)
-    overall = round(sum(all_vals) / len(all_vals), 2) if all_vals else 0
-    print(f"  {'overall':18s} {'█' * int(overall)}{'░' * (3 - int(overall))} {overall}/3")
-    print()
+            vals = [r["judge"][d] for r in results if r["judge"].get(d, -1) >= 0]
+            mean = round(sum(vals) / len(vals), 2) if vals else 0
+            bar = "█" * int(mean) + "░" * (3 - int(mean))
+            print(f"  {d:18s} {bar} {mean}/3")
 
-    # Problem summary
-    total_issues = sum(len(r["diagnostics"]) for r in results)
-    clean = sum(1 for r in results if not r["diagnostics"])
-    print(f"  {clean}/{len(results)} cases clean, {total_issues} issues total")
-    print()
+        all_vals = []
+        for r in results:
+            for d in dims:
+                v = r["judge"].get(d, -1)
+                if v >= 0:
+                    all_vals.append(v)
+        overall = round(sum(all_vals) / len(all_vals), 2) if all_vals else 0
+        print(f"  {'overall':18s} {'█' * int(overall)}{'░' * (3 - int(overall))} {overall}/3")
+        print()
 
-    # Restore stdout
-    sys.stdout = tee.stdout
-    tee.close()
+        # Problem summary
+        total_issues = sum(len(r["diagnostics"]) for r in results)
+        clean = sum(1 for r in results if not r["diagnostics"])
+        print(f"  {clean}/{len(results)} cases clean, {total_issues} issues total")
+        print()
+
+    finally:
+        detail_file.close()
+        sys.stdout = tee.stdout
+        tee.close()
 
 
 if __name__ == "__main__":
