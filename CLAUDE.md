@@ -57,3 +57,4 @@ VECTOR_STORAGE_DIR=.data/vectors        # optional override
 ## Git
 
 - Do NOT add `Co-Authored-By` lines to commit messages
+- One feature/fix per commit — do not bundle multiple issues into a single commit
