@@ -21,6 +21,7 @@ VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")
 
 # Feature flags
 RERANK_ENABLED: bool = os.getenv("RERANK_ENABLED", "true").lower() in ("true", "1", "yes")
+COMPRESS_CONTEXT: bool = os.getenv("COMPRESS_CONTEXT", "true").lower() == "true"
 
 # Adaptive cutoff bounds
 CUTOFF_FLOOR: int = int(os.getenv("CUTOFF_FLOOR", "3"))

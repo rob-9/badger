@@ -81,6 +81,39 @@ def _bookend_reorder(chunks: list[dict]) -> list[dict]:
     return [best] + middle + [second_best]
 
 
+def _extract_relevant_sentences(chunk_text: str, query: str, top_n: int = 5) -> str:
+    """Compress a chunk by keeping only the most query-relevant sentences.
+
+    Scores each sentence by normalized word overlap with the query.
+    Returns top_n sentences in their original order to preserve narrative flow.
+    Returns unchanged text if the chunk has fewer than top_n + 2 sentences.
+    """
+    import re
+
+    sentences = re.split(r'(?<=[.!?])\s+|\n+', chunk_text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if len(sentences) < top_n + 2:
+        return chunk_text
+
+    query_words = set(query.lower().split())
+    if not query_words:
+        return chunk_text
+
+    scored = []
+    for i, sentence in enumerate(sentences):
+        sentence_words = set(sentence.lower().split())
+        overlap = len(query_words & sentence_words) / len(query_words)
+        scored.append((i, overlap, sentence))
+
+    # Sort by score descending, take top_n
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top_indices = sorted(idx for idx, _, _ in scored[:top_n])
+
+    # Reassemble in original order
+    return " ".join(sentences[i] for i in top_indices)
+
+
 # ---------------------------------------------------------------------------
 # Tool schemas (for Claude's `tools` parameter)
 # ---------------------------------------------------------------------------
@@ -264,7 +297,11 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
             if chapter:
                 header += f" (Chapter: {chapter})"
             header += f" [chunk {c['chunk_index']}]"
-            parts.append(f"{header}\n{c['text']}")
+            display_text = (
+                _extract_relevant_sentences(c["text"], query)
+                if config.COMPRESS_CONTEXT else c["text"]
+            )
+            parts.append(f"{header}\n{display_text}")
             source_counter += 1
 
         formatted = "\n\n---\n\n".join(parts)
