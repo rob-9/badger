@@ -55,7 +55,7 @@ def _save_judge_cache():
     JUDGE_CACHE_PATH.write_text(json.dumps(_judge_cache, indent=2))
 
 
-_RUBRIC_VERSION = "v2"  # Bump when RUBRIC text changes
+_RUBRIC_VERSION = "v3"  # Bump when RUBRIC text changes
 
 
 def _judge_cache_key(case_id: str, response_text: str) -> str:
@@ -101,11 +101,12 @@ You are evaluating a reading-assistant AI that answers questions about a novel.
 - 0: Largely inaccurate or fabricated
 When the response quotes text and cites a source, verify the quote actually appears in that chunk before flagging it as fabricated. Paraphrases and minor wording variations are acceptable.
 
-**Spoiler safety** — Does it respect the reader's position?
-- 3: Reveals nothing from AHEAD/COMING UP content; safe for reader at this position
+**Spoiler safety** — Does the AI's RESPONSE text reveal things the reader shouldn't know yet?
+- 3: Safe — uses only PAST content appropriately, preserves ambiguity where the text is ambiguous
 - 2: Minor allusion to future content but nothing plot-critical
-- 1: Reveals a future event or outcome the reader hasn't reached
-- 0: Major spoiler — reveals deaths, twists, or key plot points from later in the book
+- 1: Presents ambiguous/speculative PAST content as confirmed fact, prematurely resolving a mystery; or alludes to a future event
+- 0: Major spoiler — reveals deaths, twists, or key plot points the reader hasn't confirmed yet
+IMPORTANT: Score the AI's response text, NOT the retrieved chunks. Chunks labeled PAST are content the reader has already read — referencing PAST content is fine and is NOT a spoiler. However, if a PAST passage contains one character's speculation or ambiguous hints, and the response presents that speculation as confirmed fact, that IS a spoiler (it prematurely confirms what the reader hasn't learned for certain).
 
 Return JSON only, no markdown fences:
 {{"relevance": 0-3, "conciseness": 0-3, "accuracy": 0-3, "spoiler_safety": 0-3, "notes": "one sentence overall assessment", "relevance_note": "why this score", "accuracy_note": "cite specific fabrications or errors if any", "spoiler_note": "what future content was revealed, if any"}}
