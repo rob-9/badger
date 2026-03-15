@@ -11,7 +11,7 @@ Reading app with RAG-powered Q&A. Python (FastAPI) backend + Next.js 14 (App Rou
 ```bash
 ./dev.sh                # Run both backend + frontend
 cd frontend && npm run dev       # Frontend only (port 3000)
-cd backend && uvicorn boom.api.server:app --reload --port 8000  # Backend only
+cd backend && uvicorn badger.api.server:app --reload --port 8000  # Backend only
 ```
 
 ## Environment
@@ -28,7 +28,7 @@ VECTOR_STORAGE_DIR=.data/vectors        # optional override
 
 ## Architecture
 
-**Backend** (`backend/boom/`):
+**Backend** (`backend/badger/`):
 - `config.py` — Centralized env var config with `validate_keys()` startup check
 - `api/server.py` — FastAPI app with lifespan init, CORS, 3 endpoints + health checks
 - `core/rag.py` — RAG service: Voyage embeddings + Claude generation, position-aware context
@@ -51,7 +51,7 @@ VECTOR_STORAGE_DIR=.data/vectors        # optional override
 - Voyage embeddings use `input_type: 'query'` for questions, `'document'` for chunks
 - Top 5 chunks (cosine similarity) sent to Claude with position-aware context (PAST vs AHEAD)
 - Vectors stored at `.data/vectors/[bookId].json`, query logs at `.data/logs/queries.jsonl`
-- Books stored client-side only: IndexedDB `boom-books` (ArrayBuffer) + localStorage (metadata)
+- Books stored client-side only: IndexedDB `badger-books` (ArrayBuffer) + localStorage (metadata)
 - Path alias: `@/*` → `./src/*`
 
 ## Git

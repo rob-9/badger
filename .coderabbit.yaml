@@ -21,7 +21,7 @@ reviews:
         - SQL injection / path traversal in any user-provided input
         - Correct use of Anthropic and Voyage AI client APIs
         - Spoiler prevention: AHEAD chunks must never leak to the reader
-    - path: "backend/boom/core/agent.py"
+    - path: "backend/badger/core/agent.py"
       instructions: |
         This is the tool-calling agent that replaced a LangGraph DAG.
         Pay special attention to:

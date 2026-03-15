@@ -1,10 +1,10 @@
-# Boom MCP Server
+# Badger MCP Server
 
-MCP (Model Context Protocol) server for Boom - allows AI agents like Claude to interact with your reading library.
+MCP (Model Context Protocol) server for Badger - allows AI agents like Claude to interact with your reading library.
 
 ## Coming Soon
 
-This will wrap the Boom core library so AI agents can:
+This will wrap the Badger core library so AI agents can:
 - Search your book library
 - Query books with RAG
 - Get reading recommendations
@@ -20,4 +20,4 @@ mcp/
 └── pyproject.toml     # Dependencies
 ```
 
-The MCP server will import from `../backend/boom/` to access the core RAG functionality.
+The MCP server will import from `../backend/badger/` to access the core RAG functionality.

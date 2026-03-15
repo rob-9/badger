@@ -1,4 +1,4 @@
-"""Tests for boom.config — configuration and validation."""
+"""Tests for badger.config — configuration and validation."""
 
 import os
 import pytest
@@ -6,7 +6,7 @@ import pytest
 
 class TestConfig:
     def test_default_models(self):
-        from boom import config
+        from badger import config
 
         assert "claude" in config.CLAUDE_MODEL.lower() or "sonnet" in config.CLAUDE_MODEL.lower()
         assert "voyage" in config.VOYAGE_MODEL.lower()
@@ -14,19 +14,19 @@ class TestConfig:
         assert "rerank" in config.VOYAGE_RERANK_MODEL.lower()
 
     def test_default_cors(self):
-        from boom import config
+        from badger import config
 
         assert isinstance(config.CORS_ORIGINS, list)
         assert len(config.CORS_ORIGINS) >= 1
 
     def test_default_storage_dir(self):
-        from boom import config
+        from badger import config
 
         assert config.VECTOR_STORAGE_DIR
 
     def test_validate_keys_exits_on_missing(self):
         """validate_keys should sys.exit(1) if API keys are empty."""
-        from boom import config
+        from badger import config
 
         original_anthropic = config.ANTHROPIC_API_KEY
         original_voyage = config.VOYAGE_API_KEY
@@ -41,7 +41,7 @@ class TestConfig:
             config.VOYAGE_API_KEY = original_voyage
 
     def test_validate_keys_passes_with_keys(self):
-        from boom import config
+        from badger import config
 
         original_anthropic = config.ANTHROPIC_API_KEY
         original_voyage = config.VOYAGE_API_KEY

@@ -33,9 +33,9 @@ load_dotenv()
 
 from anthropic import Anthropic, AsyncAnthropic
 
-from boom import config
-from boom.core.rag import RAGService
-from boom.core.agent import build_agent
+from badger import config
+from badger.core.rag import RAGService
+from badger.core.agent import build_agent
 from benchmarks.judge import score_response, set_cache_enabled
 
 logger = logging.getLogger(__name__)

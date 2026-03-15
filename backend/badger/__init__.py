@@ -1,5 +1,5 @@
 """
-Boom - Personal reading assistant with AI capabilities.
+Badger - Personal reading assistant with AI capabilities.
 
 Simple library for reading books with agentic AI assistance.
 """

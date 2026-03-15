@@ -1,3 +1,3 @@
-# boom
+# badger
 
 AI-powered reading application.

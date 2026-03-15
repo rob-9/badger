@@ -52,7 +52,6 @@ export default function Home() {
   const streamSourcesRef = useRef<ChatMessage['sources']>(undefined)
   const epubReaderRef = useRef<EpubReaderHandle>(null)
   const [savedReadingCfi, setSavedReadingCfi] = useState<string | null>(null)
-  const [pendingSourceNav, setPendingSourceNav] = useState<NonNullable<ChatMessage['sources']>[0] | null>(null)
 
   // Loading transition state
   const [isLoadingBook, setIsLoadingBook] = useState(false)
@@ -68,7 +67,7 @@ export default function Home() {
       setHistoryLoaded(true)
 
       // Restore last open book on reload
-      const lastBookId = localStorage.getItem('boom-active-book')
+      const lastBookId = localStorage.getItem('badger-active-book')
       if (lastBookId) {
         const book = books.find(b => b.id === lastBookId)
         if (book) {
@@ -112,7 +111,7 @@ export default function Home() {
       const coverUrl = await extractCover(arrayBuffer) ?? undefined
       const id = await addBook(name, arrayBuffer, coverUrl)
       setBookId(id)
-      localStorage.setItem('boom-active-book', id)
+      localStorage.setItem('badger-active-book', id)
       setHistory(await getBookHistory()) // Refresh history
 
       // Index the book for RAG
@@ -143,7 +142,7 @@ export default function Home() {
       setFileName(book.fileName)
       setIsEpub(true)
       setBookId(book.id)
-      localStorage.setItem('boom-active-book', book.id)
+      localStorage.setItem('badger-active-book', book.id)
 
       // Keep loading screen up, then mount the reader behind it
       await new Promise(r => setTimeout(r, 300))
@@ -182,7 +181,7 @@ export default function Home() {
     setFileName('')
     setEpubData(null)
     setIsEpub(false)
-    localStorage.removeItem('boom-active-book')
+    localStorage.removeItem('badger-active-book')
     setBookId(null)
     setIsIndexing(false)
     setIsIndexed(false)
@@ -316,14 +315,7 @@ export default function Home() {
     }, assistantId)
   }, [bookId, readerPosition, startStreaming])
 
-  const handleSourceClick = useCallback((source: NonNullable<ChatMessage['sources']>[0]) => {
-    setPendingSourceNav(source)
-  }, [])
-
-  const handleConfirmSourceNav = useCallback(async () => {
-    if (!pendingSourceNav) return
-    const source = pendingSourceNav
-    setPendingSourceNav(null)
+  const handleNavigateToSource = useCallback(async (source: NonNullable<ChatMessage['sources']>[0]) => {
     const currentCfi = epubReaderRef.current?.getCurrentCfi()
     if (currentCfi) {
       setSavedReadingCfi(currentCfi)
@@ -395,10 +387,7 @@ export default function Home() {
                 loadingStatus={loadingStatus}
                 onSendMessage={handleChatMessage}
                 onClose={() => setIsChatOpen(false)}
-                onSourceClick={handleSourceClick}
-                pendingSourceNav={pendingSourceNav}
-                onConfirmSourceNav={handleConfirmSourceNav}
-                onCancelSourceNav={() => setPendingSourceNav(null)}
+                onNavigateToSource={handleNavigateToSource}
               />
             )}
           </>

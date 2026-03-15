@@ -1,5 +1,5 @@
 {
-  "suite_name": "boom-v1",
+  "suite_name": "badger-v1",
   "cases": [
     {
       "id": "baseline-vocab-chinese",

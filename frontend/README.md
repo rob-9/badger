@@ -1,6 +1,6 @@
-# Boom Frontend
+# Badger Frontend
 
-Next.js frontend for Boom reading assistant.
+Next.js frontend for Badger reading assistant.
 
 ## Quick Start
 

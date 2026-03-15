@@ -36,7 +36,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
   // Initialize font size from localStorage
   const [fontSize, setFontSize] = useState(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('boom-font-size')
+      const saved = localStorage.getItem('badger-font-size')
       return saved ? parseInt(saved, 10) : 100
     }
     return 100
@@ -95,10 +95,10 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
     iframes?.forEach((iframe) => {
       const doc = iframe.contentDocument
       if (!doc) return
-      let style = doc.getElementById('boom-theme')
+      let style = doc.getElementById('badger-theme')
       if (!style) {
         style = doc.createElement('style')
-        style.id = 'boom-theme'
+        style.id = 'badger-theme'
         doc.head.appendChild(style)
       }
       style.textContent = dark
@@ -111,7 +111,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
     const next = !isDark
     setIsDark(next)
     document.documentElement.classList.toggle('dark', next)
-    localStorage.setItem('boom-theme', next ? 'dark' : 'light')
+    localStorage.setItem('badger-theme', next ? 'dark' : 'light')
     applyEpubTheme(next)
   }, [isDark, applyEpubTheme])
   const viewerRef = useRef<HTMLDivElement>(null)
@@ -240,7 +240,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
 
   // Initialize theme on mount
   useEffect(() => {
-    const savedTheme = localStorage.getItem('boom-theme')
+    const savedTheme = localStorage.getItem('badger-theme')
     if (savedTheme === 'dark') {
       setIsDark(true)
       document.documentElement.classList.add('dark')
@@ -288,7 +288,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
         renditionRef.current = rendition
 
         // Register font, styles, and dark/light theme BEFORE first display
-        rendition.themes.register('boom', {
+        rendition.themes.register('badger', {
           '@font-face': {
             'font-family': '"Cooper BT"',
             'src': `url("${window.location.origin}/fonts/cooper-bt-light.otf") format("opentype")`,
@@ -300,26 +300,26 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
           },
           '::selection': { 'background': 'rgba(217, 149, 95, 0.15)', 'color': 'inherit' },
         })
-        rendition.themes.select('boom')
+        rendition.themes.select('badger')
 
         rendition.hooks.content.register((contents: any) => {
           const dark = document.documentElement.classList.contains('dark')
           const doc = contents.document
           if (doc) {
-            let style = doc.getElementById('boom-theme')
+            let style = doc.getElementById('badger-theme')
             if (!style) {
               style = doc.createElement('style')
-              style.id = 'boom-theme'
+              style.id = 'badger-theme'
               doc.head.appendChild(style)
             }
             style.textContent = (dark
               ? '*, html, body { background: #1a1a1a !important; color: #d4d4d4 !important; border-color: #333 !important; }'
               : '*, html, body { background: #ffffff !important; color: #1a1a1a !important; }')
-              + '\n.boom-source-highlight { background: rgba(217, 149, 95, 0.3); border-radius: 2px; }'
+              + '\n.badger-source-highlight { background: rgba(217, 149, 95, 0.3); border-radius: 2px; }'
           }
           // Apply current font size to new pages
           if (renditionRef.current) {
-            const saved = localStorage.getItem('boom-font-size')
+            const saved = localStorage.getItem('badger-font-size')
             if (saved) renditionRef.current.themes.fontSize(`${saved}%`)
           }
         })
@@ -487,7 +487,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
   // Font size handler with persistence
   const handleFontSizeChange = useCallback((newSize: number) => {
     setFontSize(newSize)
-    localStorage.setItem('boom-font-size', newSize.toString())
+    localStorage.setItem('badger-font-size', newSize.toString())
   }, [])
 
   // Apply font size to rendition
@@ -794,7 +794,7 @@ function highlightTextInDoc(doc: Document, searchKey: string): HTMLElement | nul
           range.setStart(node, idx)
           range.setEnd(node, idx + key.length)
           const mark = doc.createElement('mark')
-          mark.className = 'boom-source-highlight'
+          mark.className = 'badger-source-highlight'
           range.surroundContents(mark)
           return mark
         } catch {

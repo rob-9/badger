@@ -14,7 +14,7 @@ from pathlib import Path
 
 from anthropic import Anthropic
 
-from boom import config
+from badger import config
 
 logger = logging.getLogger(__name__)
 

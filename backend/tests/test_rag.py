@@ -1,12 +1,12 @@
-"""Tests for boom.core.rag — RAG service with mocked external APIs."""
+"""Tests for badger.core.rag — RAG service with mocked external APIs."""
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 from dataclasses import dataclass
 
-from boom.core.rag import RAGService, RAGResponse
-from boom.core.chunker import TextChunk
-from boom.core.vector_store import VectorEntry, SearchResult
+from badger.core.rag import RAGService, RAGResponse
+from badger.core.chunker import TextChunk
+from badger.core.vector_store import VectorEntry, SearchResult
 
 
 # ── Mocks ─────────────────────────────────────────────────────────────
@@ -73,8 +73,8 @@ def mock_anthropic():
 @pytest.fixture
 def rag_service(tmp_path, mock_voyage, mock_anthropic):
     """RAG service with mocked external clients."""
-    with patch("boom.core.rag.voyageai") as mock_vmod, \
-         patch("boom.core.rag.Anthropic") as mock_amod:
+    with patch("badger.core.rag.voyageai") as mock_vmod, \
+         patch("badger.core.rag.Anthropic") as mock_amod:
         mock_vmod.Client.return_value = mock_voyage
         mock_amod.return_value = mock_anthropic
         service = RAGService(storage_dir=str(tmp_path / "vectors"))

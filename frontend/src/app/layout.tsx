@@ -2,7 +2,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'boom',
+  title: 'badger',
   description: 'An intelligent reading application with AI assistance',
   icons: {
     icon: [
@@ -25,7 +25,7 @@ export default function RootLayout({
         {/* Prevent dark mode flash */}
         <script dangerouslySetInnerHTML={{ __html: `
           try {
-            const theme = localStorage.getItem('boom-theme')
+            const theme = localStorage.getItem('badger-theme')
             if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
               document.documentElement.classList.add('dark')
             }

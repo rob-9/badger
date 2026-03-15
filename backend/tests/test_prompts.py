@@ -1,6 +1,6 @@
-"""Tests for boom.core.prompts — system prompts for the LangGraph pipeline."""
+"""Tests for badger.core.prompts — system prompts for the LangGraph pipeline."""
 
-from boom.core.prompts import SYSTEM_PROMPTS, POSITION_INSTRUCTIONS
+from badger.core.prompts import SYSTEM_PROMPTS, POSITION_INSTRUCTIONS
 
 
 class TestPrompts:

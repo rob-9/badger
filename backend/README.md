@@ -1,6 +1,6 @@
-# Boom Backend
+# Badger Backend
 
-Python backend for Boom reading assistant.
+Python backend for Badger reading assistant.
 
 ## Quick Start
 
@@ -18,7 +18,7 @@ cp .env.example .env
 
 **3. Run the server:**
 ```bash
-uvicorn boom.api.server:app --reload --port 8000
+uvicorn badger.api.server:app --reload --port 8000
 ```
 
 Server runs on `http://localhost:8000`
@@ -78,8 +78,8 @@ Get AI assistance for selected text (explanations, definitions, etc.)
 ## Development
 
 The backend is simple and focused:
-- `boom/core/` - RAG logic (chunking, embeddings, search)
-- `boom/api/` - FastAPI server with 3 endpoints
+- `badger/core/` - RAG logic (chunking, embeddings, search)
+- `badger/api/` - FastAPI server with 3 endpoints
 - `.data/vectors/` - Where vector embeddings are stored
 
 No database, no auth, no complexity. Just RAG for your books.

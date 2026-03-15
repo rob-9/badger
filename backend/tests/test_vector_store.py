@@ -1,11 +1,11 @@
-"""Tests for boom.core.vector_store — vector storage, search, BM25, RRF."""
+"""Tests for badger.core.vector_store — vector storage, search, BM25, RRF."""
 
 import json
 import math
 import pytest
 
-from boom.core.chunker import TextChunk
-from boom.core.vector_store import (
+from badger.core.chunker import TextChunk
+from badger.core.vector_store import (
     VectorEntry,
     VectorStore,
     SearchResult,

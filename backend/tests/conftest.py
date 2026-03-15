@@ -1,8 +1,8 @@
-"""Shared fixtures for boom tests."""
+"""Shared fixtures for badger tests."""
 
 import pytest
-from boom.core.chunker import TextChunk
-from boom.core.vector_store import VectorEntry, VectorStore, SearchResult
+from badger.core.chunker import TextChunk
+from badger.core.vector_store import VectorEntry, VectorStore, SearchResult
 
 
 # --- Sample data ---

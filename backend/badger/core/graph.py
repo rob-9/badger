@@ -19,7 +19,7 @@ from typing_extensions import TypedDict
 from anthropic import Anthropic
 from langgraph.graph import StateGraph, END
 
-from boom import config
+from badger import config
 from .prompts import SYSTEM_PROMPTS, EVALUATE_PROMPT
 from .vector_store import VectorStore, SearchResult, reciprocal_rank_fusion
 

@@ -103,7 +103,7 @@ export default function LibraryView({
           <div className="w-full max-w-2xl">
             <div className="text-center mb-8">
               <Book className="w-20 h-20 mx-auto mb-6 text-accent" />
-              <h1 className="text-4xl font-bold mb-3 text-[#f7f7f4]">boom</h1>
+              <h1 className="text-4xl font-bold mb-3 text-[#f7f7f4]">badger</h1>
               <p className="text-xl text-[#f7f7f4]/80 mb-2">Read Better.</p>
               <p className="text-sm text-[#f7f7f4]/40">
                 Upload your books and ask questions powered by AI

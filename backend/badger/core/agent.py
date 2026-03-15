@@ -21,7 +21,7 @@ from pathlib import Path
 
 from anthropic import Anthropic, AsyncAnthropic
 
-from boom import config
+from badger import config
 from .prompts import AGENT_SYSTEM_PROMPT, EVALUATE_PROMPT
 from .graph import label_chunks, strip_code_fences
 from .vector_store import VectorStore

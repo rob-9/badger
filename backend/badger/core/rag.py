@@ -24,7 +24,7 @@ from typing import Optional
 import voyageai
 from anthropic import Anthropic
 
-from boom import config
+from badger import config
 from .chunker import chunk_text, chunk_structured, TextChunk
 from .vector_store import VectorStore, VectorEntry
 

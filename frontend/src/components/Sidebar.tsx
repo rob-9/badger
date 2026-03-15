@@ -99,7 +99,7 @@ export default function Sidebar({
         {/* Header */}
         <div className="p-6 border-b border-[#f7f7f4]/10">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold text-[#f7f7f4]">boom</h1>
+            <h1 className="text-xl font-bold text-[#f7f7f4]">badger</h1>
             <button
               onClick={() => setIsOpen(false)}
               className="lg:hidden p-2 hover:bg-[#f7f7f4]/5 rounded-lg transition-colors"

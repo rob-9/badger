@@ -9,7 +9,7 @@ export interface BookMetadata {
   coverUrl?: string // data URL of cover image
 }
 
-const DB_NAME = 'boom-books'
+const DB_NAME = 'badger-books'
 const DB_VERSION = 2 // Bumped to add metadata store
 const FILES_STORE = 'epubs'
 const META_STORE = 'metadata'

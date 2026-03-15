@@ -1,7 +1,7 @@
-"""Tests for boom.core.chunker — text chunking logic."""
+"""Tests for badger.core.chunker — text chunking logic."""
 
 import pytest
-from boom.core.chunker import (
+from badger.core.chunker import (
     TextChunk,
     chunk_text,
     chunk_structured,

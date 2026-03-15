@@ -1,10 +1,10 @@
-"""Tests for boom.core.graph — LangGraph helpers, labeling, routing, logging."""
+"""Tests for badger.core.graph — LangGraph helpers, labeling, routing, logging."""
 
 import json
 import pytest
 
-from boom.core.vector_store import SearchResult
-from boom.core.graph import (
+from badger.core.vector_store import SearchResult
+from badger.core.graph import (
     strip_code_fences,
     parse_decompose_response,
     label_chunks,
@@ -17,7 +17,7 @@ from boom.core.graph import (
     VALID_TYPES,
     TOKEN_LIMITS,
 )
-from boom.core.prompts import SYSTEM_PROMPTS
+from badger.core.prompts import SYSTEM_PROMPTS
 from tests.conftest import make_chunk
 
 
@@ -347,7 +347,7 @@ class TestValidTypes:
         assert VALID_TYPES == {"vocabulary", "context", "lookup", "analysis"}
 
     def test_types_match_prompts(self):
-        from boom.core.prompts import SYSTEM_PROMPTS
+        from badger.core.prompts import SYSTEM_PROMPTS
 
         for t in VALID_TYPES:
             assert t in SYSTEM_PROMPTS, f"Missing system prompt for type: {t}"
@@ -358,7 +358,7 @@ class TestValidTypes:
 
 class TestLabelAndLog:
     def test_returns_labeled_chunks(self):
-        from boom.core.graph import _label_and_log
+        from badger.core.graph import _label_and_log
 
         results = [
             SearchResult(chunk=make_chunk("b", 2, "Text"), score=0.8),
@@ -463,7 +463,7 @@ class TestPrepareGenerate:
 
 class TestLogQuery:
     def test_writes_jsonl_and_log(self, tmp_path):
-        import boom.core.graph as graph_mod
+        import badger.core.graph as graph_mod
 
         original_dir = graph_mod.LOG_DIR
         graph_mod.LOG_DIR = tmp_path
@@ -493,8 +493,8 @@ class TestLogQuery:
 class TestWriteReadableLog:
     def test_writes_log_file(self, tmp_path):
         """Readable log should be written without errors."""
-        import boom.core.graph as graph_mod
-        from boom.core.graph import _write_readable_log
+        import badger.core.graph as graph_mod
+        from badger.core.graph import _write_readable_log
 
         original_dir = graph_mod.LOG_DIR
         graph_mod.LOG_DIR = tmp_path
@@ -534,8 +534,8 @@ class TestWriteReadableLog:
 
     def test_writes_decomposition_section(self, tmp_path):
         """Readable log should include decomposition/HyDE data when present."""
-        import boom.core.graph as graph_mod
-        from boom.core.graph import _write_readable_log
+        import badger.core.graph as graph_mod
+        from badger.core.graph import _write_readable_log
 
         original_dir = graph_mod.LOG_DIR
         graph_mod.LOG_DIR = tmp_path

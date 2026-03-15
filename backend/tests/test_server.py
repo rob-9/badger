@@ -1,4 +1,4 @@
-"""Tests for boom.api.server — FastAPI endpoints."""
+"""Tests for badger.api.server — FastAPI endpoints."""
 
 import json
 import pytest
@@ -82,7 +82,7 @@ def parse_sse(text: str) -> list[dict]:
 @pytest.fixture
 def mock_services():
     """Set up module-level service mocks before importing the app."""
-    import boom.api.server as server_mod
+    import badger.api.server as server_mod
 
     mock_rag = MagicMock()
     mock_rag.vector_store = MagicMock()
@@ -177,7 +177,7 @@ def mock_services():
 @pytest.fixture
 def client(mock_services):
     """TestClient with mocked services."""
-    from boom.api.server import app
+    from badger.api.server import app
 
     return TestClient(app, raise_server_exceptions=False)
 
@@ -403,10 +403,10 @@ class TestStreamEndpoint:
         assert "message" in error_events[0]["data"]
 
     def test_stream_503_when_not_initialized(self):
-        import boom.api.server as server_mod
+        import badger.api.server as server_mod
 
         server_mod.rag_service = None
-        from boom.api.server import app
+        from badger.api.server import app
 
         c = TestClient(app, raise_server_exceptions=False)
         resp = c.post(
@@ -470,7 +470,7 @@ class TestAgentEndpoint:
 
 class TestImportLocalEpub:
     def test_import_epub_file(self, client, mock_services, tmp_path, monkeypatch):
-        monkeypatch.setattr("boom.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
+        monkeypatch.setattr("badger.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
         epub_path = tmp_path / "test.epub"
         epub_path.write_bytes(b"PK\x03\x04fake epub content")
         resp = client.post("/api/epub/import-local", json={"path": str(epub_path)})
@@ -479,7 +479,7 @@ class TestImportLocalEpub:
         assert resp.content == b"PK\x03\x04fake epub content"
 
     def test_import_exploded_directory(self, client, mock_services, tmp_path, monkeypatch):
-        monkeypatch.setattr("boom.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
+        monkeypatch.setattr("badger.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
         epub_dir = tmp_path / "MyBook.epub"
         epub_dir.mkdir()
         (epub_dir / "mimetype").write_text("application/epub+zip")
@@ -503,14 +503,14 @@ class TestImportLocalEpub:
         assert resp.status_code == 403  # blocked by path restriction before 404
 
     def test_import_non_epub_file(self, client, mock_services, tmp_path, monkeypatch):
-        monkeypatch.setattr("boom.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
+        monkeypatch.setattr("badger.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
         txt = tmp_path / "readme.txt"
         txt.write_text("not an epub")
         resp = client.post("/api/epub/import-local", json={"path": str(txt)})
         assert resp.status_code == 400
 
     def test_import_directory_without_container(self, client, mock_services, tmp_path, monkeypatch):
-        monkeypatch.setattr("boom.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
+        monkeypatch.setattr("badger.config.EPUB_IMPORT_ALLOWED_DIRS", [str(tmp_path)])
         plain_dir = tmp_path / "not_epub"
         plain_dir.mkdir()
         (plain_dir / "random.txt").write_text("hello")
@@ -523,20 +523,20 @@ class TestImportLocalEpub:
 
 class TestServiceNotInitialized:
     def test_index_503(self):
-        import boom.api.server as server_mod
+        import badger.api.server as server_mod
 
         server_mod.rag_service = None
-        from boom.api.server import app
+        from badger.api.server import app
 
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/api/rag/index", json={"book_id": "b1", "text": "hello"})
         assert resp.status_code == 503
 
     def test_query_503(self):
-        import boom.api.server as server_mod
+        import badger.api.server as server_mod
 
         server_mod.rag_service = None
-        from boom.api.server import app
+        from badger.api.server import app
 
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post(
@@ -546,10 +546,10 @@ class TestServiceNotInitialized:
         assert resp.status_code == 503
 
     def test_agent_503(self):
-        import boom.api.server as server_mod
+        import badger.api.server as server_mod
 
         server_mod.anthropic_client = None
-        from boom.api.server import app
+        from badger.api.server import app
 
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/api/agent", json={"selected_text": "test"})

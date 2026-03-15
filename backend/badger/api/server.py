@@ -1,5 +1,5 @@
 """
-FastAPI server for Boom reading assistant.
+FastAPI server for Badger reading assistant.
 
 Simple API with three endpoints:
 1. POST /api/rag/index - Index a book
@@ -23,9 +23,9 @@ from pydantic import BaseModel, model_validator
 from typing import Optional
 from anthropic import Anthropic, AsyncAnthropic
 
-from boom import config
-from boom.core.rag import RAGService
-from boom.core.agent import build_agent, log_agent_query
+from badger import config
+from badger.core.rag import RAGService
+from badger.core.agent import build_agent, log_agent_query
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Boom Reading Assistant API",
+    title="Badger Reading Assistant API",
     description="Simple API for AI-powered reading assistance",
     version="0.1.0",
     lifespan=lifespan
@@ -438,7 +438,7 @@ async def is_book_indexed(book_id: str):
 @app.get("/")
 async def root():
     """Health check endpoint."""
-    return {"status": "ok", "message": "Boom API is running"}
+    return {"status": "ok", "message": "Badger API is running"}
 
 
 @app.get("/health")
