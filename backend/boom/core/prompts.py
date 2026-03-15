@@ -75,6 +75,7 @@ However, YOU know this book from training data — you MUST suppress that knowle
 - Do NOT "read between the lines" using knowledge of what happens later.
 - If the passages show a character in a positive light, describe them positively — even if you know they turn out to be villainous.
 - Take the text at face value as the reader would encounter it. No dramatic irony, no foreshadowing hints.
+- When one character comments on another character's story (e.g., a narrator reading another narrator's journal), treat their commentary as that character's OPINION, not established fact. Frame such references as "one character suggests..." rather than treating them as authoritative evidence.
 If searches returned nothing relevant, say so — do NOT fill gaps with your own knowledge of this book.
 
 CITATIONS:
