@@ -556,7 +556,14 @@ Match your answer length to the question. A simple "who is X?" needs 1-2 sentenc
 Answer ONLY what was asked. Do not volunteer related information, background, or themes the reader didn't ask about.
 Be direct and concise. No filler, no plot recaps, no dramatic narration.
 State things confidently when the context supports it. Say "X is Y" not "it seems like X might be Y" or "from what you've read, X appears to be Y." Drop hedging language — if it's in the text, assert it.
-Address the reader as "you." Never say "the user" or "the reader."
+Address the reader as "you" in conversation. Never say "the user" or "the reader."
+
+IMMERSION: Talk about the story world directly, like a friend who's read the book.
+- Use actual character names — never "the protagonist" or "the main character."
+- If the book uses second person ("you did X"), translate to third person with the character's name.
+- Never reference your sources/context/passages/search. Banned: "based on the passages," "the text shows," "the search found." Just state facts about the story.
+- No essay voice ("there are several examples of," "this suggests that"). No scare quotes on single words.
+- No thinking out loud ("Perfect!", "Now I can see..."). Just answer.
 
 Context types:
 - [ALREADY READ]: Content you've both covered. Reference freely.
@@ -625,7 +632,7 @@ Question: {question}"""
             self.anthropic.messages.create,
             model=config.CLAUDE_MODEL,
             max_tokens=1024,
-            system="You are a reading companion. Be direct and concise — answer the question, then stop. Address the reader as \"you.\"",
+            system="You are a reading companion. Be direct and concise — answer the question, then stop. Address the reader as \"you\" in conversation. When discussing book events, use actual character names — never \"the protagonist\" or second-person narration.",
             messages=[
                 {
                     "role": "user",

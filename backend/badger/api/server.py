@@ -260,7 +260,7 @@ async def query_book_stream(request: QueryBookRequest):
                 # Simple path: stream without RAG pipeline
                 yield f"event: status\ndata: {json.dumps({'stage': 'generating'})}\n\n"
 
-                system = 'You are a reading companion. Be direct and concise — answer the question, then stop. Address the reader as "you."'
+                system = 'You are a reading companion. Be direct and concise — answer the question, then stop. Address the reader as "you" in conversation. When discussing book events, use actual character names — never "the protagonist" or second-person narration.'
                 user_prompt = f'Selected text: "{request.selected_text}"\n\nQuestion: {request.question}'
 
                 async with async_anthropic_client.messages.stream(
