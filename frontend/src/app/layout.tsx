@@ -1,5 +1,13 @@
 import './globals.css'
 import type { Metadata } from 'next'
+import { Cormorant_Garamond } from 'next/font/google'
+
+const cormorant = Cormorant_Garamond({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600'],
+  variable: '--font-display',
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
   title: 'badger',
@@ -20,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={cormorant.variable} suppressHydrationWarning>
       <head>
         {/* Prevent dark mode flash */}
         <script dangerouslySetInnerHTML={{ __html: `

@@ -1,6 +1,6 @@
 'use client'
 
-import { Book, Clock, Upload, FileText, File, Trash2 } from 'lucide-react'
+import { Book, Clock, Upload, FileText, File, Trash2, ArrowRight } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { BookMetadata } from '@/lib/bookStorage'
 import { formatDate } from '@/lib/formatDate'
@@ -79,15 +79,7 @@ export default function LibraryView({
   const showHero = books.length === 0
 
   return (
-    <div className="min-h-screen bg-[#14120b] text-[#f7f7f4] relative">
-      {/* Gradient Mesh Background */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[5%] left-[10%] w-[250px] h-[250px] rounded-full bg-[#d9955f] opacity-[0.06] blur-[65px]"></div>
-        <div className="absolute top-[15%] right-[15%] w-[220px] h-[220px] rounded-full bg-[#cd7f47] opacity-[0.07] blur-[58px]"></div>
-        <div className="absolute bottom-[30%] left-[5%] w-[190px] h-[190px] rounded-full bg-[#e8a965] opacity-[0.05] blur-[54px]"></div>
-        <div className="absolute top-[50%] left-[50%] w-[280px] h-[280px] rounded-full bg-[#bc8555] opacity-[0.06] blur-[70px]"></div>
-        <div className="absolute bottom-[10%] right-[20%] w-[240px] h-[240px] rounded-full bg-[#d69658] opacity-[0.06] blur-[62px]"></div>
-      </div>
+    <div className="min-h-screen bg-surface-deep text-[#f7f7f4] relative grain-overlay">
 
       {/* Hidden file input shared between hero and sidebar upload */}
       <input
@@ -101,92 +93,110 @@ export default function LibraryView({
       {showHero ? (
         <div className="relative z-10 flex items-center justify-center min-h-screen p-8">
           <div className="w-full max-w-2xl">
-            <div className="text-center mb-8">
-              <Book className="w-20 h-20 mx-auto mb-6 text-accent" />
-              <h1 className="text-4xl font-bold mb-3 text-[#f7f7f4]">badger</h1>
-              <p className="text-xl text-[#f7f7f4]/80 mb-2">Read Better.</p>
-              <p className="text-sm text-[#f7f7f4]/40">
-                Upload your books and ask questions powered by AI
+            {/* Editorial hero */}
+            <div className="text-center mb-12 animate-fade-up">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-accent/20 bg-accent/5 mb-8">
+                <div className="w-1.5 h-1.5 rounded-full bg-accent animate-glow-pulse" />
+                <span className="text-[0.65rem] uppercase tracking-[0.2em] text-accent/80 font-medium">AI-Powered Reading</span>
+              </div>
+
+              <h1 className="font-display text-6xl md:text-7xl font-light mb-4 text-[#f7f7f4] tracking-tight">
+                badger
+              </h1>
+              <div className="w-12 h-px bg-accent/40 mx-auto mb-4" />
+              <p className="font-display text-2xl text-[#f7f7f4]/70 font-light italic">
+                Read better.
+              </p>
+              <p className="text-sm text-[#f7f7f4]/35 mt-3 tracking-wide">
+                Upload your books. Highlight passages. Ask questions.
               </p>
             </div>
 
             <div
-              className={`border-2 border-dashed rounded-xl p-16 text-center transition-all ${
+              className={`relative rounded-2xl transition-all duration-500 animate-fade-up ${
                 isDragging
-                  ? 'border-accent bg-accent/10 scale-105'
-                  : 'border-[#f7f7f4]/15 hover:border-[#f7f7f4]/25'
+                  ? 'border-2 border-accent bg-accent/10 scale-[1.02]'
+                  : 'border border-[#f7f7f4]/10 hover:border-accent/30'
               }`}
+              style={{ animationDelay: '100ms' }}
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
               onDragEnter={() => setIsDragging(true)}
               onDragLeave={() => setIsDragging(false)}
             >
-              {isLoading ? (
-                <div className="flex flex-col items-center space-y-4">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div>
-                  <p className="text-[#f7f7f4]/60 text-lg">Loading document...</p>
-                </div>
-              ) : (
-                <>
-                  <Upload className="w-16 h-16 mx-auto mb-6 text-[#f7f7f4]/30" />
-                  <h3 className="text-2xl font-semibold mb-3 text-[#f7f7f4]">
-                    Drop your book here
-                  </h3>
-                  <p className="text-[#f7f7f4]/60 mb-8">
-                    or click to browse your files
-                  </p>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center px-8 py-4 bg-accent/90 text-[#14120b] rounded-lg hover:bg-accent cursor-pointer transition-all hover:scale-105 text-lg font-medium"
-                  >
-                    <FileText className="w-6 h-6 mr-3" />
-                    Choose File
-                  </button>
-                </>
-              )}
+              {/* Inner glow on hover */}
+              <div className="absolute inset-0 rounded-2xl bg-gradient-to-b from-accent/[0.03] to-transparent pointer-events-none" />
+
+              <div className="relative p-16 text-center">
+                {isLoading ? (
+                  <div className="flex flex-col items-center space-y-4">
+                    <div className="w-12 h-12 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                    <p className="text-[#f7f7f4]/50 text-sm tracking-wide">Loading document...</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="w-16 h-16 mx-auto mb-8 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center">
+                      <Upload className="w-7 h-7 text-accent/70" />
+                    </div>
+                    <h3 className="font-display text-2xl font-light mb-2 text-[#f7f7f4]/90">
+                      Drop your book here
+                    </h3>
+                    <p className="text-[#f7f7f4]/40 text-sm mb-8">
+                      or browse your files
+                    </p>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="group inline-flex items-center gap-3 px-8 py-3.5 bg-accent text-surface-deep rounded-xl hover:bg-accent-hover cursor-pointer transition-all duration-300 hover:shadow-lg hover:shadow-accent/20 text-sm font-medium tracking-wide"
+                    >
+                      <FileText className="w-4 h-4" />
+                      Choose File
+                      <ArrowRight className="w-4 h-4 opacity-0 -ml-2 group-hover:opacity-100 group-hover:ml-0 transition-all duration-300" />
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
-            <div className="mt-12 grid grid-cols-3 gap-6 text-center text-sm text-[#f7f7f4]/40">
-              <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-lg bg-[#f7f7f4]/5 flex items-center justify-center mb-3">
-                  <FileText className="w-6 h-6" />
+            {/* Supported formats — refined */}
+            <div className="mt-16 flex justify-center gap-12 text-center animate-fade-up" style={{ animationDelay: '200ms' }}>
+              {[
+                { icon: FileText, label: 'Text' },
+                { icon: File, label: 'PDF' },
+                { icon: Book, label: 'EPUB' },
+              ].map(({ icon: Icon, label }) => (
+                <div key={label} className="flex flex-col items-center gap-2">
+                  <div className="w-10 h-10 rounded-xl bg-[#f7f7f4]/[0.04] border border-[#f7f7f4]/[0.06] flex items-center justify-center">
+                    <Icon className="w-4 h-4 text-[#f7f7f4]/30" />
+                  </div>
+                  <span className="text-[0.65rem] uppercase tracking-[0.15em] text-[#f7f7f4]/30 font-medium">{label}</span>
                 </div>
-                <span className="font-medium">Text Files</span>
-              </div>
-              <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-lg bg-[#f7f7f4]/5 flex items-center justify-center mb-3">
-                  <File className="w-6 h-6" />
-                </div>
-                <span className="font-medium">PDF Files</span>
-              </div>
-              <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-lg bg-[#f7f7f4]/5 flex items-center justify-center mb-3">
-                  <Book className="w-6 h-6" />
-                </div>
-                <span className="font-medium">EPUB Books</span>
-              </div>
+              ))}
             </div>
           </div>
         </div>
       ) : (
         <div className="relative z-10 p-8 pl-24 lg:pl-8">
           <div className="max-w-7xl mx-auto">
-            <div className="mb-8">
-              <h2 className="text-2xl font-bold text-[#f7f7f4] mb-2">
-                {currentFilter === 'recent' ? 'Recent Books' : 'All Books'}
+            {/* Section header — editorial style */}
+            <div className="mb-10 animate-fade-up">
+              <h2 className="font-display text-3xl font-light text-[#f7f7f4] mb-1 tracking-tight">
+                {currentFilter === 'recent' ? 'Recent' : 'Library'}
               </h2>
-              <p className="text-[#f7f7f4]/60">
-                {filteredBooks.length} {filteredBooks.length === 1 ? 'book' : 'books'}
-              </p>
+              <div className="flex items-center gap-3 mt-2">
+                <div className="w-8 h-px bg-accent/40" />
+                <p className="text-xs uppercase tracking-[0.15em] text-[#f7f7f4]/40">
+                  {filteredBooks.length} {filteredBooks.length === 1 ? 'book' : 'books'}
+                </p>
+              </div>
             </div>
 
             {filteredBooks.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
                 {filteredBooks.map((book, index) => (
                   <div
                     key={book.id}
-                    className="library-card group relative text-left bg-[#1a1812] rounded-xl border border-[#f7f7f4]/10 hover:border-[#f7f7f4]/20 hover:shadow-lg hover:shadow-black/20 transition-all overflow-hidden animate-fade-up"
-                    style={{ animationDelay: `${index * 50}ms` }}
+                    className="library-card group relative text-left rounded-xl overflow-hidden animate-fade-up"
+                    style={{ animationDelay: `${index * 60}ms` }}
                   >
                     {/* Delete button */}
                     <button
@@ -194,33 +204,40 @@ export default function LibraryView({
                         e.stopPropagation()
                         onDeleteBook(book.id)
                       }}
-                      className="absolute top-2 right-2 z-10 p-1.5 rounded-lg bg-black/40 text-[#f7f7f4]/60 opacity-0 group-hover:opacity-100 hover:bg-red-500/80 hover:text-white transition-all cursor-pointer"
+                      className="absolute top-2 right-2 z-10 p-1.5 rounded-lg bg-black/50 backdrop-blur-sm text-[#f7f7f4]/60 opacity-0 group-hover:opacity-100 hover:bg-red-500/80 hover:text-white transition-all cursor-pointer"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
 
                     <button
                       onClick={() => onBookSelect(book)}
                       className="w-full text-left cursor-pointer"
                     >
-                      <div className={`aspect-[2/3] flex items-center justify-center relative overflow-hidden ${book.coverUrl ? '' : 'bg-gradient-to-br from-[#2a2a2a] to-[#1f1f1f]'}`}>
-                        {book.coverUrl ? (
-                          <img
-                            src={book.coverUrl}
-                            alt={book.fileName}
-                            className="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:opacity-90 transition-opacity duration-200"
-                          />
-                        ) : (
-                          <Book className="w-10 h-10 text-[#f7f7f4]/15" />
-                        )}
-                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+                      {/* Cover with spine accent */}
+                      <div className="relative">
+                        <div className={`aspect-[2/3] flex items-center justify-center relative overflow-hidden rounded-t-xl ${book.coverUrl ? '' : 'bg-gradient-to-br from-surface-raised to-surface-warm'}`}>
+                          {/* Spine edge */}
+                          <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-gradient-to-b from-accent/40 via-accent/20 to-accent/40 z-10" />
+
+                          {book.coverUrl ? (
+                            <img
+                              src={book.coverUrl}
+                              alt={book.fileName}
+                              className="absolute inset-0 w-full h-full object-cover opacity-60 group-hover:opacity-90 transition-opacity duration-500"
+                            />
+                          ) : (
+                            <Book className="w-8 h-8 text-[#f7f7f4]/10" />
+                          )}
+                          {/* Hover veil */}
+                          <div className="absolute inset-0 bg-gradient-to-t from-surface-deep/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                        </div>
                       </div>
 
-                      <div className="p-2.5">
-                        <h3 className="font-medium text-sm text-[#f7f7f4] mb-1 line-clamp-2 leading-tight">
+                      <div className="p-3 bg-surface-warm border-x border-b border-[#f7f7f4]/[0.06] rounded-b-xl">
+                        <h3 className="font-medium text-sm text-[#f7f7f4]/90 mb-1.5 line-clamp-2 leading-snug">
                           {book.fileName.replace(/\.(epub|pdf|txt)$/i, '')}
                         </h3>
-                        <div className="flex items-center gap-1.5 text-xs text-[#f7f7f4]/40">
+                        <div className="flex items-center gap-1.5 text-[0.65rem] text-[#f7f7f4]/30">
                           <Clock className="w-3 h-3" />
                           <span>{formatDate(book.lastReadAt)}</span>
                         </div>
@@ -231,8 +248,8 @@ export default function LibraryView({
               </div>
             ) : (
               <div className="text-center py-20">
-                <Book className="w-16 h-16 mx-auto mb-4 text-[#f7f7f4]/20" />
-                <p className="text-[#f7f7f4]/40">
+                <Book className="w-14 h-14 mx-auto mb-4 text-[#f7f7f4]/15" />
+                <p className="text-[#f7f7f4]/35 font-display text-lg italic">
                   No books in this view
                 </p>
               </div>
