@@ -1,7 +1,6 @@
 """Tests for badger.core.vector_store — vector storage, search, BM25, RRF."""
 
 import json
-import math
 import pytest
 
 from badger.core.chunker import TextChunk
@@ -10,45 +9,11 @@ from badger.core.vector_store import (
     VectorStore,
     SearchResult,
     BM25Index,
-    cosine_similarity,
     reciprocal_rank_fusion,
     _tokenize,
     CURRENT_INDEX_VERSION,
 )
 from tests.conftest import make_entry, make_chunk
-
-
-# ── cosine_similarity ─────────────────────────────────────────────────
-
-
-class TestCosineSimilarity:
-    def test_identical_vectors(self):
-        assert cosine_similarity([1, 0, 0], [1, 0, 0]) == pytest.approx(1.0)
-
-    def test_orthogonal_vectors(self):
-        assert cosine_similarity([1, 0, 0], [0, 1, 0]) == pytest.approx(0.0)
-
-    def test_opposite_vectors(self):
-        assert cosine_similarity([1, 0], [-1, 0]) == pytest.approx(-1.0)
-
-    def test_similar_vectors(self):
-        score = cosine_similarity([1, 1, 0], [1, 0.9, 0])
-        assert score > 0.95
-
-    def test_zero_vector_returns_zero(self):
-        assert cosine_similarity([0, 0, 0], [1, 2, 3]) == 0.0
-
-    def test_both_zero_vectors(self):
-        assert cosine_similarity([0, 0], [0, 0]) == 0.0
-
-    def test_different_lengths_raises(self):
-        with pytest.raises(ValueError, match="same length"):
-            cosine_similarity([1, 2], [1, 2, 3])
-
-    def test_normalized_vectors(self):
-        a = [1 / math.sqrt(2), 1 / math.sqrt(2)]
-        b = [1.0, 0.0]
-        assert cosine_similarity(a, b) == pytest.approx(1 / math.sqrt(2))
 
 
 # ── _tokenize ─────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import ePub, { Book, Rendition, NavItem } from 'epubjs'
-import { ChevronLeft, ChevronRight, Settings, ZoomIn, ZoomOut, List, Moon, Sun, RotateCcw, ArrowLeft, Minus, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, List, Moon, Sun, RotateCcw, ArrowLeft, Minus, Plus } from 'lucide-react'
 
 export interface TextSelection {
   text: string
@@ -28,9 +28,6 @@ interface EpubReaderProps {
   onLocationChange?: (percentage: number) => void
   onBackToReading?: () => void
 }
-
-// Book page aspect ratio (width:height)
-const ASPECT_RATIO = 7 / 9
 
 const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubReader({ epubData, fileName, isIndexing, isIndexed, isChatOpen, sourceNavCfi, onCloseAction, onTextSelect, onLocationChange, onBackToReading }, ref) {
   // Initialize font size from localStorage

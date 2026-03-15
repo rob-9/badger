@@ -21,7 +21,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 import json
-import math
 import numpy as np
 from typing import Optional
 from rank_bm25 import BM25Okapi
@@ -42,22 +41,6 @@ class SearchResult:
     """A search result with similarity score."""
     chunk: TextChunk
     score: float  # Cosine similarity: 1 = identical, 0 = orthogonal, -1 = opposite
-
-
-def cosine_similarity(a: list[float], b: list[float]) -> float:
-    """
-    Calculate cosine similarity between two vectors.
-    Uses numpy for ~10x speedup over pure Python on high-dimensional vectors.
-    """
-    if len(a) != len(b):
-        raise ValueError(f"Vectors must have same length: {len(a)} != {len(b)}")
-    a_arr = np.asarray(a, dtype=np.float64)
-    b_arr = np.asarray(b, dtype=np.float64)
-    norm_a = np.linalg.norm(a_arr)
-    norm_b = np.linalg.norm(b_arr)
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return float(np.dot(a_arr, b_arr) / (norm_a * norm_b))
 
 
 def _tokenize(text: str) -> list[str]:
@@ -156,6 +139,14 @@ class VectorStore:
         """Get file path for a book's chapter summary vectors."""
         return self.storage_dir / f"{book_id}_summaries.json"
 
+    async def _ensure_loaded(self, book_id: str) -> Optional[list[VectorEntry]]:
+        entries = self.entries.get(book_id)
+        if not entries:
+            entries = await self.load_from_file(book_id)
+            if entries:
+                self.entries[book_id] = entries
+        return entries
+
     def _serialize_entry(self, entry: VectorEntry) -> dict:
         """Serialize VectorEntry to JSON-compatible dict."""
         return {
@@ -250,17 +241,7 @@ class VectorStore:
         """
         logger.debug("Searching book %s (top %d)", book_id, top_k)
 
-        # Try to get from memory first
-        book_entries = self.entries.get(book_id)
-
-        # If not in memory, try loading from file
-        if not book_entries:
-            logger.debug("Not in memory, loading from disk")
-            book_entries = await self.load_from_file(book_id)
-
-            if book_entries:
-                # Cache in memory for future queries
-                self.entries[book_id] = book_entries
+        book_entries = await self._ensure_loaded(book_id)
 
         if not book_entries:
             logger.info("No entries found for book: %s", book_id)
@@ -327,14 +308,14 @@ class VectorStore:
 
     async def get_total_chunks(self, book_id: str) -> int:
         """Return total number of indexed chunks for a book."""
-        entries = self.entries.get(book_id) or await self.load_from_file(book_id)
+        entries = await self._ensure_loaded(book_id)
         return len(entries) if entries else 0
 
     async def get_chunks_by_range(
         self, book_id: str, start_idx: int, end_idx: int
     ) -> list[SearchResult]:
         """Return chunks by index range (for proximity retrieval). No embedding needed."""
-        entries = self.entries.get(book_id) or await self.load_from_file(book_id)
+        entries = await self._ensure_loaded(book_id)
         if not entries:
             return []
         return [
@@ -362,11 +343,7 @@ class VectorStore:
         Uses progressive matching: tries full text, then 200, 100, 50 char
         snippets with normalized quotes and case-insensitive comparison.
         """
-        entries = self.entries.get(book_id)
-        if not entries:
-            entries = await self.load_from_file(book_id)
-            if entries:
-                self.entries[book_id] = entries
+        entries = await self._ensure_loaded(book_id)
         if not entries or not text:
             return 0
 
@@ -396,11 +373,7 @@ class VectorStore:
 
     async def keyword_search(self, book_id: str, text: str) -> list[SearchResult]:
         """Find all chunks that contain the given text (case-insensitive)."""
-        entries = self.entries.get(book_id)
-        if not entries:
-            entries = await self.load_from_file(book_id)
-            if entries:
-                self.entries[book_id] = entries
+        entries = await self._ensure_loaded(book_id)
         if not entries or not text:
             return []
         needle = text.lower()
@@ -420,11 +393,7 @@ class VectorStore:
         if book_id in self.bm25_indices:
             return self.bm25_indices[book_id]
 
-        entries = self.entries.get(book_id)
-        if not entries:
-            entries = await self.load_from_file(book_id)
-            if entries:
-                self.entries[book_id] = entries
+        entries = await self._ensure_loaded(book_id)
 
         if not entries:
             return None

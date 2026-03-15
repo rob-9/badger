@@ -79,24 +79,27 @@ export default function Home() {
             setBookId(book.id)
             setDocument('loaded')
 
-            // Only extract text + index if not already indexed
-            const indexed = await isBookIndexed(book.id)
-            if (!indexed) {
-              setIsIndexing(true)
-              try {
-                const structured = await extractStructuredText(data)
-                await indexBook(book.id, structured)
-              } catch (error) {
-                console.error('[App] Failed to index book on restore:', error)
-              } finally {
-                setIsIndexing(false)
-              }
-            }
+            await indexBookIfNeeded(book.id, data)
           }
         }
       }
     })
   }, [])
+
+  const indexBookIfNeeded = async (bookId: string, data: ArrayBuffer) => {
+    const indexed = await isBookIndexed(bookId)
+    if (!indexed) {
+      setIsIndexing(true)
+      try {
+        const structured = await extractStructuredText(data)
+        await indexBook(bookId, structured)
+      } catch (error) {
+        console.error('[App] Failed to index book:', error)
+      } finally {
+        setIsIndexing(false)
+      }
+    }
+  }
 
   const handleFileLoad = async (content: string, name: string, arrayBuffer?: ArrayBuffer) => {
     setDocument(content)
@@ -116,17 +119,12 @@ export default function Home() {
 
       // Index the book for RAG
       console.log('[App] Starting RAG indexing for book')
-      setIsIndexing(true)
       try {
-        const structured = await extractStructuredText(arrayBuffer)
-        await indexBook(id, structured)
+        await indexBookIfNeeded(id, arrayBuffer)
         console.log('[App] Book indexed successfully')
         setIsIndexed(true)
       } catch (error) {
-        console.error('[App] Failed to index book:', error)
         setToast({ message: 'AI features unavailable. You can still read.', type: 'error' })
-      } finally {
-        setIsIndexing(false)
       }
     }
   }
@@ -152,19 +150,7 @@ export default function Home() {
       setIsLoadingBook(false)
       setLoadingBook(null)
 
-      // Only extract text + index if not already indexed
-      const indexed = await isBookIndexed(book.id)
-      if (!indexed) {
-        setIsIndexing(true)
-        try {
-          const structured = await extractStructuredText(data)
-          await indexBook(book.id, structured)
-        } catch (error) {
-          console.error('[App] Failed to index book on reopen:', error)
-        } finally {
-          setIsIndexing(false)
-        }
-      }
+      await indexBookIfNeeded(book.id, data)
     } else {
       setIsLoadingBook(false)
       setLoadingBook(null)

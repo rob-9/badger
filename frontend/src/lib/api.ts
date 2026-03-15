@@ -54,32 +54,6 @@ export async function indexBook(bookId: string, content: StructuredBook | string
   }
 }
 
-export async function queryBook(params: {
-  bookId?: string
-  question: string
-  selectedText?: string
-  useRag?: boolean
-  readerPosition?: number
-}): Promise<{ answer: string; sources?: any[] }> {
-  const response = await apiFetch(`${API_URL}/api/rag/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      book_id: params.bookId,
-      question: params.question,
-      selected_text: params.selectedText,
-      use_rag: params.useRag ?? !!params.bookId,
-      reader_position: params.readerPosition
-    })
-  })
-
-  if (!response.ok) {
-    throw new Error(await parseErrorResponse(response, 'Failed to query book'))
-  }
-
-  return response.json()
-}
-
 export function queryBookStream(
   params: {
     bookId?: string
