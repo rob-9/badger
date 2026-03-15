@@ -473,9 +473,13 @@ def _build_user_message(
     question: str,
     selected_text: str | None,
     anchor_text: str = "",
+    reader_position: float = 0.0,
 ) -> str:
     """Build the initial user message for the agent."""
     parts = []
+    if reader_position > 0:
+        pct = int(reader_position * 100)
+        parts.append(f"[The reader is {pct}% through the book. Answer from this point in the story — not earlier, not later.]")
     if anchor_text:
         parts.append(f"[ANCHOR — passage around the reader's selection]\n\n{anchor_text}")
     if selected_text:
@@ -512,7 +516,7 @@ async def run_agent(
             logger.info("  Anchor lookup: %d chunks (indices %s)",
                         len(anchor_chunks), [c["chunk_index"] for c in anchor_chunks])
 
-    messages = [{"role": "user", "content": _build_user_message(question, selected_text, anchor_text)}]
+    messages = [{"role": "user", "content": _build_user_message(question, selected_text, anchor_text, reader_position)}]
     tool_calls_log: list[dict] = []
     answer = ""
     empty_streak = 0
@@ -663,7 +667,7 @@ async def run_agent_streaming(
             logger.info("  Anchor lookup: %d chunks (indices %s)",
                         len(anchor_chunks), [c["chunk_index"] for c in anchor_chunks])
 
-    messages = [{"role": "user", "content": _build_user_message(question, selected_text, anchor_text)}]
+    messages = [{"role": "user", "content": _build_user_message(question, selected_text, anchor_text, reader_position)}]
 
     # Phase 1: Tool-calling loop (non-streaming)
     yield {"type": "status", "stage": "thinking"}
