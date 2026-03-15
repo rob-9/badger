@@ -200,14 +200,27 @@ TOOL_SCHEMAS = [
 def build_tool_executors(vector_store: VectorStore, voyage_client):
     """Build tool executor functions closed over shared resources."""
 
+    _embed_cache: dict[str, list[float]] = {}
+    _EMBED_CACHE_MAX = 500
+
     async def _embed_query(text: str) -> list[float]:
+        cache_key = text.lower().strip()
+        if cache_key in _embed_cache:
+            return _embed_cache[cache_key]
+
         result = await asyncio.to_thread(
             voyage_client.contextualized_embed,
             inputs=[[text]],
             model=config.VOYAGE_CONTEXT_MODEL,
             input_type="query",
         )
-        return result.results[0].embeddings[0]
+        embedding = result.results[0].embeddings[0]
+
+        if len(_embed_cache) >= _EMBED_CACHE_MAX:
+            _embed_cache.clear()
+        _embed_cache[cache_key] = embedding
+
+        return embedding
 
     async def _rerank_and_cutoff(
         chunks: list[dict], query: str, selected_text: str | None,
