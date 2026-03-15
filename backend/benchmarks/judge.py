@@ -5,15 +5,60 @@ Calls Haiku to score each response on four dimensions (0-3 scale):
   Relevance, Conciseness, Accuracy, Spoiler Safety.
 """
 
+import hashlib
 import json
 import logging
+import os
 import re
+from pathlib import Path
 
 from anthropic import Anthropic
 
 from boom import config
 
 logger = logging.getLogger(__name__)
+
+# --- Judge cache ---
+JUDGE_CACHE_PATH = Path(".data/benchmarks/judge_cache.json")
+_judge_cache: dict | None = None
+_cache_enabled: bool = True
+
+
+def set_cache_enabled(enabled: bool):
+    """Enable or disable the judge response cache."""
+    global _cache_enabled
+    _cache_enabled = enabled
+
+
+def _load_judge_cache() -> dict:
+    """Load the judge cache from disk (lazily, on first access)."""
+    global _judge_cache
+    if _judge_cache is not None:
+        return _judge_cache
+    if JUDGE_CACHE_PATH.exists():
+        try:
+            _judge_cache = json.loads(JUDGE_CACHE_PATH.read_text())
+            logger.info("Loaded judge cache: %d entries", len(_judge_cache))
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Failed to load judge cache, starting fresh")
+            _judge_cache = {}
+    else:
+        _judge_cache = {}
+    return _judge_cache
+
+
+def _save_judge_cache():
+    """Persist the judge cache to disk."""
+    if _judge_cache is None:
+        return
+    os.makedirs(JUDGE_CACHE_PATH.parent, exist_ok=True)
+    JUDGE_CACHE_PATH.write_text(json.dumps(_judge_cache, indent=2))
+
+
+def _judge_cache_key(case_id: str, response_text: str) -> str:
+    """Compute a stable cache key from case ID + first 500 chars of response."""
+    raw = case_id + response_text[:500]
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 RUBRIC = """\
 You are evaluating a reading-assistant AI that answers questions about a novel.
@@ -83,6 +128,15 @@ def score_response(
             "judge_tokens_out": int,
         }
     """
+    # Check cache first
+    case_id = case.get("id", "")
+    cache_key = _judge_cache_key(case_id, response)
+    if _cache_enabled:
+        cache = _load_judge_cache()
+        if cache_key in cache:
+            logger.info("  Judge cache hit: %s", case_id)
+            return cache[cache_key]
+
     # Truncate chunks for the judge prompt
     chunks_text = "\n\n".join(
         f"[Chunk {i+1}, label={c.get('label', '?')}] {c['text'][:500]}..."
@@ -146,7 +200,7 @@ def score_response(
                     "notes": f"PARSE ERROR: {raw[:100]}",
                 }
 
-    return {
+    result_dict = {
         "relevance": parsed.get("relevance", -1),
         "conciseness": parsed.get("conciseness", -1),
         "accuracy": parsed.get("accuracy", -1),
@@ -158,3 +212,12 @@ def score_response(
         "judge_tokens_in": tokens_in,
         "judge_tokens_out": tokens_out,
     }
+
+    # Write to cache
+    if _cache_enabled:
+        cache = _load_judge_cache()
+        cache[cache_key] = result_dict
+        _save_judge_cache()
+        logger.info("  Judge cache write: %s", case_id)
+
+    return result_dict
