@@ -64,6 +64,23 @@ def _adaptive_cutoff(chunks: list[dict]) -> list[dict]:
     return kept
 
 
+def _bookend_reorder(chunks: list[dict]) -> list[dict]:
+    """Reorder chunks to place highest-relevance at start and end (lost-in-the-middle mitigation).
+
+    Input: chunks sorted by descending score.
+    Output: [best, worst, ..., second-worst, second-best]
+    """
+    if len(chunks) <= 2:
+        return list(chunks)
+
+    best = chunks[0]
+    second_best = chunks[1]
+    middle = chunks[2:]  # already weakest-last; reverse so weakest-first
+    middle.reverse()
+
+    return [best] + middle + [second_best]
+
+
 # ---------------------------------------------------------------------------
 # Tool schemas (for Claude's `tools` parameter)
 # ---------------------------------------------------------------------------
@@ -233,6 +250,9 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
 
         if not past_only:
             return "No relevant passages found in content you've already read.", [], source_counter
+
+        # Bookend reorder: best at start, second-best at end (lost-in-the-middle)
+        past_only = _bookend_reorder(past_only)
 
         # Format with global source numbering (post-dedup, so numbers are stable)
         parts = []
