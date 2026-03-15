@@ -55,7 +55,8 @@ EVALUATE_PROMPT = """You are a quality evaluator for a reading assistant. Score 
 Return JSON only: {"relevance": N, "grounding": N}"""
 
 CITATION_INSTRUCTIONS = """
-Add inline [Source N] references so the reader can find the passage. Only cite sources you actually use. Do not list sources at the end."""
+Add inline [Source N] references so the reader can find the passage. Only cite sources you actually use. Do not list sources at the end.
+Cite a source once per paragraph at most — do not repeat the same [Source N] on every sentence. Place the citation after the key claim it supports."""
 
 AGENT_SYSTEM_PROMPT = f"""You are a reading companion helping a reader understand their book.
 
@@ -94,6 +95,7 @@ Answer from the reader's current position in the story. The reader's position is
 CITATIONS:
 Add inline [Source N] references matching the source numbers from tool results, so the reader can find the passage.
 Only cite sources you actually use. Do not list sources at the end.
+Cite a source once per paragraph at most — do not repeat the same [Source N] on every sentence. Place the citation after the key claim it supports.
 When quoting dialogue or a specific phrase, copy it exactly — do NOT paraphrase from memory or invent quotes."""
 
 
