@@ -119,6 +119,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
 
   const highlightRef = useRef<HTMLElement | null>(null)
   const currentCfiRef = useRef<string | null>(null)
+  const locationsReadyRef = useRef(false)
 
   const clearHighlight = useCallback(() => {
     if (highlightRef.current) {
@@ -341,6 +342,21 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
         const spineItems = (book.spine as any).spineItems || []
         const spineLength = spineItems.length
 
+        // Generate text-proportional locations in the background.
+        // Spine-index-based percentage skews badly when front-matter items
+        // (cover, title, copyright, TOC, maps…) each count as a full spine
+        // entry but contain almost no text.
+        book.locations.generate(1024).then(() => {
+          if (!mounted) return
+          locationsReadyRef.current = true
+          // Re-emit position with accurate percentage
+          const loc = renditionRef.current?.currentLocation?.() as any
+          if (loc?.start?.percentage != null) {
+            setPercentage(loc.start.percentage)
+            if (onLocationChange) onLocationChange(loc.start.percentage)
+          }
+        })
+
         // Load table of contents
         const navigation = await book.loaded.navigation
         if (navigation?.toc) {
@@ -353,7 +369,13 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
             localStorage.setItem(`epub-location-${fileName}`, location.start.cfi)
           }
 
-          if (spineLength > 0 && location.start?.index != null) {
+          // Prefer text-proportional percentage (from locations.generate),
+          // fall back to spine-based until locations are ready.
+          if (locationsReadyRef.current && location.start?.percentage != null) {
+            const pct = location.start.percentage
+            setPercentage(pct)
+            if (onLocationChange) onLocationChange(pct)
+          } else if (spineLength > 0 && location.start?.index != null) {
             const displayed = location.start.displayed || {}
             const page = displayed.page || 0
             const sectionTotal = displayed.total || 1
@@ -429,6 +451,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
 
     return () => {
       mounted = false
+      locationsReadyRef.current = false
       if (renditionRef.current) {
         renditionRef.current.destroy()
         renditionRef.current = null
