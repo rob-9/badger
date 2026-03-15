@@ -1,8 +1,9 @@
 export function formatDate(timestamp: number): string {
-  const date = new Date(timestamp)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const dateDay = new Date(timestamp)
+  dateDay.setHours(0, 0, 0, 0)
+  const diffDays = Math.round((today.getTime() - dateDay.getTime()) / (1000 * 60 * 60 * 24))
 
   if (diffDays === 0) {
     return 'Today'
@@ -11,6 +12,6 @@ export function formatDate(timestamp: number): string {
   } else if (diffDays < 7) {
     return `${diffDays} days ago`
   } else {
-    return date.toLocaleDateString()
+    return new Date(timestamp).toLocaleDateString()
   }
 }

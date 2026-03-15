@@ -2,23 +2,10 @@
 
 import pytest
 from badger.core.chunker import TextChunk
-from badger.core.vector_store import VectorEntry, VectorStore, SearchResult
+from badger.core.vector_store import VectorEntry, VectorStore
 
 
 # --- Sample data ---
-
-SAMPLE_BOOK_TEXT = (
-    "Chapter 1: The Beginning. "
-    "It was a dark and stormy night. The wind howled through the trees. "
-    "Alice sat by the window, reading a book about philosophy. "
-    "She wondered about the nature of consciousness. "
-    "The rain pattered against the glass. "
-    "Chapter 2: The Journey. "
-    "The next morning dawned bright and clear. Alice packed her bags. "
-    "She set out on the road heading north. The countryside was beautiful. "
-    "Fields of wheat stretched to the horizon. Birds sang in the hedgerows. "
-    "She walked for hours before reaching the village."
-)
 
 SAMPLE_STRUCTURED_CONTENT = {
     "chapters": [

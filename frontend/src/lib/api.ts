@@ -6,6 +6,17 @@
 
 import type { StructuredBook } from '@/lib/parseEpub'
 
+export interface Source {
+  text: string
+  full_text: string
+  score: number
+  chunk_index: number
+  source_number: number
+  label: string
+  chapter_title?: string
+  position_label?: string
+}
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 async function parseErrorResponse(response: Response, fallback: string): Promise<string> {
@@ -54,32 +65,6 @@ export async function indexBook(bookId: string, content: StructuredBook | string
   }
 }
 
-export async function queryBook(params: {
-  bookId?: string
-  question: string
-  selectedText?: string
-  useRag?: boolean
-  readerPosition?: number
-}): Promise<{ answer: string; sources?: any[] }> {
-  const response = await apiFetch(`${API_URL}/api/rag/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      book_id: params.bookId,
-      question: params.question,
-      selected_text: params.selectedText,
-      use_rag: params.useRag ?? !!params.bookId,
-      reader_position: params.readerPosition
-    })
-  })
-
-  if (!response.ok) {
-    throw new Error(await parseErrorResponse(response, 'Failed to query book'))
-  }
-
-  return response.json()
-}
-
 export function queryBookStream(
   params: {
     bookId?: string
@@ -91,7 +76,7 @@ export function queryBookStream(
   callbacks: {
     onStatus?: (stage: string) => void
     onToken?: (text: string) => void
-    onSources?: (sources: any[]) => void
+    onSources?: (sources: Source[]) => void
     onDone?: () => void
     onError?: (error: string) => void
   }
@@ -118,7 +103,8 @@ export function queryBookStream(
 
     if (!response.ok) throw new Error(await parseErrorResponse(response, 'Stream failed'))
 
-    const reader = response.body!.getReader()
+    if (!response.body) throw new Error('Response body is null')
+    const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
     let currentEvent = ''
@@ -192,14 +178,16 @@ export function queryBookStream(
   const run = async () => {
     try {
       await runStream()
-    } catch (error: any) {
-      if (error.name === 'AbortError') return
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'AbortError') return
       // Stream failed before any tokens arrived — fall back to non-streaming
       try {
         await fallbackToQuery()
-      } catch (fallbackError: any) {
-        if (fallbackError.name !== 'AbortError') {
+      } catch (fallbackError: unknown) {
+        if (fallbackError instanceof Error && fallbackError.name !== 'AbortError') {
           callbacks.onError?.(fallbackError.message || 'Request failed')
+        } else if (!(fallbackError instanceof Error)) {
+          callbacks.onError?.('Request failed')
         }
       }
     }

@@ -7,6 +7,7 @@ Simple API with three endpoints:
 3. POST /api/agent - Get AI assistance for selected text
 """
 
+import asyncio
 import io
 import json
 import logging
@@ -39,13 +40,12 @@ BOOK_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 MAX_BOOK_ID_LENGTH = 200
 
 
-def validate_book_id(book_id: str) -> str:
+def validate_book_id(book_id: str) -> None:
     """Validate book_id is safe for use in file paths."""
     if not book_id or len(book_id) > MAX_BOOK_ID_LENGTH:
         raise HTTPException(status_code=400, detail="Invalid book ID")
     if not BOOK_ID_PATTERN.match(book_id):
         raise HTTPException(status_code=400, detail="Invalid book ID")
-    return book_id
 
 
 @asynccontextmanager
@@ -335,10 +335,11 @@ Respond in JSON format with the following structure:
   "suggestions": ["string array"]
 }}"""
 
-        message = anthropic_client.messages.create(
+        message = await asyncio.to_thread(
+            anthropic_client.messages.create,
             model=config.CLAUDE_MODEL,
             max_tokens=1000,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
 
         content = message.content[0]

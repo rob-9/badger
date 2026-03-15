@@ -86,7 +86,7 @@ class RAGService:
             input_type=input_type,
         )
 
-        if not response.embeddings or len(response.embeddings) == 0:
+        if not response.embeddings:
             raise ValueError("No embedding returned from Voyage AI")
 
         embedding = response.embeddings[0]
@@ -385,6 +385,83 @@ class RAGService:
 
         logger.info("Structured indexing complete for %s", book_id)
 
+    def _log_query(
+        self,
+        book_id: str,
+        question: str,
+        selected_text: Optional[str],
+        reader_position: Optional[float],
+        reader_chunk_index: int,
+        total_chunks: int,
+        results: list,
+        system_prompt: str,
+        user_prompt: str,
+        answer: str,
+        response,
+    ) -> None:
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "book_id": book_id,
+            "reader_position": reader_position,
+            "reader_chunk_index": reader_chunk_index,
+            "total_chunks": total_chunks,
+            "question": question,
+            "selected_text": selected_text,
+            "retrieved_chunks": [
+                {
+                    "chunk_index": r.chunk.metadata["chunk_index"],
+                    "score": round(r.score, 4),
+                    "label": "PAST" if r.chunk.metadata["chunk_index"] <= reader_chunk_index else "AHEAD",
+                    "text": r.chunk.text,
+                }
+                for r in results
+            ],
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "response": {
+                "answer": answer,
+                "model": response.model,
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "stop_reason": response.stop_reason,
+            },
+        }
+        log_file = LOG_DIR / "queries.jsonl"
+        with open(log_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+        readable_log = LOG_DIR / "queries.log"
+        with open(readable_log, "a") as f:
+            f.write("\n" + "═" * 60 + "\n")
+            f.write(f"QUERY @ {log_entry['timestamp']}\n")
+            f.write("═" * 60 + "\n\n")
+
+            f.write(f"Book:     {book_id}\n")
+            f.write(f"Position: {(reader_position or 0):.1%} (chunk {reader_chunk_index}/{total_chunks})\n")
+            selected_display = (selected_text or "")[:80]
+            f.write(f"Selected: \"{selected_display}{'…' if selected_text and len(selected_text) > 80 else ''}\"\n")
+            f.write(f"Question: {question}\n\n")
+
+            f.write(f"── Retrieved Chunks ({len(results)}) " + "─" * 35 + "\n")
+            for i, r in enumerate(results):
+                idx = r.chunk.metadata["chunk_index"]
+                label = "PAST" if idx <= reader_chunk_index else "AHEAD"
+                f.write(f"  [{i+1}] score={r.score:.4f} | chunk {idx} | {label}\n")
+                f.write(f"      {r.chunk.text[:120]}…\n\n")
+
+            f.write("── LLM Input " + "─" * 46 + "\n")
+            f.write(f"  System: {system_prompt[:200]}…\n\n")
+            f.write(f"  User:   {user_prompt[:200]}…\n\n")
+
+            f.write("── LLM Output " + "─" * 45 + "\n")
+            f.write(f"  Model:  {response.model}\n")
+            f.write(f"  Tokens: {response.usage.input_tokens} in / {response.usage.output_tokens} out\n")
+            f.write(f"  Stop:   {response.stop_reason}\n\n")
+            f.write("  Answer:\n")
+            for line in answer.split("\n"):
+                f.write(f"    {line}\n")
+            f.write("\n" + "═" * 60 + "\n")
+
     async def query_book(
         self,
         book_id: str,
@@ -449,21 +526,24 @@ class RAGService:
                 ahead_chunks.append(result)
         logger.debug("Past chunks: %d, Ahead chunks: %d", len(past_chunks), len(ahead_chunks))
 
-        # Build context with labeled sections
+        # Build context with labeled sections and continuous source numbering
         context_parts = []
+        source_num = 1
         if past_chunks:
+            past_sources = []
+            for r in past_chunks:
+                past_sources.append(f"[Source {source_num}]\n{r.chunk.text}")
+                source_num += 1
             context_parts.append(
-                "[ALREADY READ]\n" + "\n\n---\n\n".join(
-                    f"[Source {i + 1}]\n{r.chunk.text}"
-                    for i, r in enumerate(past_chunks)
-                )
+                "[ALREADY READ]\n" + "\n\n---\n\n".join(past_sources)
             )
         if ahead_chunks:
+            ahead_sources = []
+            for r in ahead_chunks:
+                ahead_sources.append(f"[Source {source_num}]\n{r.chunk.text}")
+                source_num += 1
             context_parts.append(
-                "[COMING UP - guide only, do not spoil]\n" + "\n\n---\n\n".join(
-                    f"[Source {i + 1}]\n{r.chunk.text}"
-                    for i, r in enumerate(ahead_chunks)
-                )
+                "[COMING UP - guide only, do not spoil]\n" + "\n\n---\n\n".join(ahead_sources)
             )
         context = "\n\n===\n\n".join(context_parts)
 
@@ -496,82 +576,23 @@ Question: {question}"""
 Question: {question}"""
 
         # Generate answer with Claude
-        response = self.anthropic.messages.create(
+        response = await asyncio.to_thread(
+            self.anthropic.messages.create,
             model=config.CLAUDE_MODEL,
             max_tokens=400,
             system=system_prompt,
             messages=[
                 {"role": "user", "content": user_prompt}
-            ]
+            ],
         )
 
         answer = response.content[0].text if response.content else "Unable to generate response"
 
-        # Log full exchange to file
-        log_entry = {
-            "timestamp": datetime.now().isoformat(),
-            "book_id": book_id,
-            "reader_position": reader_position,
-            "reader_chunk_index": reader_chunk_index,
-            "total_chunks": total_chunks,
-            "question": question,
-            "selected_text": selected_text,
-            "retrieved_chunks": [
-                {
-                    "chunk_index": r.chunk.metadata["chunk_index"],
-                    "score": round(r.score, 4),
-                    "label": "PAST" if r.chunk.metadata["chunk_index"] <= reader_chunk_index else "AHEAD",
-                    "text": r.chunk.text,
-                }
-                for r in results
-            ],
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt,
-            "response": {
-                "answer": answer,
-                "model": response.model,
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
-                "stop_reason": response.stop_reason,
-            },
-        }
-        # Machine-readable log
-        log_file = LOG_DIR / "queries.jsonl"
-        with open(log_file, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
-
-        # Human-readable log
-        readable_log = LOG_DIR / "queries.log"
-        with open(readable_log, "a") as f:
-            f.write("\n" + "═" * 60 + "\n")
-            f.write(f"QUERY @ {log_entry['timestamp']}\n")
-            f.write("═" * 60 + "\n\n")
-
-            f.write(f"Book:     {book_id}\n")
-            f.write(f"Position: {(reader_position or 0):.1%} (chunk {reader_chunk_index}/{total_chunks})\n")
-            selected_display = (selected_text or "")[:80]
-            f.write(f"Selected: \"{selected_display}{'…' if selected_text and len(selected_text) > 80 else ''}\"\n")
-            f.write(f"Question: {question}\n\n")
-
-            f.write(f"── Retrieved Chunks ({len(results)}) " + "─" * 35 + "\n")
-            for i, r in enumerate(results):
-                idx = r.chunk.metadata["chunk_index"]
-                label = "PAST" if idx <= reader_chunk_index else "AHEAD"
-                f.write(f"  [{i+1}] score={r.score:.4f} | chunk {idx} | {label}\n")
-                f.write(f"      {r.chunk.text[:120]}…\n\n")
-
-            f.write("── LLM Input " + "─" * 46 + "\n")
-            f.write(f"  System: {system_prompt[:200]}…\n\n")
-            f.write(f"  User:   {user_prompt[:200]}…\n\n")
-
-            f.write("── LLM Output " + "─" * 45 + "\n")
-            f.write(f"  Model:  {response.model}\n")
-            f.write(f"  Tokens: {response.usage.input_tokens} in / {response.usage.output_tokens} out\n")
-            f.write(f"  Stop:   {response.stop_reason}\n\n")
-            f.write("  Answer:\n")
-            for line in answer.split("\n"):
-                f.write(f"    {line}\n")
-            f.write("\n" + "═" * 60 + "\n")
+        self._log_query(
+            book_id, question, selected_text, reader_position,
+            reader_chunk_index, total_chunks, results,
+            system_prompt, user_prompt, answer, response,
+        )
 
         logger.info("Query complete: %d in / %d out tokens", response.usage.input_tokens, response.usage.output_tokens)
 

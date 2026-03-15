@@ -487,6 +487,7 @@ def log_query(state: QAState):
 
 def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_client) -> dict:
     """Build and compile the QA LangGraph."""
+    from .agent import _adaptive_cutoff
 
     async def _embed_query(text: str) -> list[float]:
         """Embed a query using voyage-context-3."""
@@ -685,7 +686,11 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info('  Looking for selected text in chunks: "%s…"', selected[:60])
 
         center = await vector_store.find_chunk_containing(book_id, selected)
-        chunk_match = "exact" if (center > 0 or not selected) else "fallback"
+        if center is None:
+            center = 0
+            chunk_match = "fallback"
+        else:
+            chunk_match = "exact"
         start, end = max(0, center - 3), center + 3
 
         logger.info("  Chunk match: %s", chunk_match)
@@ -860,28 +865,6 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         }
 
     # --- Node: rerank ---
-
-    def _adaptive_cutoff(chunks: list[dict], floor: int = 3, ceiling: int = 10) -> list[dict]:
-        """Select chunks using score drop-off: keep chunks before the largest gap."""
-        if len(chunks) <= floor:
-            return chunks
-
-        scores = [c["score"] for c in chunks]
-        limit = min(len(scores) - 1, ceiling)
-
-        max_drop = 0
-        cut_at = limit  # default: keep up to ceiling
-
-        for i in range(floor - 1, limit):
-            drop = scores[i] - scores[i + 1]
-            if drop > max_drop:
-                max_drop = drop
-                cut_at = i + 1
-
-        kept = chunks[:cut_at]
-        logger.info("  Adaptive cutoff: %d → %d chunks (max drop=%.4f at position %d)",
-                     len(chunks), len(kept), max_drop, cut_at)
-        return kept
 
     async def rerank_node(state: QAState) -> dict:
         """

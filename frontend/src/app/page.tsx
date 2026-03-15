@@ -11,7 +11,7 @@ import ChatPanel, { type ChatMessage } from '@/components/ChatPanel'
 import Toast from '@/components/Toast'
 import { addBook, getBookData, getBookHistory, removeBook, type BookMetadata } from '@/lib/bookStorage'
 import { indexBook, isBookIndexed, queryBookStream } from '@/lib/api'
-import { extractCover, extractText, extractStructuredText } from '@/lib/parseEpub'
+import { extractCover, extractStructuredText } from '@/lib/parseEpub'
 
 const STATUS_LABELS: Record<string, string> = {
   thinking: 'Thinking...',
@@ -79,24 +79,30 @@ export default function Home() {
             setBookId(book.id)
             setDocument('loaded')
 
-            // Only extract text + index if not already indexed
-            const indexed = await isBookIndexed(book.id)
-            if (!indexed) {
-              setIsIndexing(true)
-              try {
-                const structured = await extractStructuredText(data)
-                await indexBook(book.id, structured)
-              } catch (error) {
-                console.error('[App] Failed to index book on restore:', error)
-              } finally {
-                setIsIndexing(false)
-              }
-            }
+            await indexBookIfNeeded(book.id, data)
           }
         }
       }
     })
   }, [])
+
+  const indexBookIfNeeded = async (bookId: string, data: ArrayBuffer) => {
+    const indexed = await isBookIndexed(bookId)
+    if (indexed) {
+      setIsIndexed(true)
+      return
+    }
+    setIsIndexing(true)
+    try {
+      const structured = await extractStructuredText(data)
+      await indexBook(bookId, structured)
+      setIsIndexed(true)
+    } catch (error) {
+      console.error('[App] Failed to index book:', error)
+    } finally {
+      setIsIndexing(false)
+    }
+  }
 
   const handleFileLoad = async (content: string, name: string, arrayBuffer?: ArrayBuffer) => {
     setDocument(content)
@@ -116,17 +122,11 @@ export default function Home() {
 
       // Index the book for RAG
       console.log('[App] Starting RAG indexing for book')
-      setIsIndexing(true)
       try {
-        const structured = await extractStructuredText(arrayBuffer)
-        await indexBook(id, structured)
+        await indexBookIfNeeded(id, arrayBuffer)
         console.log('[App] Book indexed successfully')
-        setIsIndexed(true)
       } catch (error) {
-        console.error('[App] Failed to index book:', error)
         setToast({ message: 'AI features unavailable. You can still read.', type: 'error' })
-      } finally {
-        setIsIndexing(false)
       }
     }
   }
@@ -152,27 +152,15 @@ export default function Home() {
       setIsLoadingBook(false)
       setLoadingBook(null)
 
-      // Only extract text + index if not already indexed
-      const indexed = await isBookIndexed(book.id)
-      if (!indexed) {
-        setIsIndexing(true)
-        try {
-          const structured = await extractStructuredText(data)
-          await indexBook(book.id, structured)
-        } catch (error) {
-          console.error('[App] Failed to index book on reopen:', error)
-        } finally {
-          setIsIndexing(false)
-        }
-      }
+      await indexBookIfNeeded(book.id, data)
     } else {
       setIsLoadingBook(false)
       setLoadingBook(null)
     }
   }, [])
 
-  const handleDeleteBook = useCallback(async (bookId: string) => {
-    await removeBook(bookId)
+  const handleDeleteBook = useCallback(async (targetBookId: string) => {
+    await removeBook(targetBookId)
     setHistory(await getBookHistory())
   }, [])
 
@@ -287,8 +275,8 @@ export default function Home() {
     setIsChatOpen(true)
     streamAbortRef.current?.()
 
-    const userMessage: ChatMessage = { id: Date.now().toString(), role: 'user', content: question, context }
-    const assistantId = (Date.now() + 1).toString()
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: question, context }
+    const assistantId = crypto.randomUUID()
     setChatMessages(prev => [...prev, userMessage])
 
     startStreaming({
@@ -303,8 +291,8 @@ export default function Home() {
   const handleChatMessage = useCallback((message: string) => {
     streamAbortRef.current?.()
 
-    const userMessage: ChatMessage = { id: Date.now().toString(), role: 'user', content: message }
-    const assistantId = (Date.now() + 1).toString()
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: message }
+    const assistantId = crypto.randomUUID()
     setChatMessages(prev => [...prev, userMessage])
 
     startStreaming({

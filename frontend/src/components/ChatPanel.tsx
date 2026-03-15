@@ -22,12 +22,6 @@ interface ChatPanelProps {
   onNavigateToSource?: (source: NonNullable<ChatMessage['sources']>[0]) => void
 }
 
-const LABEL_COLORS: Record<string, string> = {
-  PAST: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
-  AHEAD: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
-}
-const DEFAULT_LABEL_COLOR = 'bg-gray-100 dark:bg-gray-800/30 text-gray-600 dark:text-gray-400'
-
 function truncate(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text
   // Break at last space within maxLen to avoid cutting mid-word

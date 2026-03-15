@@ -14,6 +14,14 @@ interface Highlight {
   text: string
 }
 
+const colorMap: Record<string, string> = {
+  yellow: 'bg-yellow-200',
+  blue: 'bg-blue-200',
+  green: 'bg-green-200',
+  pink: 'bg-pink-200',
+  purple: 'bg-purple-200',
+}
+
 export default function TextHighlighter({ content }: TextHighlighterProps) {
   const [highlights, setHighlights] = useState<Highlight[]>([])
 
@@ -45,7 +53,7 @@ export default function TextHighlighter({ content }: TextHighlighterProps) {
       parts.push(
         <span
           key={highlight.id}
-          className={`highlight bg-${highlight.color}-200 cursor-pointer`}
+          className={`highlight ${colorMap[highlight.color] || 'bg-yellow-200'} cursor-pointer`}
           onClick={() => removeHighlight(highlight.id)}
           title="Click to remove highlight"
         >

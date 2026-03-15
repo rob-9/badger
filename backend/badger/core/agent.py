@@ -16,6 +16,7 @@ the frontend expects: status* → sources → token* → done.
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -88,8 +89,6 @@ def _extract_relevant_sentences(chunk_text: str, query: str, top_n: int = 5) -> 
     Returns top_n sentences in their original order to preserve narrative flow.
     Returns unchanged text if the chunk has fewer than top_n + 2 sentences.
     """
-    import re
-
     sentences = re.split(r'(?<=[.!?])\s+|\n+', chunk_text)
     sentences = [s.strip() for s in sentences if s.strip()]
 
@@ -197,6 +196,28 @@ TOOL_SCHEMAS = [
 # Tool executors
 # ---------------------------------------------------------------------------
 
+def _format_sources(
+    chunks: list[dict],
+    source_counter: int,
+    seen_chunk_indices: set[int],
+    include_chunk_id: bool = True,
+) -> tuple[str, int]:
+    parts = []
+    for c in chunks:
+        seen_chunk_indices.add(c["chunk_index"])
+        c["source_number"] = source_counter
+        chapter = c.get("chapter_title", "")
+        header = f"[Source {source_counter}]"
+        if chapter:
+            header += f" (Chapter: {chapter})"
+        if include_chunk_id:
+            header += f" [chunk {c['chunk_index']}]"
+        parts.append(f"{header}\n{c['text']}")
+        source_counter += 1
+    formatted = "\n\n---\n\n".join(parts)
+    return formatted, source_counter
+
+
 def build_tool_executors(vector_store: VectorStore, voyage_client):
     """Build tool executor functions closed over shared resources."""
 
@@ -301,23 +322,13 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         past_only = _bookend_reorder(past_only)
 
         # Format with global source numbering (post-dedup, so numbers are stable)
-        parts = []
-        for c in past_only:
-            seen_chunk_indices.add(c["chunk_index"])
-            c["source_number"] = source_counter
-            chapter = c.get("chapter_title", "")
-            header = f"[Source {source_counter}]"
-            if chapter:
-                header += f" (Chapter: {chapter})"
-            header += f" [chunk {c['chunk_index']}]"
-            display_text = (
-                _extract_relevant_sentences(c["text"], query)
-                if config.COMPRESS_CONTEXT else c["text"]
-            )
-            parts.append(f"{header}\n{display_text}")
-            source_counter += 1
-
-        formatted = "\n\n---\n\n".join(parts)
+        display_chunks = [
+            {**c, "text": _extract_relevant_sentences(c["text"], query) if config.COMPRESS_CONTEXT else c["text"]}
+            for c in past_only
+        ]
+        formatted, source_counter = _format_sources(display_chunks, source_counter, seen_chunk_indices)
+        for c, dc in zip(past_only, display_chunks):
+            c["source_number"] = dc["source_number"]
         return formatted, past_only, source_counter
 
     async def execute_get_surrounding_context(
@@ -347,19 +358,7 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         if not past_only:
             return "No surrounding context available in content you've already read.", [], source_counter
 
-        parts = []
-        for c in past_only:
-            seen_chunk_indices.add(c["chunk_index"])
-            c["source_number"] = source_counter
-            chapter = c.get("chapter_title", "")
-            header = f"[Source {source_counter}]"
-            if chapter:
-                header += f" (Chapter: {chapter})"
-            header += f" [chunk {c['chunk_index']}]"
-            parts.append(f"{header}\n{c['text']}")
-            source_counter += 1
-
-        formatted = "\n\n---\n\n".join(parts)
+        formatted, source_counter = _format_sources(past_only, source_counter, seen_chunk_indices)
         return formatted, past_only, source_counter
 
     async def execute_get_chapter_summary(
@@ -386,18 +385,7 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         if not past_only:
             return "No chapter summaries available for content you've already read.", [], source_counter
 
-        parts = []
-        for c in past_only:
-            seen_chunk_indices.add(c["chunk_index"])
-            c["source_number"] = source_counter
-            chapter = c.get("chapter_title", "")
-            header = f"[Source {source_counter}]"
-            if chapter:
-                header += f" (Chapter: {chapter})"
-            parts.append(f"{header}\n{c['text']}")
-            source_counter += 1
-
-        formatted = "\n\n---\n\n".join(parts)
+        formatted, source_counter = _format_sources(past_only, source_counter, seen_chunk_indices, include_chunk_id=False)
         return formatted, past_only, source_counter
 
     return {
@@ -423,12 +411,8 @@ async def _anchor_lookup(
     is formatted source blocks to prepend to the user message.
     """
     idx = await vector_store.find_chunk_containing(book_id, selected_text)
-    if idx == 0 and selected_text:
-        # find_chunk_containing returns 0 on miss AND when found at index 0.
-        # Double-check by verifying the text is actually in chunk 0.
-        entries = vector_store.entries.get(book_id)
-        if entries and selected_text[:50].lower() not in entries[0].chunk.text.lower():
-            return "", [], 1
+    if idx is None:
+        return "", [], 1
 
     total_chunks = await vector_store.get_total_chunks(book_id)
     start = max(0, idx - 1)
@@ -487,6 +471,32 @@ def _build_user_message(
     prefix = "Their question" if selected_text else "The reader's question"
     parts.append(f"{prefix}: {question}")
     return "\n\n".join(parts)
+
+
+async def _dispatch_tool(
+    executors: dict,
+    tool_name: str,
+    tool_input: dict,
+    book_id: str,
+    reader_position: float,
+    selected_text,
+    source_counter: int,
+    seen_chunk_indices: set[int],
+) -> tuple[str, list[dict], int]:
+    if tool_name == "search_book":
+        return await executors["search_book"](
+            tool_input, book_id, reader_position, selected_text, source_counter, seen_chunk_indices,
+        )
+    elif tool_name == "get_surrounding_context":
+        return await executors["get_surrounding_context"](
+            tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
+        )
+    elif tool_name == "get_chapter_summary":
+        return await executors["get_chapter_summary"](
+            tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
+        )
+    else:
+        return f"Unknown tool: {tool_name}", [], source_counter
 
 
 async def run_agent(
@@ -552,24 +562,13 @@ async def run_agent(
 
             logger.info("  Agent tool call [turn %d]: %s(%s)", turn + 1, tool_name, json.dumps(tool_input)[:200])
 
-            if tool_name == "search_book":
-                formatted, chunks, source_counter = await executors["search_book"](
-                    tool_input, book_id, reader_position, selected_text, source_counter, seen_chunk_indices,
-                )
-            elif tool_name == "get_surrounding_context":
-                formatted, chunks, source_counter = await executors["get_surrounding_context"](
-                    tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
-                )
-            elif tool_name == "get_chapter_summary":
-                formatted, chunks, source_counter = await executors["get_chapter_summary"](
-                    tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
-                )
-            else:
-                formatted = f"Unknown tool: {tool_name}"
-                chunks = []
+            formatted, chunks, source_counter = await _dispatch_tool(
+                executors, tool_name, tool_input, book_id, reader_position,
+                selected_text, source_counter, seen_chunk_indices,
+            )
 
             # Track consecutive empty results
-            if len(chunks) == 0:
+            if not chunks:
                 empty_streak += 1
             else:
                 empty_streak = 0
@@ -703,24 +702,13 @@ async def run_agent_streaming(
 
             logger.info("  Agent tool call [turn %d]: %s(%s)", turn + 1, tool_name, json.dumps(tool_input)[:200])
 
-            if tool_name == "search_book":
-                formatted, chunks, source_counter = await executors["search_book"](
-                    tool_input, book_id, reader_position, selected_text, source_counter, seen_chunk_indices,
-                )
-            elif tool_name == "get_surrounding_context":
-                formatted, chunks, source_counter = await executors["get_surrounding_context"](
-                    tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
-                )
-            elif tool_name == "get_chapter_summary":
-                formatted, chunks, source_counter = await executors["get_chapter_summary"](
-                    tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
-                )
-            else:
-                formatted = f"Unknown tool: {tool_name}"
-                chunks = []
+            formatted, chunks, source_counter = await _dispatch_tool(
+                executors, tool_name, tool_input, book_id, reader_position,
+                selected_text, source_counter, seen_chunk_indices,
+            )
 
             # Track consecutive empty results
-            if len(chunks) == 0:
+            if not chunks:
                 empty_streak += 1
             else:
                 empty_streak = 0

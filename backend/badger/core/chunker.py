@@ -33,6 +33,14 @@ DEFAULT_CHUNK_SIZE = 2000  # ~500 tokens
 DEFAULT_OVERLAP = 200      # ~50 tokens overlap
 
 
+def _find_sentence_break(text: str) -> int:
+    return max(
+        text.rfind('. '),
+        text.rfind('! '),
+        text.rfind('? '),
+    )
+
+
 def chunk_text(
     text: str,
     book_id: str,
@@ -75,24 +83,17 @@ def chunk_text(
             search_start = max(start_index + chunk_size - 200, start_index)
             search_text = cleaned_text[search_start:end_index]
 
-            # Find last sentence boundary
-            sentence_end = max(
-                search_text.rfind('. '),
-                search_text.rfind('! '),
-                search_text.rfind('? '),
-                search_text.rfind('\n')
-            )
-
+            sentence_end = max(_find_sentence_break(search_text), search_text.rfind('\n'))
             if sentence_end > 0:
                 end_index = search_start + sentence_end + 1
 
         # Extract chunk text
-        chunk_text = cleaned_text[start_index:end_index].strip()
+        chunk_content = cleaned_text[start_index:end_index].strip()
 
-        if len(chunk_text) > 0:
+        if len(chunk_content) > 0:
             chunks.append(TextChunk(
                 id=f"{book_id}-chunk-{chunk_index}",
-                text=chunk_text,
+                text=chunk_content,
                 metadata={
                     'book_id': book_id,
                     'chunk_index': chunk_index,
@@ -121,11 +122,7 @@ def _split_paragraph_at_sentences(text: str, chunk_size: int) -> list[str]:
         if end < len(text):
             search_start = max(start + chunk_size - 200, start)
             search_text = text[search_start:end]
-            sentence_end = max(
-                search_text.rfind('. '),
-                search_text.rfind('! '),
-                search_text.rfind('? '),
-            )
+            sentence_end = _find_sentence_break(search_text)
             if sentence_end > 0:
                 end = search_start + sentence_end + 1
         piece = text[start:end].strip()

@@ -26,14 +26,6 @@ export default function DocumentViewer({ content, fileName, onClose }: DocumentV
     }
   }, [selectedText])
 
-  const formatContent = (text: string) => {
-    return text.split('\n\n').map((paragraph, index) => (
-      <p key={index} className="mb-4 text-justify">
-        {paragraph}
-      </p>
-    ))
-  }
-
   return (
     <div className="min-h-screen bg-paper">
       {/* Header */}
