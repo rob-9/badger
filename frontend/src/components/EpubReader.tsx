@@ -11,7 +11,7 @@ export interface TextSelection {
 }
 
 export interface EpubReaderHandle {
-  navigateToText: (text: string) => Promise<boolean>
+  navigateToText: (text: string, chapterTitle?: string) => Promise<boolean>
   getCurrentCfi: () => string | null
   navigateToCfi: (cfi: string) => Promise<void>
 }
@@ -39,14 +39,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
     return 100
   })
 
-  // Initialize zoom from localStorage
-  const [zoom, setZoom] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('boom-zoom-level')
-      return saved ? parseFloat(saved) : 1
-    }
-    return 1
-  })
+  const [zoom, setZoom] = useState(1)
 
   const [isReady, setIsReady] = useState(false)
   const [toc, setToc] = useState<NavItem[]>([])
@@ -154,7 +147,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
       }
     },
 
-    navigateToText: async (text: string): Promise<boolean> => {
+    navigateToText: async (text: string, chapterTitle?: string): Promise<boolean> => {
       const book = bookRef.current
       const rendition = renditionRef.current
       if (!book || !rendition) return false
@@ -176,9 +169,41 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
         (k, i, arr) => k.length >= 15 && arr.indexOf(k) === i
       )
 
-      const spineItems = (book.spine as any).spineItems || []
+      const spineItems = (book.spine as any).spineItems || [] as any[]
 
-      for (const item of spineItems) {
+      // If we have a chapter title hint, reorder spine items to search
+      // the matching chapter first — avoids matching duplicate text in
+      // earlier sections (TOC, recaps, repeated phrases).
+      let orderedItems = spineItems
+      if (chapterTitle) {
+        const tocFlat: { label: string; href: string }[] = []
+        const flattenToc = (items: NavItem[]) => {
+          for (const item of items) {
+            tocFlat.push({ label: item.label.trim(), href: item.href.split('#')[0] })
+            if (item.subitems) flattenToc(item.subitems)
+          }
+        }
+        flattenToc(toc)
+
+        const normalizedTitle = chapterTitle.toLowerCase().trim()
+        const tocMatch = tocFlat.find(t => t.label.toLowerCase().trim() === normalizedTitle)
+        if (tocMatch) {
+          const hintIdx = spineItems.findIndex((item: any) =>
+            item.href === tocMatch.href ||
+            item.href.endsWith('/' + tocMatch.href) ||
+            tocMatch.href.endsWith('/' + item.href)
+          )
+          if (hintIdx >= 0) {
+            // Search from the matched chapter outward (hint first, then remaining)
+            orderedItems = [
+              ...spineItems.slice(hintIdx),
+              ...spineItems.slice(0, hintIdx),
+            ]
+          }
+        }
+      }
+
+      for (const item of orderedItems) {
         try {
           const section = book.spine.get(item.index)
           if (!section) continue
@@ -234,7 +259,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
       }
       return false
     },
-  }), [clearHighlight])
+  }), [clearHighlight, toc])
 
   // Initialize theme on mount
   useEffect(() => {
@@ -519,21 +544,16 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
 
   // Zoom handlers with persistence
   const handleZoomIn = useCallback(() => {
-    const newZoom = Math.min(2.0, zoom + 0.1)
-    setZoom(newZoom)
-    localStorage.setItem('boom-zoom-level', newZoom.toString())
-  }, [zoom])
+    setZoom(prev => Math.min(2.0, prev + 0.1))
+  }, [])
 
   const handleZoomOut = useCallback(() => {
-    const newZoom = Math.max(0.5, zoom - 0.1)
-    setZoom(newZoom)
-    localStorage.setItem('boom-zoom-level', newZoom.toString())
-  }, [zoom])
+    setZoom(prev => Math.max(1, prev - 0.1))
+  }, [])
 
   const handleZoomReset = useCallback(() => {
     setZoom(1)
     setPanOffset({ x: 0, y: 0 })
-    localStorage.setItem('boom-zoom-level', '1')
   }, [])
 
   // Pan handlers
@@ -568,21 +588,12 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
         e.preventDefault()
         ;(document.activeElement as HTMLElement)?.blur()
         handlePrev()
-      } else if ((e.metaKey || e.ctrlKey) && e.key === '+') {
-        e.preventDefault()
-        handleZoomIn()
-      } else if ((e.metaKey || e.ctrlKey) && e.key === '-') {
-        e.preventDefault()
-        handleZoomOut()
-      } else if ((e.metaKey || e.ctrlKey) && e.key === '0') {
-        e.preventDefault()
-        handleZoomReset()
       }
     }
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleNext, handlePrev, handleZoomIn, handleZoomOut, handleZoomReset])
+  }, [handleNext, handlePrev])
 
   // Handle clicks outside the book (on the reader background) to dismiss popup
   useEffect(() => {
@@ -731,29 +742,30 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
             height: 'calc(100vh - 160px)',
             maxWidth: 'calc((100vh - 160px) * 7 / 9)',
           }}>
-            {/* Back to reading — pill button, top-left of the book */}
-            {sourceNavCfi && (
-              <button
-                onClick={onBackToReading}
-                className="absolute -left-14 top-0 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/80 dark:bg-[#252525]/80 backdrop-blur-sm border border-gray-200/60 dark:border-[#3a3a3a]/60 shadow-sm hover:bg-white dark:hover:bg-[#2e2e2e] hover:shadow-md transition-all duration-150 animate-fade-in"
-                aria-label="Back to reading position"
-                title="Back to reading position"
-              >
-                <ArrowLeft className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
-                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Return</span>
-              </button>
-            )}
-            <div
-              ref={viewerRef}
-              className="w-full h-full bg-white dark:bg-[#1a1a1a] rounded-lg shadow-lg"
-              style={{
-                fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
-                transform: `scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px)`,
-                transformOrigin: 'center center',
-                opacity: isFlipping ? 0 : 1,
-                transition: isFlipping ? 'opacity 0.15s ease-out' : 'opacity 0.35s ease-in',
-              }}
-            />
+            <div className="relative w-full h-full">
+              {/* Back to reading — arrow button, top-left of the book */}
+              {sourceNavCfi && (
+                <button
+                  onClick={onBackToReading}
+                  className="absolute left-2 top-2 z-20 p-2 rounded-full bg-white/80 dark:bg-[#252525]/80 backdrop-blur-sm border border-gray-200/60 dark:border-[#3a3a3a]/60 shadow-sm hover:bg-white dark:hover:bg-[#2e2e2e] hover:shadow-md transition-all duration-150 animate-fade-in"
+                  aria-label="Back to reading position"
+                  title="Back to reading position"
+                >
+                  <ArrowLeft className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                </button>
+              )}
+              <div
+                ref={viewerRef}
+                className="w-full h-full bg-white dark:bg-[#1a1a1a] rounded-lg shadow-lg"
+                style={{
+                  fontFamily: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+                  transform: `scale(${zoom}) translate(${panOffset.x / zoom}px, ${panOffset.y / zoom}px)`,
+                  transformOrigin: 'center center',
+                  opacity: isFlipping ? 0 : 1,
+                  transition: isFlipping ? 'opacity 0.15s ease-out' : 'opacity 0.35s ease-in',
+                }}
+              />
+            </div>
           </div>
           {/* Progress indicator */}
           {isReady && (

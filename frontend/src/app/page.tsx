@@ -236,12 +236,22 @@ export default function Home() {
         })
       },
       onDone: () => {
-        // Attach sources to the completed assistant message
-        const sources = streamSourcesRef.current
-        if (sources?.length) {
+        // Filter sources to only those actually cited in the answer
+        const allSources = streamSourcesRef.current
+        if (allSources?.length) {
           setChatMessages(prev => {
             const last = prev[prev.length - 1]
             if (last?.id === assistantId) {
+              const cited = new Set<number>()
+              const citePattern = /\[(?:Source\s+)?\d+(?:,\s*(?:Source\s+)?\d+)*\]/g
+              let m: RegExpExecArray | null
+              while ((m = citePattern.exec(last.content)) !== null) {
+                const nums = m[0].match(/\d+/g)
+                if (nums) nums.forEach(n => cited.add(parseInt(n)))
+              }
+              const sources = cited.size > 0
+                ? allSources.filter(s => cited.has(s.source_number))
+                : allSources
               return [...prev.slice(0, -1), { ...last, sources }]
             }
             return prev
@@ -308,7 +318,7 @@ export default function Home() {
     if (currentCfi) {
       setSavedReadingCfi(currentCfi)
     }
-    await epubReaderRef.current?.navigateToText(source.full_text)
+    await epubReaderRef.current?.navigateToText(source.full_text, source.chapter_title)
   }, [pendingSourceNav])
 
   const handleBackToReading = useCallback(() => {

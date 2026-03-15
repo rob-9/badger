@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Send, BookOpen, Loader2, ChevronDown } from 'lucide-react'
+import { X, Send, BookOpen, Loader2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -22,17 +22,8 @@ interface ChatPanelProps {
   onNavigateToSource?: (source: NonNullable<ChatMessage['sources']>[0]) => void
 }
 
-function truncate(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text
-  // Break at last space within maxLen to avoid cutting mid-word
-  const truncated = text.slice(0, maxLen)
-  const lastSpace = truncated.lastIndexOf(' ')
-  return (lastSpace > maxLen * 0.6 ? truncated.slice(0, lastSpace) : truncated) + '...'
-}
-
 export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose, onSourceClick, pendingSourceNav, onConfirmSourceNav, onCancelSourceNav }: ChatPanelProps) {
   const [input, setInput] = useState('')
-  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const sourceCardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -41,22 +32,6 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
-
-  const toggleSources = useCallback((msgId: string) => {
-    setExpandedSources(prev => {
-      const next = new Set(prev)
-      if (next.has(msgId)) {
-        next.delete(msgId)
-      } else {
-        next.add(msgId)
-        setTimeout(() => {
-          const el = document.getElementById(`sources-${msgId}`)
-          el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        }, 50)
-      }
-      return next
-    })
-  }, [])
 
   const doSubmit = useCallback(() => {
     if (!input.trim() || isLoading) return
@@ -270,48 +245,6 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
 
                 </div>
 
-                {/* Collapsible sources section */}
-                {msg.sources && msg.sources.length > 0 && (
-                  <div className="mt-1.5">
-                    <button
-                      onClick={() => toggleSources(msg.id)}
-                      aria-expanded={expandedSources.has(msg.id)}
-                      className="flex items-center gap-1 text-[0.7rem] text-gray-400 dark:text-[#666] hover:text-gray-600 dark:hover:text-[#999] transition-colors"
-                    >
-                      <ChevronDown className={`w-3 h-3 transition-transform ${expandedSources.has(msg.id) ? 'rotate-180' : ''}`} />
-                      {msg.sources.length} source{msg.sources.length !== 1 ? 's' : ''}
-                    </button>
-                    {expandedSources.has(msg.id) && (
-                      <div id={`sources-${msg.id}`} className="mt-1.5 space-y-1.5 border-t border-gray-100 dark:border-[#333] pt-2">
-                        {msg.sources.map((source) => (
-                          <button
-                            key={source.source_number}
-                            onClick={() => onSourceClick?.(source)}
-                            className="flex gap-2 text-xs w-full text-left hover:bg-gray-50 dark:hover:bg-[#2a2a2a] rounded-md p-1 -m-1 transition-colors cursor-pointer"
-                          >
-                            <span className="inline-flex items-center justify-center min-w-[1.2em] h-[1.2em] text-[0.65rem] font-semibold bg-accent/20 text-accent-foreground rounded-full px-1 leading-none flex-shrink-0 mt-0.5">
-                              {source.source_number}
-                            </span>
-                            <div className="min-w-0">
-                              {source.chapter_title ? (
-                                <>
-                                  <span className="text-gray-700 dark:text-[#aaa] font-medium block">{source.chapter_title}</span>
-                                  <span className="text-gray-400 dark:text-[#666] line-clamp-1 text-[0.65rem]">
-                                    {truncate(source.text, 80)}
-                                  </span>
-                                </>
-                              ) : (
-                                <span className="text-gray-500 dark:text-[#888] line-clamp-2">
-                                  {truncate(source.text, 120)}
-                                </span>
-                              )}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             )}
           </div>
