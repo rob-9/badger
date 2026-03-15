@@ -88,12 +88,12 @@ def chunk_text(
                 end_index = search_start + sentence_end + 1
 
         # Extract chunk text
-        chunk_text = cleaned_text[start_index:end_index].strip()
+        chunk_content = cleaned_text[start_index:end_index].strip()
 
-        if len(chunk_text) > 0:
+        if len(chunk_content) > 0:
             chunks.append(TextChunk(
                 id=f"{book_id}-chunk-{chunk_index}",
-                text=chunk_text,
+                text=chunk_content,
                 metadata={
                     'book_id': book_id,
                     'chunk_index': chunk_index,

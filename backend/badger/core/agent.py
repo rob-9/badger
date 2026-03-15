@@ -411,12 +411,8 @@ async def _anchor_lookup(
     is formatted source blocks to prepend to the user message.
     """
     idx = await vector_store.find_chunk_containing(book_id, selected_text)
-    if idx == 0 and selected_text:
-        # find_chunk_containing returns 0 on miss AND when found at index 0.
-        # Double-check by verifying the text is actually in chunk 0.
-        entries = vector_store.entries.get(book_id)
-        if entries and selected_text[:50].lower() not in entries[0].chunk.text.lower():
-            return "", [], 1
+    if idx is None:
+        return "", [], 1
 
     total_chunks = await vector_store.get_total_chunks(book_id)
     start = max(0, idx - 1)
@@ -568,7 +564,7 @@ async def run_agent(
             )
 
             # Track consecutive empty results
-            if len(chunks) == 0:
+            if not chunks:
                 empty_streak += 1
             else:
                 empty_streak = 0
@@ -708,7 +704,7 @@ async def run_agent_streaming(
             )
 
             # Track consecutive empty results
-            if len(chunks) == 0:
+            if not chunks:
                 empty_streak += 1
             else:
                 empty_streak = 0

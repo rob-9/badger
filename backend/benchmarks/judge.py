@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 JUDGE_CACHE_PATH = Path(".data/benchmarks/judge_cache.json")
 _judge_cache: dict | None = None
 _cache_enabled: bool = True
+_judge_cache_dirty: bool = False
 
 
 def set_cache_enabled(enabled: bool):
@@ -48,19 +49,26 @@ def _load_judge_cache() -> dict:
 
 
 def _save_judge_cache():
-    """Persist the judge cache to disk."""
-    if _judge_cache is None:
+    """Persist the judge cache to disk if it has been modified."""
+    global _judge_cache_dirty
+    if _judge_cache is None or not _judge_cache_dirty:
         return
     os.makedirs(JUDGE_CACHE_PATH.parent, exist_ok=True)
     JUDGE_CACHE_PATH.write_text(json.dumps(_judge_cache, indent=2))
+    _judge_cache_dirty = False
+
+
+def flush_judge_cache():
+    """Flush the judge cache to disk. Call at end of a benchmark run."""
+    _save_judge_cache()
 
 
 _RUBRIC_VERSION = "v2"  # Bump when RUBRIC text changes
 
 
 def _judge_cache_key(case_id: str, response_text: str) -> str:
-    """Compute a stable cache key from rubric version + case ID + response prefix."""
-    raw = _RUBRIC_VERSION + case_id + response_text[:500]
+    """Compute a stable cache key from rubric version + case ID + full response."""
+    raw = _RUBRIC_VERSION + "\x00" + case_id + "\x00" + response_text
     return hashlib.sha256(raw.encode()).hexdigest()
 
 RUBRIC = """\
@@ -214,11 +222,16 @@ def score_response(
         "judge_tokens_out": tokens_out,
     }
 
-    # Write to cache
-    if _cache_enabled:
+    # Write to cache (skip parse errors — they are transient)
+    has_parse_error = any(
+        result_dict.get(d) == -1
+        for d in ("relevance", "conciseness", "accuracy", "spoiler_safety")
+    )
+    if _cache_enabled and not has_parse_error:
+        global _judge_cache_dirty
         cache = _load_judge_cache()
         cache[cache_key] = result_dict
-        _save_judge_cache()
+        _judge_cache_dirty = True
         logger.info("  Judge cache write: %s", case_id)
 
     return result_dict

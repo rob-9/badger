@@ -526,21 +526,24 @@ class RAGService:
                 ahead_chunks.append(result)
         logger.debug("Past chunks: %d, Ahead chunks: %d", len(past_chunks), len(ahead_chunks))
 
-        # Build context with labeled sections
+        # Build context with labeled sections and continuous source numbering
         context_parts = []
+        source_num = 1
         if past_chunks:
+            past_sources = []
+            for r in past_chunks:
+                past_sources.append(f"[Source {source_num}]\n{r.chunk.text}")
+                source_num += 1
             context_parts.append(
-                "[ALREADY READ]\n" + "\n\n---\n\n".join(
-                    f"[Source {i + 1}]\n{r.chunk.text}"
-                    for i, r in enumerate(past_chunks)
-                )
+                "[ALREADY READ]\n" + "\n\n---\n\n".join(past_sources)
             )
         if ahead_chunks:
+            ahead_sources = []
+            for r in ahead_chunks:
+                ahead_sources.append(f"[Source {source_num}]\n{r.chunk.text}")
+                source_num += 1
             context_parts.append(
-                "[COMING UP - guide only, do not spoil]\n" + "\n\n---\n\n".join(
-                    f"[Source {i + 1}]\n{r.chunk.text}"
-                    for i, r in enumerate(ahead_chunks)
-                )
+                "[COMING UP - guide only, do not spoil]\n" + "\n\n---\n\n".join(ahead_sources)
             )
         context = "\n\n===\n\n".join(context_parts)
 
@@ -573,13 +576,14 @@ Question: {question}"""
 Question: {question}"""
 
         # Generate answer with Claude
-        response = self.anthropic.messages.create(
+        response = await asyncio.to_thread(
+            self.anthropic.messages.create,
             model=config.CLAUDE_MODEL,
             max_tokens=400,
             system=system_prompt,
             messages=[
                 {"role": "user", "content": user_prompt}
-            ]
+            ],
         )
 
         answer = response.content[0].text if response.content else "Unable to generate response"

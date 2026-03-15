@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import statistics
 import sys
 import time
 from datetime import datetime
@@ -36,13 +37,14 @@ from anthropic import Anthropic, AsyncAnthropic
 from badger import config
 from badger.core.rag import RAGService
 from badger.core.agent import build_agent
-from benchmarks.judge import score_response, set_cache_enabled
+from benchmarks.judge import score_response, set_cache_enabled, flush_judge_cache
 
 logger = logging.getLogger(__name__)
 
 # --- Embedding cache for benchmarks ---
 EMBEDDING_CACHE_PATH = Path(".data/benchmarks/embedding_cache.json")
 _embedding_cache: dict = {}
+_embedding_cache_dirty: bool = False
 
 
 def _load_embedding_cache():
@@ -60,14 +62,18 @@ def _load_embedding_cache():
 
 
 def _save_embedding_cache():
-    """Persist the embedding cache to disk."""
+    """Persist the embedding cache to disk if it has been modified."""
+    global _embedding_cache_dirty
+    if not _embedding_cache_dirty:
+        return
     os.makedirs(EMBEDDING_CACHE_PATH.parent, exist_ok=True)
     EMBEDDING_CACHE_PATH.write_text(json.dumps(_embedding_cache))
+    _embedding_cache_dirty = False
 
 
 def _embedding_cache_key(query_text: str, model_name: str) -> str:
     """Compute a stable cache key for an embedding query."""
-    raw = query_text + model_name
+    raw = query_text + "\x00" + model_name
     return hashlib.sha256(raw.encode()).hexdigest()
 
 CASES_FILE = Path(__file__).parent / "test_cases.json"
@@ -623,8 +629,6 @@ async def main():
         logger.info("Judge cache disabled (--no-cache)")
     else:
         set_cache_enabled(True)
-
-    if not args.no_cache:
         _load_embedding_cache()
 
     config.validate_keys()
@@ -657,11 +661,12 @@ async def main():
 
         # Cache query embeddings after successful call
         if not args.no_cache and input_type == "query" and len(inputs) == 1:
+            global _embedding_cache_dirty
             query_text = inputs[0][0] if isinstance(inputs[0], list) else inputs[0]
             cache_key = _embedding_cache_key(query_text, model)
             embedding = result.results[0].embeddings[0]
             _embedding_cache[cache_key] = embedding
-            _save_embedding_cache()
+            _embedding_cache_dirty = True
             logger.info("  Embedding cache write: %s", query_text[:60])
 
         return result
@@ -764,7 +769,7 @@ async def main():
                 await asyncio.sleep(args.delay)
 
         # Generate report
-        report = generate_report(suite_name, run_id, results, output_dir)
+        generate_report(suite_name, run_id, results, output_dir)
 
         print()
         print(f"Output:")
@@ -798,12 +803,15 @@ async def main():
         times = [r.get("elapsed", 0) for r in results]
         total_time = sum(times)
         max_time = max(times) if times else 0
-        median_time = sorted(times)[len(times) // 2] if times else 0
+        median_time = statistics.median(times) if times else 0
         print(f"  {clean}/{len(results)} cases clean, {total_issues} issues total")
         print(f"  Timing: {total_time:.0f}s total, {median_time:.1f}s median, {max_time:.1f}s max")
         print()
 
     finally:
+        # Flush caches to disk once at end of run
+        _save_embedding_cache()
+        flush_judge_cache()
         if detail_file:
             detail_file.close()
         sys.stdout = tee.stdout

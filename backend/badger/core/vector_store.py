@@ -337,15 +337,17 @@ class VectorStore:
             text = text.replace(src, dst)
         return re.sub(r'\s+', ' ', text).strip()
 
-    async def find_chunk_containing(self, book_id: str, text: str) -> int:
+    async def find_chunk_containing(self, book_id: str, text: str) -> Optional[int]:
         """Find the chunk index that contains the given text.
 
         Uses progressive matching: tries full text, then 200, 100, 50 char
         snippets with normalized quotes and case-insensitive comparison.
+
+        Returns the chunk index if found, or None if no match.
         """
         entries = await self._ensure_loaded(book_id)
         if not entries or not text:
-            return 0
+            return None
 
         normalized = self._normalize_quotes(text)
 
@@ -369,7 +371,7 @@ class VectorStore:
                 if snippet in chunk_text:
                     return chunk_index
 
-        return 0
+        return None
 
     async def keyword_search(self, book_id: str, text: str) -> list[SearchResult]:
         """Find all chunks that contain the given text (case-insensitive)."""

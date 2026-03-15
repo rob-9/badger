@@ -29,23 +29,6 @@ export default function AgentAssistant({ selectedText, context, onClose }: Agent
       setResponse(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
-      // For now, provide a mock response for demonstration
-      setResponse({
-        explanation: `This text appears to discuss "${selectedText}". This could be a complex concept that might benefit from additional context or clarification.`,
-        definitions: [
-          `${selectedText}: A key concept in this context that may require deeper understanding.`
-        ],
-        relatedConcepts: [
-          'Background knowledge',
-          'Context analysis',
-          'Conceptual framework'
-        ],
-        suggestions: [
-          'Consider researching the broader context of this topic',
-          'Look for examples or case studies related to this concept',
-          'Connect this idea to other concepts in the document'
-        ]
-      })
     } finally {
       setIsLoading(false)
     }

@@ -8,6 +8,22 @@ startup to fail fast if required API keys are missing.
 import os
 import sys
 
+
+def _bool_env(name: str, default: str) -> bool:
+    """Parse a boolean environment variable, accepting 'true', '1', 'yes' (case-insensitive)."""
+    return os.getenv(name, default).lower() in ("true", "1", "yes")
+
+
+def _int_env(name: str, default: str) -> int:
+    """Parse an integer environment variable with a clear error on invalid values."""
+    raw = os.getenv(name, default)
+    try:
+        return int(raw)
+    except ValueError:
+        print(f"ERROR: {name} must be an integer, got: {raw}", file=sys.stderr)
+        sys.exit(1)
+
+
 # API keys (required)
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 VOYAGE_API_KEY: str = os.getenv("VOYAGE_API_KEY", "")
@@ -20,12 +36,12 @@ VOYAGE_CONTEXT_MODEL: str = os.getenv("VOYAGE_CONTEXT_MODEL", "voyage-context-3"
 VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")
 
 # Feature flags
-RERANK_ENABLED: bool = os.getenv("RERANK_ENABLED", "true").lower() in ("true", "1", "yes")
-COMPRESS_CONTEXT: bool = os.getenv("COMPRESS_CONTEXT", "true").lower() == "true"
+RERANK_ENABLED: bool = _bool_env("RERANK_ENABLED", "true")
+COMPRESS_CONTEXT: bool = _bool_env("COMPRESS_CONTEXT", "true")
 
 # Adaptive cutoff bounds
-CUTOFF_FLOOR: int = int(os.getenv("CUTOFF_FLOOR", "3"))
-CUTOFF_CEILING: int = int(os.getenv("CUTOFF_CEILING", "7"))
+CUTOFF_FLOOR: int = _int_env("CUTOFF_FLOOR", "3")
+CUTOFF_CEILING: int = _int_env("CUTOFF_CEILING", "7")
 
 # RAG pipeline
 _relevance_raw = os.getenv("RELEVANCE_THRESHOLD", "0.3")
@@ -45,7 +61,7 @@ EPUB_IMPORT_ALLOWED_DIRS: list[str] = [
 ]
 
 # Maximum input size for book indexing (bytes)
-MAX_INDEX_INPUT_SIZE: int = int(os.getenv("MAX_INDEX_INPUT_SIZE", str(10 * 1024 * 1024)))  # 10MB default
+MAX_INDEX_INPUT_SIZE: int = _int_env("MAX_INDEX_INPUT_SIZE", str(10 * 1024 * 1024))  # 10MB default
 
 
 def validate_keys() -> None:

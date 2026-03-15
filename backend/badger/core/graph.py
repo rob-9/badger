@@ -686,7 +686,11 @@ def build_qa_graph(anthropic: Anthropic, vector_store: VectorStore, voyage_clien
         logger.info('  Looking for selected text in chunks: "%s…"', selected[:60])
 
         center = await vector_store.find_chunk_containing(book_id, selected)
-        chunk_match = "exact" if (center > 0 or not selected) else "fallback"
+        if center is None:
+            center = 0
+            chunk_match = "fallback"
+        else:
+            chunk_match = "exact"
         start, end = max(0, center - 3), center + 3
 
         logger.info("  Chunk match: %s", chunk_match)

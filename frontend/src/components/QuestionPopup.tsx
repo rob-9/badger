@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Send, Sparkles } from 'lucide-react'
 
 interface QuestionPopupProps {
@@ -27,12 +27,12 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
 
   const shouldClose = isClosing || externalClosing
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setIsClosing(true)
     setTimeout(() => {
       onClose()
     }, 150) // Match animation duration
-  }
+  }, [onClose])
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -44,7 +44,7 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [handleClose])
 
   // Close on outside click
   useEffect(() => {
@@ -55,33 +55,31 @@ export default function QuestionPopup({ selectedText, position, pageRect, onSubm
     }
     setTimeout(() => document.addEventListener('mousedown', handleClick), 0)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
+  }, [handleClose])
+
+  const doSubmit = useCallback((text: string) => {
+    setIsClosing(true)
+    setTimeout(() => {
+      onSubmit(text, selectedText)
+    }, 150)
+  }, [onSubmit, selectedText])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (question.trim()) {
-      setIsClosing(true)
-      setTimeout(() => {
-        onSubmit(question.trim(), selectedText)
-      }, 150)
+      doSubmit(question.trim())
     }
   }
 
   const handleQuickPrompt = (prompt: string) => {
-    setIsClosing(true)
-    setTimeout(() => {
-      onSubmit(prompt, selectedText)
-    }, 150)
+    doSubmit(prompt)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (question.trim()) {
-        setIsClosing(true)
-        setTimeout(() => {
-          onSubmit(question.trim(), selectedText)
-        }, 150)
+        doSubmit(question.trim())
       }
     }
   }

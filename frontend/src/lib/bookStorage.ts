@@ -54,7 +54,7 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
 }
 
 // Get all book metadata, sorted by lastReadAt descending
@@ -105,26 +105,6 @@ export async function getBookData(id: string): Promise<ArrayBuffer | null> {
     const request = tx.objectStore(FILES_STORE).get(id)
     request.onerror = () => reject(request.error)
     request.onsuccess = () => resolve(request.result?.data || null)
-  })
-}
-
-// Update last read time and position
-export async function updateReadProgress(id: string, position?: string): Promise<void> {
-  const db = await openDB()
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(META_STORE, 'readwrite')
-    const store = tx.objectStore(META_STORE)
-    const request = store.get(id)
-    request.onerror = () => reject(request.error)
-    request.onsuccess = () => {
-      const book = request.result as BookMetadata | undefined
-      if (book) {
-        book.lastReadAt = Date.now()
-        if (position) book.lastPosition = position
-        store.put(book)
-      }
-    }
-    tx.oncomplete = () => resolve()
   })
 }
 

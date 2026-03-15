@@ -185,13 +185,13 @@ class TestVectorStore:
     async def test_find_chunk_containing_not_found(self, vector_store, sample_entries):
         await vector_store.add_book("book1", sample_entries)
         idx = await vector_store.find_chunk_containing("book1", "nonexistent text xyz")
-        assert idx == 0  # fallback to 0
+        assert idx is None
 
     @pytest.mark.asyncio
     async def test_find_chunk_containing_empty_text(self, vector_store, sample_entries):
         await vector_store.add_book("book1", sample_entries)
         idx = await vector_store.find_chunk_containing("book1", "")
-        assert idx == 0
+        assert idx is None
 
     @pytest.mark.asyncio
     async def test_keyword_search(self, vector_store, sample_entries):
