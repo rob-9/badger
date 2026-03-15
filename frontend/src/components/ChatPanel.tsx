@@ -62,11 +62,21 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
     e.target.style.overflowY = newHeight >= 128 ? 'auto' : 'hidden'
   }, [])
 
+  const sourceSectionRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
   const toggleSources = useCallback((msgId: string) => {
     setExpandedSources(prev => {
       const next = new Set(prev)
-      if (next.has(msgId)) next.delete(msgId)
-      else next.add(msgId)
+      const expanding = !next.has(msgId)
+      if (expanding) next.add(msgId)
+      else next.delete(msgId)
+      // Auto-scroll to show sources when expanding
+      if (expanding) {
+        setTimeout(() => {
+          const el = sourceSectionRefs.current.get(msgId)
+          el?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+        }, 120)
+      }
       return next
     })
   }, [])
@@ -198,7 +208,10 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
                       </button>
 
                       {expandedSources.has(msg.id) && (
-                        <div className="mt-1.5 space-y-1">
+                        <div
+                          className="mt-1.5 space-y-1"
+                          ref={el => { if (el) sourceSectionRefs.current.set(msg.id, el); else sourceSectionRefs.current.delete(msg.id) }}
+                        >
                           {msg.sources.map((source, i) => {
                             const key = `${msg.id}-${source.source_number}`
                             const isActive = activeSource?.msgId === msg.id && activeSource?.num === source.source_number
@@ -224,7 +237,7 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
                                       </span>
                                     )}
                                     <p className="text-[0.72rem] leading-relaxed text-gray-500 dark:text-[#888] italic">
-                                      &ldquo;{source.text}&rdquo;
+                                      {renderHighlightedSource(source.full_text, source.text)}
                                     </p>
                                     <button
                                       onClick={() => onNavigateToSource?.(source)}
@@ -269,7 +282,7 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
+      {/* Input — pinned at bottom */}
       <div className="px-4 py-4 border-t border-gray-100 dark:border-[#2a2a2a] bg-white dark:bg-[#1e1e1e]">
         <form onSubmit={handleSubmit}>
           <div className="flex items-end gap-2 bg-gray-50 dark:bg-[#252525] rounded-2xl px-4 py-3 border border-gray-200 dark:border-[#333] focus-within:border-accent/50 dark:focus-within:border-accent/40 focus-within:ring-2 focus-within:ring-accent/20 dark:focus-within:ring-accent/10 transition-all">
@@ -297,5 +310,46 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
         </form>
       </div>
     </div>
+  )
+}
+
+/** Show surrounding context from full_text with the snippet highlighted */
+function renderHighlightedSource(fullText: string, snippet: string) {
+  // Backend truncates text to 200 chars + "..." — strip trailing ellipsis for matching
+  const cleanSnippet = snippet.replace(/\.{3}$/, '').replace(/…$/, '')
+  const idx = fullText.indexOf(cleanSnippet)
+  if (idx === -1) {
+    return <>&ldquo;{snippet}&rdquo;</>
+  }
+
+  // Show ~120 chars before and after the snippet for context
+  const pad = 120
+  const start = Math.max(0, idx - pad)
+  const end = Math.min(fullText.length, idx + cleanSnippet.length + pad)
+
+  // Trim to word boundaries
+  let before = fullText.slice(start, idx)
+  if (start > 0) {
+    const sp = before.indexOf(' ')
+    if (sp !== -1) before = before.slice(sp + 1)
+  }
+
+  let after = fullText.slice(idx + cleanSnippet.length, end)
+  if (end < fullText.length) {
+    const sp = after.lastIndexOf(' ')
+    if (sp !== -1) after = after.slice(0, sp)
+  }
+
+  const prefix = start > 0 ? '…' : ''
+  const suffix = end < fullText.length ? '…' : ''
+
+  return (
+    <>
+      &ldquo;{prefix}{before}
+      <mark className="bg-accent/20 dark:bg-accent/15 rounded-sm px-0.5 not-italic text-gray-700 dark:text-[#d4d4d4]">
+        {cleanSnippet}
+      </mark>
+      {after}{suffix}&rdquo;
+    </>
   )
 }

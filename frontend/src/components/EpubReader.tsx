@@ -244,11 +244,13 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
           }
 
           await new Promise(resolve => setTimeout(resolve, 200))
-          // Highlight while still invisible
+          // Highlight the full source passage in the rendered page
           const iframe = viewerRef.current?.querySelector('iframe')
           const doc = iframe?.contentDocument
           if (doc) {
-            highlightRef.current = highlightTextInDoc(doc, matchedKey)
+            // Use up to 400 chars of the source for a substantial highlight
+            const highlightKey = normalized.slice(0, 400)
+            highlightRef.current = highlightTextInDoc(doc, highlightKey)
           }
           // Fade in with content already in position
           setIsFlipping(false)
@@ -337,8 +339,9 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
             }
             style.textContent = (dark
               ? '*, html, body { background: #1a1a1a !important; color: #d4d4d4 !important; border-color: #333 !important; }'
-              : '*, html, body { background: #ffffff !important; color: #1a1a1a !important; }')
-              + '\n.badger-source-highlight { background: rgba(217, 149, 95, 0.3); border-radius: 2px; }'
+                + '\n.badger-source-highlight { background: rgba(217, 149, 95, 0.45) !important; color: #fff !important; border-radius: 3px; padding: 1px 0; }'
+              : '*, html, body { background: #ffffff !important; color: #1a1a1a !important; }'
+                + '\n.badger-source-highlight { background: rgba(217, 149, 95, 0.35) !important; border-radius: 3px; padding: 1px 0; }')
           }
           // Apply current font size to new pages
           if (renditionRef.current) {
@@ -743,11 +746,10 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
             maxWidth: 'calc((100vh - 160px) * 7 / 9)',
           }}>
             <div className="relative w-full h-full">
-              {/* Back to reading — arrow button, top-left of the book */}
               {sourceNavCfi && (
                 <button
                   onClick={onBackToReading}
-                  className="absolute left-2 top-2 z-20 p-2 rounded-full bg-white/80 dark:bg-[#252525]/80 backdrop-blur-sm border border-gray-200/60 dark:border-[#3a3a3a]/60 shadow-sm hover:bg-white dark:hover:bg-[#2e2e2e] hover:shadow-md transition-all duration-150 animate-fade-in"
+                  className="absolute left-2 top-2 z-20 p-2 rounded-full bg-white/80 dark:bg-[#252525]/80 backdrop-blur-sm shadow-sm hover:bg-white dark:hover:bg-[#2e2e2e] hover:shadow-md transition-all duration-150 animate-fade-in"
                   aria-label="Back to reading position"
                   title="Back to reading position"
                 >
@@ -796,6 +798,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
             </button>
           </>
         )}
+
       </div>
 
     </div>
@@ -804,10 +807,12 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
 
 export default EpubReader
 
-// Helper: find and highlight text in an iframe document
+// Helper: find and highlight text in an iframe document.
+// Handles multi-node text by wrapping each text node segment individually.
 function highlightTextInDoc(doc: Document, searchKey: string): HTMLElement | null {
   // Try progressively shorter keys to handle text node boundaries
-  for (const len of [searchKey.length, 40, 25]) {
+  const lengths = [searchKey.length, Math.min(200, searchKey.length), 80, 40]
+  for (const len of lengths) {
     let key = searchKey.slice(0, Math.min(len, searchKey.length))
     if (len < searchKey.length) {
       const lastSpace = key.lastIndexOf(' ')
@@ -815,24 +820,52 @@ function highlightTextInDoc(doc: Document, searchKey: string): HTMLElement | nul
     }
     if (key.length < 10) continue
 
+    // Collect all text nodes in order
+    const textNodes: Text[] = []
     const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
-    let node: Text | null
-    while ((node = walker.nextNode() as Text | null)) {
-      const content = node.textContent || ''
-      const idx = content.indexOf(key)
-      if (idx !== -1) {
+    let n: Text | null
+    while ((n = walker.nextNode() as Text | null)) textNodes.push(n)
+
+    // Concatenate text to search across node boundaries
+    const fullText = textNodes.map(t => t.textContent || '').join('')
+    const idx = fullText.indexOf(key)
+    if (idx === -1) continue
+
+    // Map the match range back to individual text nodes
+    let firstMark: HTMLElement | null = null
+    let charPos = 0
+    const matchEnd = idx + key.length
+
+    for (const textNode of textNodes) {
+      const nodeLen = (textNode.textContent || '').length
+      const nodeStart = charPos
+      const nodeEnd = charPos + nodeLen
+
+      // Check if this node overlaps with the match range
+      if (nodeEnd > idx && nodeStart < matchEnd) {
+        const highlightStart = Math.max(0, idx - nodeStart)
+        const highlightEnd = Math.min(nodeLen, matchEnd - nodeStart)
+
         try {
           const range = doc.createRange()
-          range.setStart(node, idx)
-          range.setEnd(node, idx + key.length)
+          range.setStart(textNode, highlightStart)
+          range.setEnd(textNode, highlightEnd)
           const mark = doc.createElement('mark')
           mark.className = 'badger-source-highlight'
           range.surroundContents(mark)
-          return mark
+          if (!firstMark) firstMark = mark
         } catch {
-          continue
+          // surroundContents can fail on complex DOM — skip this node
         }
       }
+
+      charPos = nodeEnd
+      if (charPos >= matchEnd) break
+    }
+
+    if (firstMark) {
+      firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return firstMark
     }
   }
   return null
