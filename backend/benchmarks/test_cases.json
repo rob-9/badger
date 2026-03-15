@@ -28,7 +28,7 @@
       "selected_text": "Evie's",
       "question": "who is evie?",
       "question_type": "lookup",
-      "expected_gist": "Eveline Brooke, a former Babel student who died. She was known for her brilliance and is referenced by other characters.",
+      "expected_gist": "Eveline Brooke, a former Babel student who died under suspicious or violent circumstances. At 45% the reader already knows she was murdered (this is PAST content). She had a dedicated desk on the eighth floor and was known for her brilliance.",
       "tags": ["baseline-easy", "lookup"]
     },
     {
