@@ -1,0 +1,129 @@
+"""
+Question Generation: grounded in the reader's mental model.
+
+Generates questions that a simulated reader would naturally ask at
+each stop point, with type distribution evolving based on position.
+"""
+
+import asyncio
+import json
+import logging
+from dataclasses import dataclass
+
+from badger.core.graph import strip_code_fences
+from reader.prompts import QUESTION_GEN_PROMPT
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GeneratedQuestion:
+    question: str
+    selected_text: str             # exact substring from the section
+    question_type: str             # vocabulary | context | lookup | analysis
+    motivation: str                # why the reader would ask this
+    expected_answer: str           # sketch of good answer (for judge)
+    triggered_by: str | None       # "theory:3" or "unresolved:1" or None (organic)
+
+
+def _type_guidance(position: float) -> str:
+    """Return question type guidance string based on reader position."""
+    if position < 0.2:
+        return (
+            "- HEAVY on vocabulary and lookup questions (new world, new terms, unfamiliar names)\n"
+            "- LIGHT on context questions\n"
+            "- MINIMAL analysis (too early for deep thematic questions)"
+        )
+    elif position < 0.7:
+        return (
+            "- MIXED types: vocabulary still relevant but decreasing\n"
+            "- INCREASING analysis and theory-testing questions\n"
+            "- Context questions about relationships and motivations\n"
+            "- Try to include at least one question that tests a specific theory from your mental model"
+        )
+    else:
+        return (
+            "- HEAVY on analysis, connection-making, and thematic synthesis\n"
+            "- Questions about how themes have evolved\n"
+            "- Theory-testing and theory-confirming questions\n"
+            "- LIGHT on vocabulary (you should know the world by now)"
+        )
+
+
+async def generate_questions(
+    client,
+    recent_text: str,
+    mind,
+    journal_context: str,
+    position: float,
+    label: str,
+    max_questions: int,
+    model: str,
+) -> list[GeneratedQuestion]:
+    """Generate reader questions using QUESTION_GEN_PROMPT.
+
+    Validates that selected_text is a verbatim substring of recent_text.
+    """
+    prompt = QUESTION_GEN_PROMPT.format(
+        position=position,
+        label=label,
+        recent_text=recent_text[:12000],
+        mind_context=mind.to_prompt_context(),
+        journal_context=journal_context[:4000],
+        max_questions=max_questions,
+        type_guidance=_type_guidance(position),
+    )
+
+    response = await asyncio.to_thread(
+        client.messages.create,
+        model=model,
+        max_tokens=4096,
+        system="You are a reader generating questions. Return only a valid JSON array.",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = response.content[0].text.strip()
+    logger.info("  Question gen: %d chars, %d/%d tokens",
+                len(raw), response.usage.input_tokens, response.usage.output_tokens)
+
+    try:
+        parsed = json.loads(strip_code_fences(raw))
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("  Failed to parse question gen JSON")
+        return []
+
+    if not isinstance(parsed, list):
+        logger.warning("  Question gen returned non-list: %s", type(parsed))
+        return []
+
+    questions: list[GeneratedQuestion] = []
+    for q in parsed[:max_questions]:
+        if not isinstance(q, dict):
+            continue
+
+        question_text = q.get("question", "").strip()
+        selected = q.get("selected_text", "").strip()
+        qtype = q.get("question_type", "context").strip()
+
+        if not question_text:
+            continue
+
+        # Validate question_type
+        if qtype not in ("vocabulary", "context", "lookup", "analysis"):
+            qtype = "context"
+
+        # Validate selected_text is a verbatim substring of recent_text
+        if selected and selected not in recent_text:
+            logger.warning("  Hallucinated selected_text for question: %s", question_text[:60])
+            selected = ""
+
+        questions.append(GeneratedQuestion(
+            question=question_text,
+            selected_text=selected,
+            question_type=qtype,
+            motivation=q.get("motivation", ""),
+            expected_answer=q.get("expected_answer", ""),
+            triggered_by=q.get("triggered_by"),
+        ))
+
+    logger.info("  Generated %d valid questions (of %d returned)", len(questions), len(parsed))
+    return questions
