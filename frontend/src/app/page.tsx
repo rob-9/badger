@@ -319,7 +319,7 @@ export default function Home() {
       setSavedReadingCfi(currentCfi)
     }
     await epubReaderRef.current?.navigateToText(source.full_text, source.chapter_title)
-  }, [pendingSourceNav])
+  }, [])
 
   const handleBackToReading = useCallback(() => {
     if (savedReadingCfi) {

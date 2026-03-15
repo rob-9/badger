@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Send, BookOpen, Loader2 } from 'lucide-react'
+import { X, Send, BookOpen, Loader2, ChevronDown, ArrowUpRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -22,8 +22,10 @@ interface ChatPanelProps {
   onNavigateToSource?: (source: NonNullable<ChatMessage['sources']>[0]) => void
 }
 
-export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose, onSourceClick, pendingSourceNav, onConfirmSourceNav, onCancelSourceNav }: ChatPanelProps) {
+export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose, onNavigateToSource }: ChatPanelProps) {
   const [input, setInput] = useState('')
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
+  const [activeSource, setActiveSource] = useState<{ msgId: string; num: number } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const sourceCardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -257,11 +259,10 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
                   )}
 
                 </div>
-
-              </div>
-            )}
-          </div>
-        ))}
+              )}
+            </div>
+          )
+        })}
 
         {/* Pre-streaming spinner (before first token) */}
         {isLoading && !isStreaming && (
