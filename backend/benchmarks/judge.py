@@ -55,9 +55,12 @@ def _save_judge_cache():
     JUDGE_CACHE_PATH.write_text(json.dumps(_judge_cache, indent=2))
 
 
+_RUBRIC_VERSION = "v2"  # Bump when RUBRIC text changes
+
+
 def _judge_cache_key(case_id: str, response_text: str) -> str:
-    """Compute a stable cache key from case ID + first 500 chars of response."""
-    raw = case_id + response_text[:500]
+    """Compute a stable cache key from rubric version + case ID + response prefix."""
+    raw = _RUBRIC_VERSION + case_id + response_text[:500]
     return hashlib.sha256(raw.encode()).hexdigest()
 
 RUBRIC = """\
@@ -137,11 +140,8 @@ def score_response(
             logger.info("  Judge cache hit: %s", case_id)
             return cache[cache_key]
 
-    # Truncate chunks for the judge prompt
     chunks_text = "\n\n".join(
-        f"[Chunk {i+1}, label={c.get('label', '?')}] {c['text'][:500]}..."
-        if len(c.get("text", "")) > 500
-        else f"[Chunk {i+1}, label={c.get('label', '?')}] {c['text']}"
+        f"[Chunk {i+1}, label={c.get('label', '?')}] {c['text']}"
         for i, c in enumerate(chunks)
     ) or "(no chunks retrieved)"
 
