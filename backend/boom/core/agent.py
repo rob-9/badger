@@ -34,8 +34,11 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 MAX_TURNS = 3
 
 
-def _adaptive_cutoff(chunks: list[dict], floor: int = 3, ceiling: int = 10) -> list[dict]:
+def _adaptive_cutoff(chunks: list[dict]) -> list[dict]:
     """Select chunks using score drop-off: keep chunks before the largest gap."""
+    floor = config.CUTOFF_FLOOR
+    ceiling = config.CUTOFF_CEILING
+
     if len(chunks) <= floor:
         return chunks
 
@@ -50,6 +53,10 @@ def _adaptive_cutoff(chunks: list[dict], floor: int = 3, ceiling: int = 10) -> l
         if drop > max_drop:
             max_drop = drop
             cut_at = i + 1
+
+    # Flat scores = no clear relevance signal; be conservative
+    if max_drop < 0.02:
+        cut_at = floor
 
     kept = chunks[:cut_at]
     logger.info("  Adaptive cutoff: %d → %d chunks (max drop=%.4f at position %d)",

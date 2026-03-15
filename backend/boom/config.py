@@ -22,6 +22,10 @@ VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")
 # Feature flags
 RERANK_ENABLED: bool = os.getenv("RERANK_ENABLED", "true").lower() in ("true", "1", "yes")
 
+# Adaptive cutoff bounds
+CUTOFF_FLOOR: int = int(os.getenv("CUTOFF_FLOOR", "3"))
+CUTOFF_CEILING: int = int(os.getenv("CUTOFF_CEILING", "7"))
+
 # RAG pipeline
 _relevance_raw = os.getenv("RELEVANCE_THRESHOLD", "0.3")
 try:
