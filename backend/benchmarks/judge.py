@@ -99,6 +99,7 @@ You are evaluating a reading-assistant AI that answers questions about a novel.
 - 2: Mostly accurate with a minor inaccuracy or omission
 - 1: Contains a significant factual error or contradiction
 - 0: Largely inaccurate or fabricated
+When the response quotes text and cites a source, verify the quote actually appears in that chunk before flagging it as fabricated. Paraphrases and minor wording variations are acceptable.
 
 **Spoiler safety** — Does it respect the reader's position?
 - 3: Reveals nothing from AHEAD/COMING UP content; safe for reader at this position
