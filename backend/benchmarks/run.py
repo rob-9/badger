@@ -11,12 +11,16 @@ Usage:
     python -m benchmarks.run --ids vocab-canton        # specific cases
     python -m benchmarks.run --dry-run                 # validate only
     python -m benchmarks.run --delay 3                 # seconds between cases
+    python -m benchmarks.run --skip-judge              # skip LLM judge scoring
+    python -m benchmarks.run --no-cache                # bypass all caches
 """
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -32,9 +36,39 @@ from anthropic import Anthropic, AsyncAnthropic
 from boom import config
 from boom.core.rag import RAGService
 from boom.core.agent import build_agent
-from benchmarks.judge import score_response
+from benchmarks.judge import score_response, set_cache_enabled
 
 logger = logging.getLogger(__name__)
+
+# --- Embedding cache for benchmarks ---
+EMBEDDING_CACHE_PATH = Path(".data/benchmarks/embedding_cache.json")
+_embedding_cache: dict = {}
+
+
+def _load_embedding_cache():
+    """Load the embedding cache from disk."""
+    global _embedding_cache
+    if EMBEDDING_CACHE_PATH.exists():
+        try:
+            _embedding_cache = json.loads(EMBEDDING_CACHE_PATH.read_text())
+            logger.info("Loaded embedding cache: %d entries", len(_embedding_cache))
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Failed to load embedding cache, starting fresh")
+            _embedding_cache = {}
+    else:
+        _embedding_cache = {}
+
+
+def _save_embedding_cache():
+    """Persist the embedding cache to disk."""
+    os.makedirs(EMBEDDING_CACHE_PATH.parent, exist_ok=True)
+    EMBEDDING_CACHE_PATH.write_text(json.dumps(_embedding_cache))
+
+
+def _embedding_cache_key(query_text: str, model_name: str) -> str:
+    """Compute a stable cache key for an embedding query."""
+    raw = query_text + model_name
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 CASES_FILE = Path(__file__).parent / "test_cases.json"
 OUTPUT_DIR = Path(".data/benchmarks")
@@ -454,10 +488,25 @@ def generate_report(
 # === Main Runner ===
 
 
+SKIP_JUDGE_SCORES = {
+    "relevance": -1,
+    "conciseness": -1,
+    "accuracy": -1,
+    "spoiler_safety": -1,
+    "notes": "judge skipped",
+    "relevance_note": "",
+    "accuracy_note": "",
+    "spoiler_note": "",
+    "judge_tokens_in": 0,
+    "judge_tokens_out": 0,
+}
+
+
 async def run_case(
     case: dict,
     agent: dict,
     anthropic: Anthropic,
+    skip_judge: bool = False,
 ) -> dict:
     """Run a single test case through the agent and score it."""
     case_id = case["id"]
@@ -483,23 +532,26 @@ async def run_case(
 
     retrieval_metrics = compute_retrieval_metrics(state)
 
-    # Convert sources to chunks format for the judge
-    judge_chunks = [
-        {
-            "text": s.get("full_text", s.get("text", "")),
-            "label": s.get("label", "?"),
-            "chunk_index": s.get("chunk_index"),
-            "score": s.get("score", 0),
-        }
-        for s in result["sources"]
-    ]
+    if skip_judge:
+        judge_scores = dict(SKIP_JUDGE_SCORES)
+    else:
+        # Convert sources to chunks format for the judge
+        judge_chunks = [
+            {
+                "text": s.get("full_text", s.get("text", "")),
+                "label": s.get("label", "?"),
+                "chunk_index": s.get("chunk_index"),
+                "score": s.get("score", 0),
+            }
+            for s in result["sources"]
+        ]
 
-    judge_scores = score_response(
-        anthropic=anthropic,
-        case=case,
-        chunks=judge_chunks,
-        response=result["answer"],
-    )
+        judge_scores = score_response(
+            anthropic=anthropic,
+            case=case,
+            chunks=judge_chunks,
+            response=result["answer"],
+        )
 
     diagnostics = compute_diagnostics(case, state, judge_scores, retrieval_metrics)
 
@@ -540,6 +592,8 @@ async def main():
     parser.add_argument("--dry-run", action="store_true", help="Validate only, don't run")
     parser.add_argument("--delay", type=float, default=1, help="Seconds between cases")
     parser.add_argument("--cases-file", type=str, help="Path to test cases JSON")
+    parser.add_argument("--skip-judge", action="store_true", help="Skip LLM judge scoring (returns -1 for all scores)")
+    parser.add_argument("--no-cache", action="store_true", help="Bypass judge and embedding caches")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -563,17 +617,62 @@ async def main():
 
     print(f"Suite: {suite_name} — {len(cases)} case(s)")
 
+    # Configure caches
+    if args.no_cache:
+        set_cache_enabled(False)
+        logger.info("Judge cache disabled (--no-cache)")
+    else:
+        set_cache_enabled(True)
+
+    if not args.no_cache:
+        _load_embedding_cache()
+
     config.validate_keys()
     rag_service = RAGService(storage_dir=config.VECTOR_STORAGE_DIR)
     anthropic = Anthropic(api_key=config.ANTHROPIC_API_KEY)
     async_anthropic = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
     vector_store = rag_service.vector_store
 
+    # Wrap voyage client's contextualized_embed with caching
+    voyage_client = rag_service.voyage
+    _original_contextualized_embed = voyage_client.contextualized_embed
+
+    def _cached_contextualized_embed(inputs, model, input_type="query", **kwargs):
+        """Caching wrapper around voyage contextualized_embed for query embeddings."""
+        if not args.no_cache and input_type == "query" and len(inputs) == 1:
+            query_text = inputs[0][0] if isinstance(inputs[0], list) else inputs[0]
+            cache_key = _embedding_cache_key(query_text, model)
+            if cache_key in _embedding_cache:
+                logger.info("  Embedding cache hit: %s", query_text[:60])
+                # Return a mock result matching the Voyage response structure
+                class _CachedResult:
+                    def __init__(self, embedding):
+                        self.embeddings = [embedding]
+                class _CachedResponse:
+                    def __init__(self, embedding):
+                        self.results = [_CachedResult(embedding)]
+                return _CachedResponse(_embedding_cache[cache_key])
+
+        result = _original_contextualized_embed(inputs=inputs, model=model, input_type=input_type, **kwargs)
+
+        # Cache query embeddings after successful call
+        if not args.no_cache and input_type == "query" and len(inputs) == 1:
+            query_text = inputs[0][0] if isinstance(inputs[0], list) else inputs[0]
+            cache_key = _embedding_cache_key(query_text, model)
+            embedding = result.results[0].embeddings[0]
+            _embedding_cache[cache_key] = embedding
+            _save_embedding_cache()
+            logger.info("  Embedding cache write: %s", query_text[:60])
+
+        return result
+
+    voyage_client.contextualized_embed = _cached_contextualized_embed
+
     agent = build_agent(
         anthropic=anthropic,
         async_anthropic=async_anthropic,
         vector_store=vector_store,
-        voyage_client=rag_service.voyage,
+        voyage_client=voyage_client,
     )
 
     book_ids = {c["book_id"] for c in cases}
@@ -624,7 +723,7 @@ async def main():
             print(f"[{i+1}/{len(cases)}] {case['id']}...", end=" ", flush=True)
             t0 = time.time()
 
-            result = await run_case(case, agent, anthropic)
+            result = await run_case(case, agent, anthropic, skip_judge=args.skip_judge)
             elapsed = time.time() - t0
             result["elapsed"] = round(elapsed, 1)
             results.append(result)
