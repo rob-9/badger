@@ -110,13 +110,12 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
   const onTextSelectRef = useRef(onTextSelect)
   useEffect(() => { onTextSelectRef.current = onTextSelect }, [onTextSelect])
 
-  const highlightRef = useRef<HTMLElement | null>(null)
+  const highlightMarksRef = useRef<HTMLElement[]>([])
   const currentCfiRef = useRef<string | null>(null)
   const locationsReadyRef = useRef(false)
 
   const clearHighlight = useCallback(() => {
-    if (highlightRef.current) {
-      const mark = highlightRef.current
+    for (const mark of highlightMarksRef.current) {
       const parent = mark.parentNode
       if (parent) {
         while (mark.firstChild) {
@@ -125,8 +124,8 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
         parent.removeChild(mark)
         parent.normalize()
       }
-      highlightRef.current = null
     }
+    highlightMarksRef.current = []
   }, [])
 
   // Clear highlight when sourceNavCfi is cleared (user clicked back or navigated away)
@@ -250,7 +249,7 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
           if (doc) {
             // Use up to 400 chars of the source for a substantial highlight
             const highlightKey = normalized.slice(0, 400)
-            highlightRef.current = highlightTextInDoc(doc, highlightKey)
+            highlightMarksRef.current = highlightTextInDoc(doc, highlightKey)
           }
           // Fade in with content already in position
           setIsFlipping(false)
@@ -339,9 +338,11 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
             }
             style.textContent = (dark
               ? '*, html, body { background: #1a1a1a !important; color: #d4d4d4 !important; border-color: #333 !important; }'
-                + '\n.badger-source-highlight { background: rgba(217, 149, 95, 0.45) !important; color: #fff !important; border-radius: 3px; padding: 1px 0; }'
+                + '\n@keyframes highlight-reveal { from { background-size: 0% 100%; } to { background-size: 100% 100%; } }'
+                + '\n.badger-source-highlight { background: linear-gradient(to right, rgba(217,149,95,0.2) 100%, transparent 100%) !important; background-size: 100% 100%; background-repeat: no-repeat; animation: highlight-reveal 600ms ease-out both; color: #fff !important; border-radius: 3px; padding: 1px 2px; text-decoration: underline; text-decoration-color: rgba(217,149,95,0.35); text-underline-offset: 2px; }'
               : '*, html, body { background: #ffffff !important; color: #1a1a1a !important; }'
-                + '\n.badger-source-highlight { background: rgba(217, 149, 95, 0.35) !important; border-radius: 3px; padding: 1px 0; }')
+                + '\n@keyframes highlight-reveal { from { background-size: 0% 100%; } to { background-size: 100% 100%; } }'
+                + '\n.badger-source-highlight { background: linear-gradient(to right, rgba(217,149,95,0.18) 100%, transparent 100%) !important; background-size: 100% 100%; background-repeat: no-repeat; animation: highlight-reveal 600ms ease-out both; border-radius: 3px; padding: 1px 2px; text-decoration: underline; text-decoration-color: rgba(217,149,95,0.3); text-underline-offset: 2px; }')
           }
           // Apply current font size to new pages
           if (renditionRef.current) {
@@ -809,7 +810,7 @@ export default EpubReader
 
 // Helper: find and highlight text in an iframe document.
 // Handles multi-node text by wrapping each text node segment individually.
-function highlightTextInDoc(doc: Document, searchKey: string): HTMLElement | null {
+function highlightTextInDoc(doc: Document, searchKey: string): HTMLElement[] {
   // Try progressively shorter keys to handle text node boundaries
   const lengths = [searchKey.length, Math.min(200, searchKey.length), 80, 40]
   for (const len of lengths) {
@@ -832,7 +833,7 @@ function highlightTextInDoc(doc: Document, searchKey: string): HTMLElement | nul
     if (idx === -1) continue
 
     // Map the match range back to individual text nodes
-    let firstMark: HTMLElement | null = null
+    const marks: HTMLElement[] = []
     let charPos = 0
     const matchEnd = idx + key.length
 
@@ -853,7 +854,7 @@ function highlightTextInDoc(doc: Document, searchKey: string): HTMLElement | nul
           const mark = doc.createElement('mark')
           mark.className = 'badger-source-highlight'
           range.surroundContents(mark)
-          if (!firstMark) firstMark = mark
+          marks.push(mark)
         } catch {
           // surroundContents can fail on complex DOM — skip this node
         }
@@ -863,12 +864,12 @@ function highlightTextInDoc(doc: Document, searchKey: string): HTMLElement | nul
       if (charPos >= matchEnd) break
     }
 
-    if (firstMark) {
-      firstMark.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      return firstMark
+    if (marks.length > 0) {
+      marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return marks
     }
   }
-  return null
+  return []
 }
 
 // Ready badge — shows briefly after indexing completes
