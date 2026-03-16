@@ -19,7 +19,7 @@ from badger.core.vector_store import VectorStore
 from benchmarks.judge import score_response
 from benchmarks.run import compute_retrieval_metrics
 
-from reader.mind import ReaderMind, MindUpdate, react_to_section, update_mind
+from reader.mind import ReaderMind, MindUpdate, TokenUsage, react_to_section, update_mind
 from reader.journal import JournalEntry, format_journal_context, render_journal_markdown
 from reader.questions import generate_questions
 from reader.reflection import reflect_on_response
@@ -272,6 +272,7 @@ async def run_readthrough(
 
     # Tracking for report
     all_results: list[dict] = []
+    all_tokens: list[TokenUsage] = []
     total_questions = 0
     total_follow_ups = 0
     stop_summaries: list[dict] = []
@@ -288,6 +289,7 @@ async def run_readthrough(
             continue
 
         t0 = time.time()
+        stop_tokens: list[TokenUsage] = []
         print(f"[{stop_idx + 1}/{len(stops)}] {stop.label} ({stop.position:.0%})...", end=" ", flush=True)
 
         try:
@@ -301,15 +303,17 @@ async def run_readthrough(
                 continue
 
             # 2. REACT — chain-of-thought reaction
-            reaction = await react_to_section(
+            reaction, react_usage = await react_to_section(
                 anthropic, recent_text, mind, stop.position, stop.label, cfg.think_model,
             )
+            stop_tokens.append(react_usage)
             await asyncio.sleep(cfg.delay)
 
             # 3. THINK — structured mind update
-            mind_update = await update_mind(
+            mind_update, think_usage = await update_mind(
                 anthropic, recent_text, reaction, mind, stop.position, stop.label, cfg.think_model,
             )
+            stop_tokens.append(think_usage)
             mind.apply_update(mind_update, stop.position)
             await asyncio.sleep(cfg.delay)
 
@@ -325,10 +329,11 @@ async def run_readthrough(
 
             # 5. ASK — generate questions
             journal_ctx = format_journal_context(journal)
-            questions = await generate_questions(
+            questions, qgen_usage = await generate_questions(
                 anthropic, recent_text, mind, journal_ctx,
                 stop.position, stop.label, cfg.max_questions_per_stop, cfg.question_model,
             )
+            stop_tokens.append(qgen_usage)
             await asyncio.sleep(cfg.delay)
 
         except Exception as e:
@@ -411,9 +416,10 @@ async def run_readthrough(
                 stop_scores.append(avg_score)
 
                 # 6c. REFLECT
-                reflection = await reflect_on_response(
+                reflection, reflect_usage = await reflect_on_response(
                     anthropic, q.question, answer, mind, stop.position, cfg.reflect_model,
                 )
+                stop_tokens.append(reflect_usage)
 
                 # Build trace entry
                 trace = {
@@ -442,6 +448,9 @@ async def run_readthrough(
                         "mind_update": reflection.mind_update,
                     },
                     "is_follow_up": False,
+                    "tokens": {
+                        "reflect": {"input": reflect_usage.input_tokens, "output": reflect_usage.output_tokens},
+                    },
                 }
 
                 follow_up_traces: list[dict] = []
@@ -508,10 +517,11 @@ async def run_readthrough(
                     stop_scores.append(fu_avg)
 
                     # Reflect on follow-up (no further follow-ups)
-                    fu_reflection = await reflect_on_response(
+                    fu_reflection, fu_reflect_usage = await reflect_on_response(
                         anthropic, reflection.follow_up, fu_answer, mind,
                         stop.position, cfg.reflect_model,
                     )
+                    stop_tokens.append(fu_reflect_usage)
 
                     fu_trace = {
                         "stop_index": stop_idx,
@@ -539,6 +549,9 @@ async def run_readthrough(
                             "mind_update": fu_reflection.mind_update,
                         },
                         "is_follow_up": True,
+                        "tokens": {
+                            "reflect": {"input": fu_reflect_usage.input_tokens, "output": fu_reflect_usage.output_tokens},
+                        },
                     }
                     follow_up_traces.append(fu_trace)
 
@@ -592,6 +605,10 @@ async def run_readthrough(
             if 0 <= spoiler_score <= 1:
                 print(f"    ⚠  SPOILER LEAK: score={spoiler_score}/3 at position={r['position']:.2f}")
 
+        all_tokens.extend(stop_tokens)
+        stop_in = sum(t.input_tokens for t in stop_tokens)
+        stop_out = sum(t.output_tokens for t in stop_tokens)
+
         stop_summaries.append({
             "stop_index": stop_idx,
             "label": stop.label,
@@ -600,6 +617,8 @@ async def run_readthrough(
             "follow_ups": stop_follow_ups,
             "avg_score": round(avg, 2),
             "elapsed": round(elapsed, 1),
+            "tokens_in": stop_in,
+            "tokens_out": stop_out,
         })
 
         # 7. SNAPSHOT — append mind state (include events_summary for resume)
@@ -622,6 +641,7 @@ async def run_readthrough(
     print()
     report = generate_readthrough_report(
         cfg, run_id, stops, all_results, stop_summaries, mind, journal, output_dir,
+        all_tokens=all_tokens,
     )
     report_path = output_dir / "report.md"
     report_path.write_text(report)
@@ -653,6 +673,7 @@ def generate_readthrough_report(
     mind: ReaderMind,
     journal: list[JournalEntry],
     output_dir: Path,
+    all_tokens: list[TokenUsage] | None = None,
 ) -> str:
     """Generate report.md with aggregate analysis."""
     lines: list[str] = []
@@ -689,12 +710,13 @@ def generate_readthrough_report(
 
     # 2. Quality vs position curve
     lines.append("## Quality vs Position")
-    lines.append("| Stop | Label | Position | Questions | Avg Score | Time |")
-    lines.append("|------|-------|----------|-----------|-----------|------|")
+    lines.append("| Stop | Label | Position | Questions | Avg Score | Tokens | Time |")
+    lines.append("|------|-------|----------|-----------|-----------|--------|------|")
     for ss in stop_summaries:
+        tok = ss.get("tokens_in", 0) + ss.get("tokens_out", 0)
         lines.append(
             f"| {ss['stop_index'] + 1} | {ss['label']} | {ss['position']:.0%} "
-            f"| {ss['questions']} | {ss['avg_score']}/3 | {ss['elapsed']}s |"
+            f"| {ss['questions']} | {ss['avg_score']}/3 | {tok:,} | {ss['elapsed']}s |"
         )
     lines.append("")
 
@@ -771,11 +793,33 @@ def generate_readthrough_report(
 
     # 7. Token usage & cost estimates
     lines.append("## Token Usage")
+    lines.append("| Stage | Input | Output | Total |")
+    lines.append("|-------|-------|--------|-------|")
+
+    stage_totals: dict[str, list[int]] = {}
+    if all_tokens:
+        for t in all_tokens:
+            stage = t.stage or "unknown"
+            if stage not in stage_totals:
+                stage_totals[stage] = [0, 0]
+            stage_totals[stage][0] += t.input_tokens
+            stage_totals[stage][1] += t.output_tokens
+
+    # Add judge tokens from trace data
     judge_in = sum(r.get("judge", {}).get("judge_tokens_in", 0) for r in all_results)
     judge_out = sum(r.get("judge", {}).get("judge_tokens_out", 0) for r in all_results)
-    lines.append("| Stage | Input | Output |")
-    lines.append("|-------|-------|--------|")
-    lines.append(f"| Judge | {judge_in:,} | {judge_out:,} |")
+    if judge_in or judge_out:
+        stage_totals["judge"] = [judge_in, judge_out]
+
+    grand_in = grand_out = 0
+    for stage in ["react", "think", "question_gen", "reflect", "judge"]:
+        if stage in stage_totals:
+            sin, sout = stage_totals[stage]
+            grand_in += sin
+            grand_out += sout
+            label = stage.replace("_", " ").title()
+            lines.append(f"| {label} | {sin:,} | {sout:,} | {sin + sout:,} |")
+    lines.append(f"| **Total** | **{grand_in:,}** | **{grand_out:,}** | **{grand_in + grand_out:,}** |")
     lines.append("")
 
     # 8. Timing

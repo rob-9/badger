@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass
 
 from badger.core.graph import strip_code_fences
+from reader.mind import TokenUsage, _usage
 from reader.prompts import REFLECT_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,8 @@ async def reflect_on_response(
     mind,
     position: float,
     model: str,
-) -> Reflection:
-    """Evaluate a RAG response from the reader's perspective."""
+) -> tuple[Reflection, TokenUsage]:
+    """Evaluate a RAG response from the reader's perspective. Returns (reflection, usage)."""
     prompt = REFLECT_PROMPT.format(
         position=position,
         question=question,
@@ -69,23 +70,25 @@ async def reflect_on_response(
         messages=[{"role": "user", "content": prompt}],
     )
 
+    usage = _usage(result, "reflect")
+
     if not result.content or not hasattr(result.content[0], "text"):
         logger.warning("  Unexpected reflection API response format")
-        return _default_reflection()
+        return _default_reflection(), usage
 
     raw = result.content[0].text.strip()
     logger.info("  Reflect: %d chars, %d/%d tokens",
-                len(raw), result.usage.input_tokens, result.usage.output_tokens)
+                len(raw), usage.input_tokens, usage.output_tokens)
 
     try:
         parsed = json.loads(strip_code_fences(raw))
     except (json.JSONDecodeError, TypeError):
         logger.warning("  Failed to parse reflection JSON: %s", raw[:200])
-        return _default_reflection()
+        return _default_reflection(), usage
 
     if not isinstance(parsed, dict):
         logger.warning("  Reflection is not a dict: %s", type(parsed).__name__)
-        return _default_reflection()
+        return _default_reflection(), usage
 
     return Reflection(
         satisfactory=_to_bool(parsed.get("satisfactory"), default=True),
@@ -95,7 +98,7 @@ async def reflect_on_response(
         follow_up=_to_optional_str(parsed.get("follow_up")),
         follow_up_reason=_to_optional_str(parsed.get("follow_up_reason")),
         mind_update=_to_optional_str(parsed.get("mind_update")),
-    )
+    ), usage
 
 
 def _default_reflection() -> Reflection:

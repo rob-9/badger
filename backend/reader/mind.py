@@ -16,6 +16,23 @@ from reader.prompts import REACT_PROMPT, MIND_UPDATE_PROMPT
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class TokenUsage:
+    """Token counts from a single LLM call."""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    stage: str = ""  # "react", "think", "question_gen", "reflect", "judge", "rag"
+
+
+def _usage(response, stage: str) -> TokenUsage:
+    """Extract token usage from an Anthropic API response."""
+    return TokenUsage(
+        input_tokens=getattr(response.usage, "input_tokens", 0),
+        output_tokens=getattr(response.usage, "output_tokens", 0),
+        stage=stage,
+    )
+
+
 def _extract_text(response) -> str:
     """Safely extract text from an Anthropic API response."""
     if not response.content or not hasattr(response.content[0], "text"):
@@ -305,8 +322,8 @@ async def react_to_section(
     position: float,
     label: str,
     model: str,
-) -> str:
-    """Chain-of-thought reaction to a section. Returns raw reasoning text."""
+) -> tuple[str, TokenUsage]:
+    """Chain-of-thought reaction to a section. Returns (reasoning_text, usage)."""
     prompt = REACT_PROMPT.format(
         label=label,
         position=position,
@@ -322,9 +339,10 @@ async def react_to_section(
         messages=[{"role": "user", "content": prompt}],
     )
     raw = _extract_text(response)
+    usage = _usage(response, "react")
     logger.info("  React: %d chars, %d/%d tokens",
-                len(raw), response.usage.input_tokens, response.usage.output_tokens)
-    return raw
+                len(raw), usage.input_tokens, usage.output_tokens)
+    return raw, usage
 
 
 async def update_mind(
@@ -335,8 +353,8 @@ async def update_mind(
     position: float,
     label: str,
     model: str,
-) -> MindUpdate:
-    """Structured mental model update. Returns MindUpdate dataclass."""
+) -> tuple[MindUpdate, TokenUsage]:
+    """Structured mental model update. Returns (MindUpdate, usage)."""
     prompt = MIND_UPDATE_PROMPT.format(
         label=label,
         position=position,
@@ -353,8 +371,9 @@ async def update_mind(
         messages=[{"role": "user", "content": prompt}],
     )
     raw = _extract_text(response)
+    usage = _usage(response, "think")
     logger.info("  Mind update: %d chars, %d/%d tokens",
-                len(raw), response.usage.input_tokens, response.usage.output_tokens)
+                len(raw), usage.input_tokens, usage.output_tokens)
 
     try:
         parsed = json.loads(strip_code_fences(raw))
@@ -371,4 +390,4 @@ async def update_mind(
     if not parsed.get("emotional_state"):
         parsed["emotional_state"] = "uncertain"
 
-    return MindUpdate.from_dict(parsed)
+    return MindUpdate.from_dict(parsed), usage

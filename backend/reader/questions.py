@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 
 from badger.core.graph import strip_code_fences
+from reader.mind import TokenUsage, _usage
 from reader.prompts import QUESTION_GEN_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -65,10 +66,11 @@ async def generate_questions(
     label: str,
     max_questions: int,
     model: str,
-) -> list[GeneratedQuestion]:
+) -> tuple[list[GeneratedQuestion], TokenUsage]:
     """Generate reader questions using QUESTION_GEN_PROMPT.
 
     Validates that selected_text is a verbatim substring of recent_text.
+    Returns (questions, usage).
     """
     prompt = QUESTION_GEN_PROMPT.format(
         position=position,
@@ -88,23 +90,25 @@ async def generate_questions(
         messages=[{"role": "user", "content": prompt}],
     )
 
+    usage = _usage(response, "question_gen")
+
     if not response.content or not hasattr(response.content[0], "text"):
         logger.warning("  Unexpected question gen API response format")
-        return []
+        return [], usage
 
     raw = response.content[0].text.strip()
     logger.info("  Question gen: %d chars, %d/%d tokens",
-                len(raw), response.usage.input_tokens, response.usage.output_tokens)
+                len(raw), usage.input_tokens, usage.output_tokens)
 
     try:
         parsed = json.loads(strip_code_fences(raw))
     except (json.JSONDecodeError, TypeError):
         logger.warning("  Failed to parse question gen JSON: %s", raw[:200])
-        return []
+        return [], usage
 
     if not isinstance(parsed, list):
         logger.warning("  Question gen returned non-list: %s", type(parsed).__name__)
-        return []
+        return [], usage
 
     # Pre-compute normalized text for whitespace-tolerant validation
     normalized_text = _normalize_ws(recent_text)
@@ -141,4 +145,4 @@ async def generate_questions(
         ))
 
     logger.info("  Generated %d valid questions (of %d returned)", len(questions), len(parsed))
-    return questions
+    return questions, usage
