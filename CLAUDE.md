@@ -23,7 +23,10 @@ VOYAGE_API_KEY=pa-...         # Voyage AI embeddings (required)
 CLAUDE_MODEL=claude-sonnet-4-20250514  # optional override
 VOYAGE_MODEL=voyage-3                   # optional override
 CORS_ORIGINS=http://localhost:3000      # optional override
-VECTOR_STORAGE_DIR=.data/vectors        # optional override
+VECTOR_STORAGE_DIR=.data/vectors        # legacy JSON path (used for auto-migration)
+QDRANT_URL=                             # empty = embedded mode (no server needed)
+QDRANT_API_KEY=                         # for Qdrant Cloud (optional)
+QDRANT_STORAGE_DIR=.data/qdrant         # embedded Qdrant data directory
 ```
 
 ## Architecture
@@ -32,7 +35,7 @@ VECTOR_STORAGE_DIR=.data/vectors        # optional override
 - `config.py` — Centralized env var config with `validate_keys()` startup check
 - `api/server.py` — FastAPI app with lifespan init, CORS, 3 endpoints + health checks
 - `core/rag.py` — RAG service: Voyage embeddings + Claude generation, position-aware context
-- `core/vector_store.py` — File-based vector storage with in-memory cache, cosine similarity
+- `core/vector_store.py` — Qdrant-backed vector storage (embedded mode for dev, remote for prod)
 - `core/chunker.py` — Text chunking (2000 char chunks, 200 overlap, sentence-aware boundaries)
 
 **Frontend** (`frontend/src/`):
@@ -40,7 +43,7 @@ VECTOR_STORAGE_DIR=.data/vectors        # optional override
 - `app/` — Next.js App Router pages
 - `components/` — EpubReader, ChatPanel, QuestionPopup, FileUploader, BookHistory
 
-**RAG Pipeline**: `chunker.py` (2000 char chunks) → `rag.py` (Voyage `voyage-3` embeddings) → `vector_store.py` (cosine similarity) → `rag.py` (Claude `claude-sonnet-4-20250514`)
+**RAG Pipeline**: `chunker.py` (2000 char chunks) → `rag.py` (Voyage embeddings) → `vector_store.py` (Qdrant cosine search) → `rag.py` (Claude `claude-sonnet-4-20250514`)
 
 **API Endpoints** (Python backend on port 8000):
 - `POST /api/rag/index` — `{book_id, text}` → chunks, embeds, stores
@@ -50,7 +53,8 @@ VECTOR_STORAGE_DIR=.data/vectors        # optional override
 **Key Details**:
 - Voyage embeddings use `input_type: 'query'` for questions, `'document'` for chunks
 - Top 5 chunks (cosine similarity) sent to Claude with position-aware context (PAST vs AHEAD)
-- Vectors stored at `.data/vectors/[bookId].json`, query logs at `.data/logs/queries.jsonl`
+- Vectors stored in Qdrant (`.data/qdrant/` in embedded mode), query logs at `.data/logs/queries.jsonl`
+- Legacy `.data/vectors/*.json` auto-migrated to Qdrant on first run
 - Books stored client-side only: IndexedDB `badger-books` (ArrayBuffer) + localStorage (metadata)
 - Path alias: `@/*` → `./src/*`
 

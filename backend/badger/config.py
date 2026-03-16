@@ -54,6 +54,9 @@ except ValueError:
 # Infrastructure
 CORS_ORIGINS: list[str] = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
 VECTOR_STORAGE_DIR: str = os.getenv("VECTOR_STORAGE_DIR", ".data/vectors")
+QDRANT_URL: str = os.getenv("QDRANT_URL", "")
+QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
+QDRANT_STORAGE_DIR: str = os.getenv("QDRANT_STORAGE_DIR", ".data/qdrant")
 
 # Allowed directories for EPUB import (comma-separated paths)
 EPUB_IMPORT_ALLOWED_DIRS: list[str] = [

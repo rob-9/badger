@@ -12,6 +12,7 @@ dependencies = [
 
     "rank-bm25>=0.2.2",
     "numpy>=1.24.0",
+    "qdrant-client>=1.12.0",
 
     # Document processing
     "pypdf>=6.0.0",

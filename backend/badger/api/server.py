@@ -64,7 +64,8 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing services...")
     anthropic_client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
     async_anthropic_client = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
-    rag_service = RAGService(storage_dir=config.VECTOR_STORAGE_DIR)
+    rag_service = RAGService()
+    await rag_service.vector_store.initialize()
     agent = build_agent(
         anthropic=anthropic_client,
         async_anthropic=async_anthropic_client,

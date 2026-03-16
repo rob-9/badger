@@ -73,6 +73,8 @@ def sample_entries():
 
 
 @pytest.fixture
-def vector_store(tmp_path):
-    """VectorStore backed by a temp directory."""
-    return VectorStore(storage_dir=str(tmp_path / "vectors"))
+async def vector_store():
+    """VectorStore backed by in-memory Qdrant (3-dimensional for test speed)."""
+    store = VectorStore(location=":memory:", embedding_dim=3)
+    await store.initialize()
+    return store

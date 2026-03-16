@@ -1,6 +1,8 @@
 """Tests for badger.core.vector_store — vector storage, search, BM25, RRF."""
 
 import json
+from pathlib import Path
+
 import pytest
 
 from badger.core.chunker import TextChunk
@@ -11,7 +13,6 @@ from badger.core.vector_store import (
     BM25Index,
     reciprocal_rank_fusion,
     _tokenize,
-    CURRENT_INDEX_VERSION,
 )
 from tests.conftest import make_entry, make_chunk
 
@@ -135,7 +136,7 @@ class TestVectorStore:
 
     @pytest.mark.asyncio
     async def test_search_nonexistent_book(self, vector_store):
-        results = await vector_store.search("nobook", [1.0, 0.0], top_k=5)
+        results = await vector_store.search("nobook", [1.0, 0.0, 0.0], top_k=5)
         assert results == []
 
     @pytest.mark.asyncio
@@ -228,101 +229,66 @@ class TestVectorStore:
 
     @pytest.mark.asyncio
     async def test_hybrid_search_empty_book(self, vector_store):
-        results = await vector_store.hybrid_search("nobook", [1.0], "test", top_k=5)
+        results = await vector_store.hybrid_search("nobook", [1.0, 0.0, 0.0], "test", top_k=5)
         assert results == []
 
 
 class TestVectorStorePersistence:
 
     @pytest.mark.asyncio
-    async def test_save_and_load(self, vector_store, sample_entries):
-        await vector_store.add_book("book1", sample_entries)
-
-        # Create a fresh store pointing at the same directory
-        store2 = VectorStore(storage_dir=str(vector_store.storage_dir))
-        loaded = await store2.load_from_file("book1")
-        assert loaded is not None
-        assert len(loaded) == 5
-        assert loaded[0].chunk.text == sample_entries[0].chunk.text
-        assert loaded[0].embedding == sample_entries[0].embedding
-
-    @pytest.mark.asyncio
-    async def test_load_nonexistent_returns_none(self, vector_store):
-        result = await vector_store.load_from_file("nonexistent")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_version_check_outdated(self, vector_store, sample_entries, tmp_path):
-        """Outdated index version should return None on load."""
-        await vector_store.add_book("book1", sample_entries)
-        # Manually downgrade the version in the file
-        file_path = vector_store._get_file_path("book1")
-        with open(file_path, "r") as f:
-            data = json.load(f)
-        data["version"] = 0
-        with open(file_path, "w") as f:
-            json.dump(data, f)
-        # Clear memory cache
-        vector_store.entries.clear()
-        loaded = await vector_store.load_from_file("book1")
-        assert loaded is None
-
-    @pytest.mark.asyncio
-    async def test_has_book_from_disk(self, tmp_path, sample_entries):
-        store1 = VectorStore(storage_dir=str(tmp_path / "vectors"))
+    async def test_data_persists_across_clients(self, tmp_path, sample_entries):
+        """Data written by one client is readable by another pointing to the same path."""
+        storage = str(tmp_path / "qdrant")
+        store1 = VectorStore(storage_dir=storage, embedding_dim=3)
+        await store1.initialize()
         await store1.add_book("book1", sample_entries)
+        # Release the file lock before opening a second client on the same path.
+        # Embedded mode uses only _sync_client; _async_client is None.
+        store1._sync_client.close()
 
-        # Fresh store with no memory cache
-        store2 = VectorStore(storage_dir=str(tmp_path / "vectors"))
+        store2 = VectorStore(storage_dir=storage, embedding_dim=3)
+        await store2.initialize()
         assert store2.has_book("book1")
-
-    @pytest.mark.asyncio
-    async def test_has_book_outdated_version_on_disk(self, tmp_path, sample_entries):
-        store = VectorStore(storage_dir=str(tmp_path / "vectors"))
-        await store.add_book("book1", sample_entries)
-        # Downgrade version on disk
-        file_path = store._get_file_path("book1")
-        with open(file_path, "r") as f:
-            data = json.load(f)
-        data["version"] = 0
-        with open(file_path, "w") as f:
-            json.dump(data, f)
-        # Clear memory
-        store.entries.clear()
-        assert not store.has_book("book1")
-
-    @pytest.mark.asyncio
-    async def test_search_loads_from_disk(self, tmp_path, sample_entries):
-        store1 = VectorStore(storage_dir=str(tmp_path / "vectors"))
-        await store1.add_book("book1", sample_entries)
-
-        store2 = VectorStore(storage_dir=str(tmp_path / "vectors"))
         results = await store2.search("book1", [1.0, 0.0, 0.0], top_k=1)
         assert len(results) == 1
         assert results[0].chunk.metadata["chunk_index"] == 0
 
     @pytest.mark.asyncio
-    async def test_remove_deletes_files(self, vector_store, sample_entries):
+    async def test_has_book_from_persisted(self, tmp_path, sample_entries):
+        storage = str(tmp_path / "qdrant")
+        store1 = VectorStore(storage_dir=storage, embedding_dim=3)
+        await store1.initialize()
+        await store1.add_book("book1", sample_entries)
+        # Release the file lock before opening a second client on the same path.
+        # Embedded mode uses only _sync_client; _async_client is None.
+        store1._sync_client.close()
+
+        store2 = VectorStore(storage_dir=storage, embedding_dim=3)
+        await store2.initialize()
+        assert store2.has_book("book1")
+
+    @pytest.mark.asyncio
+    async def test_remove_deletes_from_collection(self, vector_store, sample_entries):
         await vector_store.add_book("book1", sample_entries)
-        file_path = vector_store._get_file_path("book1")
-        assert file_path.exists()
+        assert vector_store.has_book("book1")
         await vector_store.remove_book("book1")
-        assert not file_path.exists()
+        assert not vector_store.has_book("book1")
+        results = await vector_store.search("book1", [1.0, 0.0, 0.0])
+        assert results == []
 
 
 class TestVectorStoreSummaries:
 
     @pytest.mark.asyncio
-    async def test_save_and_load_summaries(self, vector_store):
+    async def test_save_and_search_summaries(self, vector_store):
         entries = [
             make_entry("book1", 0, "Chapter 1 summary about themes.", [1.0, 0.0, 0.0]),
             make_entry("book1", 1, "Chapter 2 summary about conflict.", [0.0, 1.0, 0.0]),
         ]
         await vector_store.save_summaries("book1", entries)
-
-        loaded = await vector_store.load_summaries("book1")
-        assert loaded is not None
-        assert len(loaded) == 2
+        results = await vector_store.search_summaries("book1", [0.9, 0.1, 0.0], top_k=1)
+        assert len(results) == 1
+        assert "themes" in results[0].chunk.text
 
     @pytest.mark.asyncio
     async def test_search_summaries(self, vector_store):
@@ -338,62 +304,178 @@ class TestVectorStoreSummaries:
 
     @pytest.mark.asyncio
     async def test_search_summaries_no_summaries(self, vector_store):
-        results = await vector_store.search_summaries("nobook", [1.0, 0.0], top_k=3)
+        results = await vector_store.search_summaries("nobook", [1.0, 0.0, 0.0], top_k=3)
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_remove_deletes_summary_files(self, vector_store):
-        entries = [make_entry("book1", 0, "Summary.", [1.0])]
+    async def test_remove_deletes_summaries(self, vector_store):
+        entries = [make_entry("book1", 0, "Summary.", [1.0, 0.0, 0.0])]
         await vector_store.save_summaries("book1", entries)
-        summaries_path = vector_store._get_summaries_path("book1")
-        assert summaries_path.exists()
+        results = await vector_store.search_summaries("book1", [1.0, 0.0, 0.0])
+        assert len(results) == 1
         await vector_store.remove_book("book1")
-        assert not summaries_path.exists()
-
-    @pytest.mark.asyncio
-    async def test_summaries_cached_in_memory(self, vector_store):
-        entries = [make_entry("book1", 0, "Summary.", [1.0, 0.0])]
-        await vector_store.save_summaries("book1", entries)
-        assert "book1" in vector_store.summary_entries
+        results = await vector_store.search_summaries("book1", [1.0, 0.0, 0.0])
+        assert results == []
 
 
 class TestVectorStoreStats:
     @pytest.mark.asyncio
     async def test_empty_stats(self, vector_store):
         stats = vector_store.get_stats()
-        assert stats == {"book_count": 0, "total_chunks": 0}
+        assert stats["total_chunks"] == 0
 
     @pytest.mark.asyncio
     async def test_stats_after_add(self, vector_store, sample_entries):
         await vector_store.add_book("book1", sample_entries)
         stats = vector_store.get_stats()
-        assert stats["book_count"] == 1
         assert stats["total_chunks"] == 5
 
 
-class TestVectorStoreSerialization:
-    def test_serialize_deserialize_roundtrip(self, vector_store):
-        entry = make_entry("b", 0, "Some text.", [1.0, 2.0, 3.0])
-        serialized = vector_store._serialize_entry(entry)
-        deserialized = vector_store._deserialize_entry(serialized)
-        assert deserialized.chunk.id == entry.chunk.id
-        assert deserialized.chunk.text == entry.chunk.text
-        assert deserialized.chunk.metadata == entry.chunk.metadata
-        assert deserialized.embedding == entry.embedding
+class TestAutoMigration:
+    """Test that legacy .data/vectors/*.json files are auto-migrated into Qdrant."""
+
+    def _write_legacy_json(self, dir_path: Path, book_id: str, entries: list, version: int = 2):
+        """Write a legacy-format JSON vector file."""
+        data = {
+            "version": version,
+            "book_id": book_id,
+            "entry_count": len(entries),
+            "entries": [
+                {
+                    "chunk": {
+                        "id": e.chunk.id,
+                        "text": e.chunk.text,
+                        "metadata": e.chunk.metadata,
+                    },
+                    "embedding": e.embedding,
+                }
+                for e in entries
+            ],
+        }
+        file_path = dir_path / f"{book_id}.json"
+        file_path.write_text(json.dumps(data))
+        return file_path
+
+    @pytest.mark.asyncio
+    async def test_migrates_legacy_chunks(self, tmp_path, sample_entries):
+        """Legacy JSON chunks should be imported into Qdrant on first initialize()."""
+        json_dir = tmp_path / ".data" / "vectors"
+        json_dir.mkdir(parents=True)
+        self._write_legacy_json(json_dir, "book1", sample_entries)
+
+        store = VectorStore(storage_dir=str(tmp_path / "qdrant"), embedding_dim=3)
+        store._old_json_dir = json_dir
+        await store.initialize()
+
+        assert store.has_book("book1")
+        results = await store.search("book1", [1.0, 0.0, 0.0], top_k=1)
+        assert len(results) == 1
+        assert results[0].chunk.metadata["chunk_index"] == 0
+
+    @pytest.mark.asyncio
+    async def test_migrates_legacy_summaries(self, tmp_path, sample_entries):
+        """Legacy summary files (*_summaries.json) should be migrated alongside chunks."""
+        json_dir = tmp_path / ".data" / "vectors"
+        json_dir.mkdir(parents=True)
+        self._write_legacy_json(json_dir, "book1", sample_entries)
+
+        summary_entries = [make_entry("book1", 0, "Chapter summary.", [0.5, 0.5, 0.0])]
+        self._write_legacy_json(json_dir, "book1_summaries", summary_entries)
+
+        store = VectorStore(storage_dir=str(tmp_path / "qdrant"), embedding_dim=3)
+        store._old_json_dir = json_dir
+        await store.initialize()
+
+        results = await store.search_summaries("book1", [0.5, 0.5, 0.0], top_k=1)
+        assert len(results) == 1
+        assert "summary" in results[0].chunk.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_skips_outdated_version(self, tmp_path, sample_entries):
+        """Legacy files with version < CURRENT_INDEX_VERSION should be skipped."""
+        json_dir = tmp_path / ".data" / "vectors"
+        json_dir.mkdir(parents=True)
+        self._write_legacy_json(json_dir, "book1", sample_entries, version=0)
+
+        store = VectorStore(storage_dir=str(tmp_path / "qdrant"), embedding_dim=3)
+        store._old_json_dir = json_dir
+        await store.initialize()
+
+        assert not store.has_book("book1")
+
+    @pytest.mark.asyncio
+    async def test_skips_if_qdrant_has_data(self, tmp_path, sample_entries):
+        """Auto-migration should not run if Qdrant already has data."""
+        json_dir = tmp_path / ".data" / "vectors"
+        json_dir.mkdir(parents=True)
+
+        # First: create a store and add data directly (book_id matches metadata)
+        store1 = VectorStore(storage_dir=str(tmp_path / "qdrant"), embedding_dim=3)
+        store1._old_json_dir = json_dir  # no files yet
+        await store1.initialize()
+        await store1.add_book("book1", sample_entries)
+        store1._sync_client.close()
+
+        # Now write a legacy JSON file for a different book
+        other_entries = [make_entry("legacy", 0, "Legacy book.", [0.1, 0.2, 0.3])]
+        self._write_legacy_json(json_dir, "legacy", other_entries)
+
+        # Second store: should skip migration since Qdrant already has data
+        store2 = VectorStore(storage_dir=str(tmp_path / "qdrant"), embedding_dim=3)
+        store2._old_json_dir = json_dir
+        await store2.initialize()
+
+        assert store2.has_book("book1")
+        assert not store2.has_book("legacy")
+
+    @pytest.mark.asyncio
+    async def test_no_legacy_dir_is_noop(self, tmp_path):
+        """Missing legacy directory should not cause errors."""
+        store = VectorStore(storage_dir=str(tmp_path / "qdrant"), embedding_dim=3)
+        store._old_json_dir = tmp_path / "nonexistent"
+        await store.initialize()
+        # Should initialize cleanly with no data
+        assert not store.has_book("anything")
+
+
+class TestMultiBookIsolation:
+    """Verify that book_id filtering properly isolates books."""
+
+    @pytest.mark.asyncio
+    async def test_search_returns_only_target_book(self, vector_store):
+        book1 = [make_entry("book1", 0, "Alpha content.", [1.0, 0.0, 0.0])]
+        book2 = [make_entry("book2", 0, "Beta content.", [1.0, 0.0, 0.0])]
+        await vector_store.add_book("book1", book1)
+        await vector_store.add_book("book2", book2)
+
+        results = await vector_store.search("book1", [1.0, 0.0, 0.0], top_k=5)
+        assert len(results) == 1
+        assert results[0].chunk.metadata["book_id"] == "book1"
+
+    @pytest.mark.asyncio
+    async def test_remove_only_affects_target_book(self, vector_store):
+        book1 = [make_entry("book1", 0, "Alpha.", [1.0, 0.0, 0.0])]
+        book2 = [make_entry("book2", 0, "Beta.", [0.0, 1.0, 0.0])]
+        await vector_store.add_book("book1", book1)
+        await vector_store.add_book("book2", book2)
+
+        await vector_store.remove_book("book1")
+        assert not vector_store.has_book("book1")
+        assert vector_store.has_book("book2")
 
 
 class TestBM25LazyBuild:
     @pytest.mark.asyncio
-    async def test_bm25_built_lazily_on_hybrid_search(self, tmp_path, sample_entries):
-        """BM25 index should be built on demand when loading from disk."""
-        store1 = VectorStore(storage_dir=str(tmp_path / "vectors"))
-        await store1.add_book("book1", sample_entries)
-
-        # Fresh store loads from disk — no BM25 index yet
-        store2 = VectorStore(storage_dir=str(tmp_path / "vectors"))
-        assert "book1" not in store2.bm25_indices
+    async def test_bm25_built_lazily_on_hybrid_search(self, sample_entries):
+        """BM25 index should be built on demand when not yet cached."""
+        store = VectorStore(location=":memory:", embedding_dim=3)
+        await store.initialize()
+        await store.add_book("book1", sample_entries)
+        # Clear the BM25 cache to simulate cold start
+        store.bm25_indices.clear()
+        assert "book1" not in store.bm25_indices
 
         # hybrid_search triggers lazy BM25 build
-        results = await store2.hybrid_search("book1", [1.0, 0.0, 0.0], "beginning", top_k=3)
-        assert "book1" in store2.bm25_indices
+        results = await store.hybrid_search("book1", [1.0, 0.0, 0.0], "beginning", top_k=3)
+        assert "book1" in store.bm25_indices
         assert len(results) >= 1

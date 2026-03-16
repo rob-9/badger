@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from badger.core.rag import RAGService, RAGResponse
 from badger.core.chunker import TextChunk
-from badger.core.vector_store import VectorEntry, SearchResult
+from badger.core.vector_store import VectorEntry, SearchResult, VectorStore
 
 
 # ── Mocks ─────────────────────────────────────────────────────────────
@@ -71,14 +71,18 @@ def mock_anthropic():
 
 
 @pytest.fixture
-def rag_service(tmp_path, mock_voyage, mock_anthropic):
-    """RAG service with mocked external clients."""
+async def rag_service(mock_voyage, mock_anthropic):
+    """RAG service with mocked external clients and an in-memory vector store."""
     with patch("badger.core.rag.voyageai") as mock_vmod, \
-         patch("badger.core.rag.Anthropic") as mock_amod:
+         patch("badger.core.rag.Anthropic") as mock_amod, \
+         patch("badger.core.rag.VectorStore") as mock_vs_cls:
         mock_vmod.Client.return_value = mock_voyage
         mock_amod.return_value = mock_anthropic
-        service = RAGService(storage_dir=str(tmp_path / "vectors"))
-        # Replace clients with our mocks
+        # Inject a real in-memory store so vector operations work without a server
+        real_store = VectorStore(location=":memory:")
+        await real_store.initialize()
+        mock_vs_cls.return_value = real_store
+        service = RAGService()
         service.voyage = mock_voyage
         service.anthropic = mock_anthropic
         yield service
@@ -311,7 +315,7 @@ class TestQuerySimple:
 
 class TestQueryBook:
     @pytest.mark.asyncio
-    async def test_returns_rag_response(self, rag_service, mock_voyage, mock_anthropic, tmp_path):
+    async def test_returns_rag_response(self, rag_service, mock_voyage, mock_anthropic):
         # First index the book
         entry = VectorEntry(
             chunk=TextChunk(
@@ -336,7 +340,7 @@ class TestQueryBook:
         assert len(response.sources) == 1
 
     @pytest.mark.asyncio
-    async def test_query_book_none_selected_text(self, rag_service, mock_voyage, mock_anthropic, tmp_path):
+    async def test_query_book_none_selected_text(self, rag_service, mock_voyage, mock_anthropic):
         """query_book should handle selected_text=None without crashing."""
         entry = VectorEntry(
             chunk=TextChunk(
@@ -366,6 +370,7 @@ class TestQueryBook:
 
     @pytest.mark.asyncio
     async def test_position_labeling(self, rag_service, mock_voyage, mock_anthropic):
+        base = [0.0] * 1024
         entries = [
             VectorEntry(
                 chunk=TextChunk(
@@ -373,13 +378,14 @@ class TestQueryBook:
                     text=f"Chunk {i} text.",
                     metadata={"book_id": "b", "chunk_index": i},
                 ),
-                embedding=[float(i == 0), float(i == 1), float(i == 2)],
+                embedding=[1.0 if j == i else 0.0 for j in range(1024)],
             )
             for i in range(3)
         ]
         await rag_service.vector_store.add_book("b", entries)
 
-        mock_voyage.embed.return_value = FakeEmbedResponse(embeddings=[[1.0, 0.0, 0.0]])
+        query_vec = [1.0] + [0.0] * 1023
+        mock_voyage.embed.return_value = FakeEmbedResponse(embeddings=[query_vec])
         mock_anthropic.messages.create.return_value = FakeMessageResponse(
             content=[FakeContentBlock(text="Answer.")]
         )
