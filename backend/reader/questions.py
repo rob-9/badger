@@ -8,12 +8,18 @@ each stop point, with type distribution evolving based on position.
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 from badger.core.graph import strip_code_fences
 from reader.prompts import QUESTION_GEN_PROMPT
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_ws(text: str) -> str:
+    """Collapse whitespace for substring comparison."""
+    return re.sub(r'\s+', ' ', text).strip()
 
 
 @dataclass
@@ -81,6 +87,11 @@ async def generate_questions(
         system="You are a reader generating questions. Return only a valid JSON array.",
         messages=[{"role": "user", "content": prompt}],
     )
+
+    if not response.content or not hasattr(response.content[0], "text"):
+        logger.warning("  Unexpected question gen API response format")
+        return []
+
     raw = response.content[0].text.strip()
     logger.info("  Question gen: %d chars, %d/%d tokens",
                 len(raw), response.usage.input_tokens, response.usage.output_tokens)
@@ -88,21 +99,24 @@ async def generate_questions(
     try:
         parsed = json.loads(strip_code_fences(raw))
     except (json.JSONDecodeError, TypeError):
-        logger.warning("  Failed to parse question gen JSON")
+        logger.warning("  Failed to parse question gen JSON: %s", raw[:200])
         return []
 
     if not isinstance(parsed, list):
-        logger.warning("  Question gen returned non-list: %s", type(parsed))
+        logger.warning("  Question gen returned non-list: %s", type(parsed).__name__)
         return []
+
+    # Pre-compute normalized text for whitespace-tolerant validation
+    normalized_text = _normalize_ws(recent_text)
 
     questions: list[GeneratedQuestion] = []
     for q in parsed[:max_questions]:
         if not isinstance(q, dict):
             continue
 
-        question_text = q.get("question", "").strip()
-        selected = q.get("selected_text", "").strip()
-        qtype = q.get("question_type", "context").strip()
+        question_text = str(q.get("question", "")).strip()
+        selected = str(q.get("selected_text", "")).strip()
+        qtype = str(q.get("question_type", "context")).strip()
 
         if not question_text:
             continue
@@ -111,17 +125,18 @@ async def generate_questions(
         if qtype not in ("vocabulary", "context", "lookup", "analysis"):
             qtype = "context"
 
-        # Validate selected_text is a verbatim substring of recent_text
-        if selected and selected not in recent_text:
-            logger.warning("  Hallucinated selected_text for question: %s", question_text[:60])
-            selected = ""
+        # Validate selected_text is a substring (whitespace-tolerant)
+        if selected:
+            if selected not in recent_text and _normalize_ws(selected) not in normalized_text:
+                logger.warning("  Hallucinated selected_text for question: %s", question_text[:60])
+                selected = ""
 
         questions.append(GeneratedQuestion(
             question=question_text,
             selected_text=selected,
             question_type=qtype,
-            motivation=q.get("motivation", ""),
-            expected_answer=q.get("expected_answer", ""),
+            motivation=str(q.get("motivation", "")),
+            expected_answer=str(q.get("expected_answer", "")),
             triggered_by=q.get("triggered_by"),
         ))
 
