@@ -16,6 +16,14 @@ from reader.prompts import REACT_PROMPT, MIND_UPDATE_PROMPT
 logger = logging.getLogger(__name__)
 
 
+def _extract_text(response) -> str:
+    """Safely extract text from an Anthropic API response."""
+    if not response.content or not hasattr(response.content[0], "text"):
+        logger.warning("  Unexpected API response format: no text content")
+        return ""
+    return response.content[0].text.strip()
+
+
 @dataclass
 class Theory:
     text: str                    # "I think Lovell is hiding something about Robin's mother"
@@ -102,17 +110,29 @@ class MindUpdate:
 
     @classmethod
     def from_dict(cls, d: dict) -> "MindUpdate":
+        if not isinstance(d, dict):
+            logger.warning("  MindUpdate.from_dict got %s, expected dict", type(d).__name__)
+            return cls(emotional_state="confused", events_summary="(invalid data)")
+
+        def _ensure_list(val):
+            return val if isinstance(val, list) else []
+
+        def _ensure_int_list(val):
+            if not isinstance(val, list):
+                return []
+            return [x for x in val if isinstance(x, int) and x >= 0]
+
         return cls(
-            new_characters=d.get("new_characters", []),
-            updated_characters=d.get("updated_characters", []),
-            new_theories=d.get("new_theories", []),
-            theory_updates=d.get("theory_updates", []),
-            new_unresolved=d.get("new_unresolved", []),
-            resolved=d.get("resolved", []),
-            new_themes=d.get("new_themes", []),
-            new_surprises=d.get("new_surprises", []),
-            emotional_state=d.get("emotional_state", ""),
-            events_summary=d.get("events_summary", ""),
+            new_characters=_ensure_list(d.get("new_characters")),
+            updated_characters=_ensure_list(d.get("updated_characters")),
+            new_theories=_ensure_list(d.get("new_theories")),
+            theory_updates=_ensure_list(d.get("theory_updates")),
+            new_unresolved=_ensure_list(d.get("new_unresolved")),
+            resolved=_ensure_int_list(d.get("resolved")),
+            new_themes=_ensure_list(d.get("new_themes")),
+            new_surprises=_ensure_list(d.get("new_surprises")),
+            emotional_state=str(d.get("emotional_state", "")),
+            events_summary=str(d.get("events_summary", "")),
         )
 
 
@@ -138,19 +158,19 @@ class ReaderMind:
         parts.append(f"Current mood: {self.emotional_state}")
 
         # Active theories (non-contradicted first)
-        active = [t for t in self.theories if t.confidence != "contradicted"]
-        contradicted = [t for t in self.theories if t.confidence == "contradicted"]
-        if active:
+        if self.theories:
             parts.append("\nActive theories:")
-            for i, t in enumerate(active):
-                idx = self.theories.index(t)
+            for idx, t in enumerate(self.theories):
+                if t.confidence == "contradicted":
+                    continue
                 evidence = "; ".join(t.evidence[-2:]) if t.evidence else "no evidence yet"
                 parts.append(f"  [{idx}] ({t.confidence}) {t.text} — {evidence}")
-        if contradicted:
-            parts.append("\nContradicted theories:")
-            for t in contradicted[-3:]:
-                idx = self.theories.index(t)
-                parts.append(f"  [{idx}] {t.text}")
+
+            contradicted = [(i, t) for i, t in enumerate(self.theories) if t.confidence == "contradicted"]
+            if contradicted:
+                parts.append("\nContradicted theories:")
+                for idx, t in contradicted[-3:]:
+                    parts.append(f"  [{idx}] {t.text}")
 
         # Unresolved questions
         if self.unresolved:
@@ -301,7 +321,7 @@ async def react_to_section(
         system="You are a thoughtful reader experiencing a book for the first time.",
         messages=[{"role": "user", "content": prompt}],
     )
-    raw = response.content[0].text.strip()
+    raw = _extract_text(response)
     logger.info("  React: %d chars, %d/%d tokens",
                 len(raw), response.usage.input_tokens, response.usage.output_tokens)
     return raw
@@ -332,7 +352,7 @@ async def update_mind(
         system="You are updating a reader's mental model. Return only valid JSON.",
         messages=[{"role": "user", "content": prompt}],
     )
-    raw = response.content[0].text.strip()
+    raw = _extract_text(response)
     logger.info("  Mind update: %d chars, %d/%d tokens",
                 len(raw), response.usage.input_tokens, response.usage.output_tokens)
 
@@ -340,6 +360,15 @@ async def update_mind(
         parsed = json.loads(strip_code_fences(raw))
     except (json.JSONDecodeError, TypeError):
         logger.warning("  Failed to parse mind update JSON, returning empty update")
-        parsed = {"emotional_state": "confused", "events_summary": "(parse error)"}
+        parsed = {}
+
+    if not isinstance(parsed, dict):
+        logger.warning("  Mind update is not a dict: %s", type(parsed).__name__)
+        parsed = {}
+
+    if not parsed.get("events_summary"):
+        parsed["events_summary"] = "(no summary)"
+    if not parsed.get("emotional_state"):
+        parsed["emotional_state"] = "uncertain"
 
     return MindUpdate.from_dict(parsed)
