@@ -44,16 +44,15 @@ class RAGResponse:
 class RAGService:
     """Simple RAG for personal reading assistant."""
 
-    def __init__(self, storage_dir: str = config.VECTOR_STORAGE_DIR):
-        """
-        Initialize RAG service.
-
-        Args:
-            storage_dir: Directory to store vector embeddings
-        """
+    def __init__(self):
+        """Initialize RAG service."""
         self.voyage = voyageai.Client(api_key=config.VOYAGE_API_KEY)
         self.anthropic = Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        self.vector_store = VectorStore(storage_dir)
+        self.vector_store = VectorStore(
+            storage_dir=config.QDRANT_STORAGE_DIR,
+            url=config.QDRANT_URL,
+            api_key=config.QDRANT_API_KEY,
+        )
         logger.info("Service initialized")
 
     async def get_embedding(
