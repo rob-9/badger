@@ -127,4 +127,11 @@ def render_journal_markdown(entries: list[JournalEntry], mind) -> str:
 
 def _slug(text: str) -> str:
     """Create a markdown-compatible anchor slug."""
-    return text.lower().replace(" ", "-").replace(":", "")
+    import re
+    if not text:
+        return "section"
+    slug = text.strip().lower()
+    slug = slug.replace(" ", "-")
+    slug = re.sub(r'[^\w\-]', '', slug)
+    slug = re.sub(r'-+', '-', slug).strip('-')
+    return slug or "section"
