@@ -26,9 +26,15 @@ from reader.reflection import reflect_on_response
 
 logger = logging.getLogger(__name__)
 
-# Front-matter chapter titles to skip (case-insensitive)
-FRONT_MATTER_RE = re.compile(
-    r"^(dedication|contents|copyright|title\s*page|acknowledgments?|about\s+the\s+author|cover)$",
+# Chapter titles to skip: front-matter, back-matter, footnotes (case-insensitive)
+SKIP_CHAPTER_RE = re.compile(
+    r"^("
+    r"dedication|contents|copyright|title\s*page|cover"
+    r"|acknowledge?ments?"
+    r"|about\s+the\s+(author|publisher)"
+    r"|also\s+by\b.*"
+    r"|.*\bfootnote\s*\d*"
+    r")$",
     re.IGNORECASE,
 )
 
@@ -148,28 +154,18 @@ async def _resolve_chapter_stops(
     # Filter out front-matter
     chapters = [
         c for c in chapters
-        if c["title"] and not FRONT_MATTER_RE.match(c["title"].strip())
+        if c["title"] and not SKIP_CHAPTER_RE.match(c["title"].strip())
     ]
 
     if len(chapters) < 2:
         logger.warning("No chapter structure found, falling back to pct:10")
         return _resolve_pct_stops(total_chunks, 10)
 
-    # Cap very long books at 25 stops
-    if len(chapters) > 25:
-        step = len(chapters) // 25
-        chapters = chapters[::step]
-        # Always include the last chapter
-        all_results_last = await vector_store.get_chunks_by_range(
-            book_id, total_chunks - 1, total_chunks - 1
-        )
-        if chapters[-1]["end_idx"] < total_chunks - 1:
-            chapters.append({
-                "title": "Final",
-                "start_idx": chapters[-1]["end_idx"] + 1,
-                "end_idx": total_chunks - 1,
-                "chapter_index": None,
-            })
+    # Cap very long books at ~30 stops (evenly spaced, always include last)
+    max_stops = 40
+    if len(chapters) > max_stops:
+        indices = [round(i * (len(chapters) - 1) / (max_stops - 1)) for i in range(max_stops)]
+        chapters = [chapters[i] for i in dict.fromkeys(indices)]
 
     stops: list[StopPoint] = []
     for c in chapters:
