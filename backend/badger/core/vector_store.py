@@ -58,9 +58,22 @@ class SearchResult:
     score: float  # Cosine similarity: 1 = identical, 0 = orthogonal, -1 = opposite
 
 
+# CJK Unicode ranges — tokenized as individual characters (no word boundaries in CJK)
+_CJK_RE = re.compile(
+    r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff'
+    r'\u3040-\u309f\u30a0-\u30ff'
+    r'\uac00-\ud7af]'
+    r'|\w+'
+)
+
+
 def _tokenize(text: str) -> list[str]:
-    """Split text into lowercase words for BM25 matching (e.g. 'Hello World!' → ['hello', 'world'])."""
-    return re.findall(r'\w+', text.lower())
+    """Split text into lowercase tokens for BM25 matching.
+
+    CJK characters become individual tokens (no word boundaries in CJK scripts).
+    Latin/Cyrillic/etc. use standard word-boundary splitting.
+    """
+    return _CJK_RE.findall(text.lower())
 
 
 class BM25Index:
@@ -613,11 +626,20 @@ class QdrantVectorStore:
             text = text.replace(src, dst)
         return re.sub(r'\s+', ' ', text).strip()
 
+    @staticmethod
+    def _normalize_for_fuzzy(text: str) -> str:
+        """Aggressive normalization for fuzzy matching — strips all punctuation."""
+        text = QdrantVectorStore._normalize_quotes(text)
+        text = re.sub(r'[^\w\s]', '', text)
+        return re.sub(r'\s+', ' ', text).strip().lower()
+
     async def find_chunk_containing(self, book_id: str, text: str) -> Optional[int]:
         """Find the chunk index that contains the given text.
 
-        Uses progressive matching: tries full text, then 200, 100, 50 char
-        snippets with normalized quotes and case-insensitive comparison.
+        Uses progressive matching:
+        1. Exact substring with normalized quotes (full, 200, 100, 50 chars)
+        2. Punctuation-stripped fuzzy match (handles special chars like finish'd)
+        3. Adjacent chunk boundary check (handles cross-chunk selections)
 
         Returns the chunk index if found, or None if no match.
         """
@@ -637,8 +659,7 @@ class QdrantVectorStore:
             for e in entries
         ]
 
-        # Progressive snippet lengths — try longest first for best accuracy
-        # Deduplicate and skip lengths longer than the text
+        # Phase 1: Exact substring match with progressive snippet lengths
         snippet_lengths = list(dict.fromkeys(
             l for l in [len(normalized), 200, 100, 50] if l <= len(normalized)
         ))
@@ -650,6 +671,27 @@ class QdrantVectorStore:
             for chunk_text, chunk_index in normalized_chunks:
                 if snippet in chunk_text:
                     return chunk_index
+
+        # Phase 2: Punctuation-stripped fuzzy match
+        fuzzy_needle = self._normalize_for_fuzzy(text)
+        if len(fuzzy_needle) >= 15:
+            fuzzy_chunks = [
+                (self._normalize_for_fuzzy(e.chunk.text), e.chunk.metadata["chunk_index"])
+                for e in entries
+            ]
+            fuzzy_snippet = fuzzy_needle[:min(len(fuzzy_needle), 100)]
+            for chunk_text, chunk_index in fuzzy_chunks:
+                if fuzzy_snippet in chunk_text:
+                    return chunk_index
+
+            # Phase 3: Check adjacent chunk boundaries (selection may span two chunks)
+            if len(fuzzy_needle) >= 30:
+                sorted_fuzzy = sorted(fuzzy_chunks, key=lambda x: x[1])
+                boundary_snippet = fuzzy_needle[:150]
+                for i in range(len(sorted_fuzzy) - 1):
+                    combined = sorted_fuzzy[i][0] + " " + sorted_fuzzy[i + 1][0]
+                    if boundary_snippet in combined:
+                        return sorted_fuzzy[i][1]
 
         return None
 

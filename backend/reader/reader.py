@@ -236,9 +236,8 @@ async def run_readthrough(
     agent: dict,
 ) -> None:
     """The main readthrough loop."""
-    run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
-    output_dir = Path(f".data/readthrough/{cfg.book_id}/{run_id}")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    book_dir = Path(f".data/readthrough/{cfg.book_id}")
+    book_dir.mkdir(parents=True, exist_ok=True)
 
     # Resolve stop points
     stops = await resolve_stops(vector_store, cfg.book_id, cfg.stop_strategy)
@@ -258,10 +257,24 @@ async def run_readthrough(
     journal: list[JournalEntry] = []
     completed_stops: list[str] = []
 
-    # Resume support: load state if start_at > 0
-    state_path = output_dir / "state.json"
+    # Resume support: find the most recent prior run and continue into it
     if cfg.start_at > 0:
-        mind, journal, completed_stops = _try_resume(output_dir, cfg.start_at)
+        prev_dir = _find_latest_run(book_dir)
+        if prev_dir:
+            mind, journal, completed_stops = _try_resume(prev_dir, cfg.start_at)
+            # Continue writing to the same run directory
+            run_id = prev_dir.name
+            output_dir = prev_dir
+            logger.info("Resuming run %s from position %.2f", run_id, cfg.start_at)
+        else:
+            logger.warning("No prior run found to resume, starting fresh")
+
+    if cfg.start_at <= 0 or not completed_stops:
+        run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+        output_dir = book_dir / run_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    state_path = output_dir / "state.json"
 
     # Output file handles / paths
     mind_path = output_dir / "mind.jsonl"
@@ -876,6 +889,16 @@ def _write_state(path: Path, last_position: float, completed: list[str], run_id:
         "updated_at": datetime.now().isoformat(),
     }
     path.write_text(json.dumps(state, indent=2))
+
+
+def _find_latest_run(book_dir: Path) -> Path | None:
+    """Find the most recent run directory (by name, which is a timestamp)."""
+    runs = sorted(
+        [d for d in book_dir.iterdir() if d.is_dir() and (d / "mind.jsonl").exists()],
+        key=lambda d: d.name,
+        reverse=True,
+    )
+    return runs[0] if runs else None
 
 
 def _try_resume(

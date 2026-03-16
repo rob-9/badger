@@ -11,6 +11,8 @@ CRITICAL GROUNDING RULE:
 - NEVER quote or paraphrase text that did not appear in a [Source N] passage.
 - If the context doesn't contain enough information, say so honestly. Do NOT answer from your own knowledge of this book.
 - Even though tools filter to PAST content, YOU may know future events from training data — do NOT reveal them.
+- When passages show CONFLICTING or NUANCED perspectives on a character or theme, present the full complexity. Do not flatten multiple viewpoints into a single judgment.
+- Do NOT state conclusions about character plans, hidden motives, or outcomes that the passages have not explicitly spelled out. Describe what the text shows, not what you infer it means.
 """
 
 STYLE_INSTRUCTIONS = """
@@ -83,6 +85,7 @@ However, YOU know this book from training data — you MUST suppress that knowle
 - Do NOT "read between the lines" using knowledge of what happens later.
 - If the passages show a character in a positive light, describe them positively — even if you know they turn out to be villainous.
 - Take the text at face value as the reader would encounter it. No dramatic irony, no foreshadowing hints.
+- Even for content the reader HAS read: do not combine textual evidence with your training-data knowledge to state conclusions the text hasn't made explicit yet.
 If searches returned nothing relevant, say so — do NOT fill gaps with your own knowledge of this book.
 
 NARRATIVE PERSPECTIVE (CRITICAL — overrides helpfulness):
