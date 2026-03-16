@@ -284,6 +284,9 @@ async def run_readthrough(
     print(f"Book: {cfg.book_id}")
     print()
 
+    dims = ["relevance", "conciseness", "accuracy", "spoiler_safety"]
+    errors = 0
+
     for stop_idx, stop in enumerate(stops):
         if stop.position <= cfg.start_at:
             continue
@@ -291,45 +294,59 @@ async def run_readthrough(
         t0 = time.time()
         print(f"[{stop_idx + 1}/{len(stops)}] {stop.label} ({stop.position:.0%})...", end=" ", flush=True)
 
-        # 1. READ — load chunks for this section
-        chunks = await vector_store.get_chunks_by_range(
-            cfg.book_id, stop.chunk_range[0], stop.chunk_range[1],
-        )
-        recent_text = "\n\n".join(r.chunk.text for r in chunks)
-        if not recent_text.strip():
-            print("(empty section, skipping)")
+        try:
+            # 1. READ — load chunks for this section
+            chunks = await vector_store.get_chunks_by_range(
+                cfg.book_id, stop.chunk_range[0], stop.chunk_range[1],
+            )
+            recent_text = "\n\n".join(r.chunk.text for r in chunks)
+            if not recent_text.strip():
+                print("(empty section, skipping)")
+                continue
+
+            # 2. REACT — chain-of-thought reaction
+            reaction = await react_to_section(
+                anthropic, recent_text, mind, stop.position, stop.label, cfg.think_model,
+            )
+            await asyncio.sleep(cfg.delay)
+
+            # 3. THINK — structured mind update
+            mind_update = await update_mind(
+                anthropic, recent_text, reaction, mind, stop.position, stop.label, cfg.think_model,
+            )
+            mind.apply_update(mind_update, stop.position)
+            await asyncio.sleep(cfg.delay)
+
+            # 4. CREATE JOURNAL ENTRY
+            entry = JournalEntry(
+                position=stop.position,
+                label=stop.label,
+                events=mind_update.events_summary,
+                reaction=reaction,
+                mood=mind_update.emotional_state or mind.emotional_state,
+            )
+            journal.append(entry)
+
+            # 5. ASK — generate questions
+            journal_ctx = format_journal_context(journal)
+            questions = await generate_questions(
+                anthropic, recent_text, mind, journal_ctx,
+                stop.position, stop.label, cfg.max_questions_per_stop, cfg.question_model,
+            )
+            await asyncio.sleep(cfg.delay)
+
+        except Exception as e:
+            elapsed = time.time() - t0
+            errors += 1
+            print(f"ERROR in react/think/ask: {e} ({elapsed:.1f}s)")
+            logger.exception("Stop %d (%s) failed during react/think/ask", stop_idx, stop.label)
+            # Save what we have so far before continuing
+            _append_jsonl(mind_path, {
+                "position": stop.position, "label": stop.label, "mind": mind.to_dict(),
+            })
+            completed_stops.append(stop.label)
+            _write_state(state_path, stop.position, completed_stops, run_id)
             continue
-
-        # 2. REACT — chain-of-thought reaction
-        reaction = await react_to_section(
-            anthropic, recent_text, mind, stop.position, stop.label, cfg.think_model,
-        )
-        await asyncio.sleep(cfg.delay)
-
-        # 3. THINK — structured mind update
-        mind_update = await update_mind(
-            anthropic, recent_text, reaction, mind, stop.position, stop.label, cfg.think_model,
-        )
-        mind.apply_update(mind_update, stop.position)
-        await asyncio.sleep(cfg.delay)
-
-        # 4. CREATE JOURNAL ENTRY
-        entry = JournalEntry(
-            position=stop.position,
-            label=stop.label,
-            events=mind_update.events_summary,
-            reaction=reaction,
-            mood=mind_update.emotional_state or mind.emotional_state,
-        )
-        journal.append(entry)
-
-        # 5. ASK — generate questions
-        journal_ctx = format_journal_context(journal)
-        questions = await generate_questions(
-            anthropic, recent_text, mind, journal_ctx,
-            stop.position, stop.label, cfg.max_questions_per_stop, cfg.question_model,
-        )
-        await asyncio.sleep(cfg.delay)
 
         stop_scores: list[float] = []
         stop_questions = 0
@@ -337,229 +354,233 @@ async def run_readthrough(
 
         # 6. For each question
         for q_idx, q in enumerate(questions):
-            stop_questions += 1
-            total_questions += 1
+            try:
+                stop_questions += 1
+                total_questions += 1
 
-            # 6a. QUERY — run through the agent
-            agent_result = await agent["run_agent"](
-                book_id=cfg.book_id,
-                question=q.question,
-                selected_text=q.selected_text or None,
-                reader_position=stop.position,
-            )
-            answer = agent_result.get("answer", "")
-            sources = agent_result.get("sources", [])
-            tool_calls = agent_result.get("tool_calls", [])
-
-            # Build state dict for judge/metrics
-            state = {
-                "answer": answer,
-                "sources": sources,
-                "tool_calls": tool_calls,
-                "selected_text": q.selected_text,
-                "book_id": cfg.book_id,
-                "reader_position": stop.position,
-                "question": q.question,
-            }
-
-            # 6b. JUDGE
-            if cfg.skip_judge:
-                judge_scores = dict(SKIP_JUDGE_SCORES)
-            else:
-                judge_chunks = [
-                    {
-                        "text": s.get("full_text", s.get("text", "")),
-                        "label": s.get("label", "?"),
-                        "chunk_index": s.get("chunk_index"),
-                        "score": s.get("score", 0),
-                    }
-                    for s in sources
-                ]
-                # Build a case dict for the judge
-                judge_case = {
-                    "id": f"reader-{stop_idx}-{q_idx}",
-                    "question": q.question,
-                    "selected_text": q.selected_text,
-                    "reader_position": stop.position,
-                    "expected_gist": q.expected_answer,
-                    "tags": [q.question_type],
-                }
-                judge_scores = score_response(
-                    anthropic=anthropic,
-                    case=judge_case,
-                    chunks=judge_chunks,
-                    response=answer,
-                )
-
-            retrieval_metrics = compute_retrieval_metrics(state)
-
-            # Compute average score from judge dimensions
-            dims = ["relevance", "conciseness", "accuracy", "spoiler_safety"]
-            valid_scores = [judge_scores[d] for d in dims if judge_scores.get(d, -1) >= 0]
-            avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
-            stop_scores.append(avg_score)
-
-            # 6c. REFLECT
-            reflection = await reflect_on_response(
-                anthropic, q.question, answer, mind, stop.position, cfg.reflect_model,
-            )
-
-            # Build trace entry
-            trace = {
-                "stop_index": stop_idx,
-                "stop_label": stop.label,
-                "position": stop.position,
-                "question_index": q_idx,
-                "question": q.question,
-                "question_type": q.question_type,
-                "selected_text": q.selected_text,
-                "motivation": q.motivation,
-                "expected_answer": q.expected_answer,
-                "triggered_by": q.triggered_by,
-                "answer": answer,
-                "tool_calls": tool_calls,
-                "sources_count": len(sources),
-                "retrieval_metrics": retrieval_metrics,
-                "judge": judge_scores,
-                "reflection": {
-                    "satisfactory": reflection.satisfactory,
-                    "contradicts_model": reflection.contradicts_model,
-                    "reveals_new_info": reflection.reveals_new_info,
-                    "possible_spoiler": reflection.possible_spoiler,
-                    "follow_up": reflection.follow_up,
-                    "follow_up_reason": reflection.follow_up_reason,
-                    "mind_update": reflection.mind_update,
-                },
-                "is_follow_up": False,
-            }
-
-            follow_up_traces: list[dict] = []
-
-            # 6d. FOLLOW-UP if needed
-            if (
-                reflection.follow_up
-                and stop_follow_ups < cfg.max_follow_ups
-                and not reflection.satisfactory
-            ):
-                stop_follow_ups += 1
-                total_follow_ups += 1
-
-                fu_result = await agent["run_agent"](
+                # 6a. QUERY — run through the agent
+                agent_result = await agent["run_agent"](
                     book_id=cfg.book_id,
-                    question=reflection.follow_up,
+                    question=q.question,
                     selected_text=q.selected_text or None,
                     reader_position=stop.position,
                 )
-                fu_answer = fu_result.get("answer", "")
-                fu_sources = fu_result.get("sources", [])
-                fu_tool_calls = fu_result.get("tool_calls", [])
+                answer = agent_result.get("answer", "")
+                sources = agent_result.get("sources", [])
+                tool_calls = agent_result.get("tool_calls", [])
 
-                fu_state = {
-                    "answer": fu_answer,
-                    "sources": fu_sources,
-                    "tool_calls": fu_tool_calls,
+                # Build state dict for judge/metrics
+                q_state = {
+                    "answer": answer,
+                    "sources": sources,
+                    "tool_calls": tool_calls,
                     "selected_text": q.selected_text,
                     "book_id": cfg.book_id,
                     "reader_position": stop.position,
-                    "question": reflection.follow_up,
+                    "question": q.question,
                 }
 
+                # 6b. JUDGE
                 if cfg.skip_judge:
-                    fu_judge = dict(SKIP_JUDGE_SCORES)
+                    judge_scores = dict(SKIP_JUDGE_SCORES)
                 else:
-                    fu_chunks = [
+                    judge_chunks = [
                         {
                             "text": s.get("full_text", s.get("text", "")),
                             "label": s.get("label", "?"),
                             "chunk_index": s.get("chunk_index"),
                             "score": s.get("score", 0),
                         }
-                        for s in fu_sources
+                        for s in sources
                     ]
-                    fu_case = {
-                        "id": f"reader-{stop_idx}-{q_idx}-fu",
-                        "question": reflection.follow_up,
+                    judge_case = {
+                        "id": f"reader-{stop_idx}-{q_idx}",
+                        "question": q.question,
                         "selected_text": q.selected_text,
                         "reader_position": stop.position,
-                        "expected_gist": reflection.follow_up_reason or "",
+                        "expected_gist": q.expected_answer,
                         "tags": [q.question_type],
                     }
-                    fu_judge = score_response(
+                    judge_scores = score_response(
                         anthropic=anthropic,
-                        case=fu_case,
-                        chunks=fu_chunks,
-                        response=fu_answer,
+                        case=judge_case,
+                        chunks=judge_chunks,
+                        response=answer,
                     )
 
-                fu_metrics = compute_retrieval_metrics(fu_state)
-                fu_valid = [fu_judge[d] for d in dims if fu_judge.get(d, -1) >= 0]
-                fu_avg = sum(fu_valid) / len(fu_valid) if fu_valid else 0
-                stop_scores.append(fu_avg)
+                retrieval_metrics = compute_retrieval_metrics(q_state)
 
-                # Reflect on follow-up (no further follow-ups)
-                fu_reflection = await reflect_on_response(
-                    anthropic, reflection.follow_up, fu_answer, mind,
-                    stop.position, cfg.reflect_model,
+                valid_scores = [judge_scores[d] for d in dims if judge_scores.get(d, -1) >= 0]
+                avg_score = sum(valid_scores) / len(valid_scores) if valid_scores else 0
+                stop_scores.append(avg_score)
+
+                # 6c. REFLECT
+                reflection = await reflect_on_response(
+                    anthropic, q.question, answer, mind, stop.position, cfg.reflect_model,
                 )
 
-                fu_trace = {
+                # Build trace entry
+                trace = {
                     "stop_index": stop_idx,
                     "stop_label": stop.label,
                     "position": stop.position,
                     "question_index": q_idx,
-                    "question": reflection.follow_up,
+                    "question": q.question,
                     "question_type": q.question_type,
                     "selected_text": q.selected_text,
-                    "motivation": reflection.follow_up_reason or "",
-                    "expected_answer": "",
-                    "triggered_by": f"follow_up:{q_idx}",
-                    "answer": fu_answer,
-                    "tool_calls": fu_tool_calls,
-                    "sources_count": len(fu_sources),
-                    "retrieval_metrics": fu_metrics,
-                    "judge": fu_judge,
+                    "motivation": q.motivation,
+                    "expected_answer": q.expected_answer,
+                    "triggered_by": q.triggered_by,
+                    "answer": answer,
+                    "tool_calls": tool_calls,
+                    "sources_count": len(sources),
+                    "retrieval_metrics": retrieval_metrics,
+                    "judge": judge_scores,
                     "reflection": {
-                        "satisfactory": fu_reflection.satisfactory,
-                        "contradicts_model": fu_reflection.contradicts_model,
-                        "reveals_new_info": fu_reflection.reveals_new_info,
-                        "possible_spoiler": fu_reflection.possible_spoiler,
-                        "follow_up": None,
-                        "follow_up_reason": None,
-                        "mind_update": fu_reflection.mind_update,
+                        "satisfactory": reflection.satisfactory,
+                        "contradicts_model": reflection.contradicts_model,
+                        "reveals_new_info": reflection.reveals_new_info,
+                        "possible_spoiler": reflection.possible_spoiler,
+                        "follow_up": reflection.follow_up,
+                        "follow_up_reason": reflection.follow_up_reason,
+                        "mind_update": reflection.mind_update,
                     },
-                    "is_follow_up": True,
+                    "is_follow_up": False,
                 }
-                follow_up_traces.append(fu_trace)
 
-            # 6e. RECORD — append to output files
-            _append_jsonl(questions_path, {
-                "stop_index": stop_idx,
-                "position": stop.position,
-                "label": stop.label,
-                "question": q.question,
-                "selected_text": q.selected_text,
-                "question_type": q.question_type,
-                "motivation": q.motivation,
-                "expected_answer": q.expected_answer,
-                "triggered_by": q.triggered_by,
-            })
+                follow_up_traces: list[dict] = []
 
-            _append_jsonl(responses_path, {
-                "stop_index": stop_idx,
-                "position": stop.position,
-                "question": q.question,
-                "answer": answer,
-                "judge": judge_scores,
-                "reflection": trace["reflection"],
-            })
+                # 6d. FOLLOW-UP if needed
+                if (
+                    reflection.follow_up
+                    and stop_follow_ups < cfg.max_follow_ups
+                    and not reflection.satisfactory
+                ):
+                    stop_follow_ups += 1
+                    total_follow_ups += 1
 
-            _append_jsonl(traces_path, trace)
-            for ft in follow_up_traces:
-                _append_jsonl(traces_path, ft)
+                    fu_result = await agent["run_agent"](
+                        book_id=cfg.book_id,
+                        question=reflection.follow_up,
+                        selected_text=q.selected_text or None,
+                        reader_position=stop.position,
+                    )
+                    fu_answer = fu_result.get("answer", "")
+                    fu_sources = fu_result.get("sources", [])
+                    fu_tool_calls = fu_result.get("tool_calls", [])
 
-            all_results.append(trace)
-            for ft in follow_up_traces:
-                all_results.append(ft)
+                    fu_q_state = {
+                        "answer": fu_answer,
+                        "sources": fu_sources,
+                        "tool_calls": fu_tool_calls,
+                        "selected_text": q.selected_text,
+                        "book_id": cfg.book_id,
+                        "reader_position": stop.position,
+                        "question": reflection.follow_up,
+                    }
+
+                    if cfg.skip_judge:
+                        fu_judge = dict(SKIP_JUDGE_SCORES)
+                    else:
+                        fu_chunks = [
+                            {
+                                "text": s.get("full_text", s.get("text", "")),
+                                "label": s.get("label", "?"),
+                                "chunk_index": s.get("chunk_index"),
+                                "score": s.get("score", 0),
+                            }
+                            for s in fu_sources
+                        ]
+                        fu_case = {
+                            "id": f"reader-{stop_idx}-{q_idx}-fu",
+                            "question": reflection.follow_up,
+                            "selected_text": q.selected_text,
+                            "reader_position": stop.position,
+                            "expected_gist": reflection.follow_up_reason or "",
+                            "tags": [q.question_type],
+                        }
+                        fu_judge = score_response(
+                            anthropic=anthropic,
+                            case=fu_case,
+                            chunks=fu_chunks,
+                            response=fu_answer,
+                        )
+
+                    fu_metrics = compute_retrieval_metrics(fu_q_state)
+                    fu_valid = [fu_judge[d] for d in dims if fu_judge.get(d, -1) >= 0]
+                    fu_avg = sum(fu_valid) / len(fu_valid) if fu_valid else 0
+                    stop_scores.append(fu_avg)
+
+                    # Reflect on follow-up (no further follow-ups)
+                    fu_reflection = await reflect_on_response(
+                        anthropic, reflection.follow_up, fu_answer, mind,
+                        stop.position, cfg.reflect_model,
+                    )
+
+                    fu_trace = {
+                        "stop_index": stop_idx,
+                        "stop_label": stop.label,
+                        "position": stop.position,
+                        "question_index": q_idx,
+                        "question": reflection.follow_up,
+                        "question_type": q.question_type,
+                        "selected_text": q.selected_text,
+                        "motivation": reflection.follow_up_reason or "",
+                        "expected_answer": "",
+                        "triggered_by": f"follow_up:{q_idx}",
+                        "answer": fu_answer,
+                        "tool_calls": fu_tool_calls,
+                        "sources_count": len(fu_sources),
+                        "retrieval_metrics": fu_metrics,
+                        "judge": fu_judge,
+                        "reflection": {
+                            "satisfactory": fu_reflection.satisfactory,
+                            "contradicts_model": fu_reflection.contradicts_model,
+                            "reveals_new_info": fu_reflection.reveals_new_info,
+                            "possible_spoiler": fu_reflection.possible_spoiler,
+                            "follow_up": None,
+                            "follow_up_reason": None,
+                            "mind_update": fu_reflection.mind_update,
+                        },
+                        "is_follow_up": True,
+                    }
+                    follow_up_traces.append(fu_trace)
+
+                # 6e. RECORD — append to output files
+                _append_jsonl(questions_path, {
+                    "stop_index": stop_idx,
+                    "position": stop.position,
+                    "label": stop.label,
+                    "question": q.question,
+                    "selected_text": q.selected_text,
+                    "question_type": q.question_type,
+                    "motivation": q.motivation,
+                    "expected_answer": q.expected_answer,
+                    "triggered_by": q.triggered_by,
+                })
+
+                _append_jsonl(responses_path, {
+                    "stop_index": stop_idx,
+                    "position": stop.position,
+                    "question": q.question,
+                    "answer": answer,
+                    "judge": judge_scores,
+                    "reflection": trace["reflection"],
+                })
+
+                _append_jsonl(traces_path, trace)
+                for ft in follow_up_traces:
+                    _append_jsonl(traces_path, ft)
+
+                all_results.append(trace)
+                for ft in follow_up_traces:
+                    all_results.append(ft)
+
+            except Exception as e:
+                errors += 1
+                logger.exception("Question %d at stop %d failed: %s", q_idx, stop_idx, e)
+                print(f"\n    ⚠  Question {q_idx + 1} failed: {e}")
+                continue
 
             # 6f. Delay between questions
             await asyncio.sleep(cfg.delay)
@@ -570,7 +591,7 @@ async def run_readthrough(
         print(f"{stop_questions} questions, avg={avg:.1f}/3 ({elapsed:.1f}s)")
 
         # Check for spoiler leaks
-        for r in all_results[-stop_questions:]:
+        for r in all_results[-(stop_questions + stop_follow_ups):]:
             spoiler_score = r.get("judge", {}).get("spoiler_safety", 3)
             if 0 <= spoiler_score <= 1:
                 print(f"    ⚠  SPOILER LEAK: score={spoiler_score}/3 at position={r['position']:.2f}")
@@ -585,20 +606,21 @@ async def run_readthrough(
             "elapsed": round(elapsed, 1),
         })
 
-        # 7. SNAPSHOT — append mind state
+        # 7. SNAPSHOT — append mind state (include events_summary for resume)
         _append_jsonl(mind_path, {
             "position": stop.position,
             "label": stop.label,
+            "events_summary": mind_update.events_summary,
             "mind": mind.to_dict(),
         })
 
-        # 8. UPDATE STATE
-        completed_stops.append(stop.label)
-        _write_state(state_path, stop.position, completed_stops, run_id)
-
-        # 9. RENDER — re-render journal
+        # 8. RENDER journal FIRST (so it's consistent if crash after state write)
         journal_md = render_journal_markdown(journal, mind)
         journal_path.write_text(journal_md)
+
+        # 9. UPDATE STATE (last — signals this stop is complete)
+        completed_stops.append(stop.label)
+        _write_state(state_path, stop.position, completed_stops, run_id)
 
     # Generate report
     print()
@@ -608,7 +630,11 @@ async def run_readthrough(
     report_path = output_dir / "report.md"
     report_path.write_text(report)
 
-    print(f"Readthrough complete: {total_questions} questions, {total_follow_ups} follow-ups")
+    print(f"Readthrough complete: {total_questions} questions, {total_follow_ups} follow-ups", end="")
+    if errors:
+        print(f", {errors} errors")
+    else:
+        print()
     print(f"Output: {output_dir}")
     print(f"  report.md")
     print(f"  journal.md")
@@ -818,14 +844,14 @@ def _try_resume(
 ) -> tuple[ReaderMind, list[JournalEntry], list[str]]:
     """Try to resume from existing state files.
 
-    Returns (mind, journal_entries, completed_stops).
-    Falls back to empty state on any error.
+    Restores mind state, journal entries, and completed stops from
+    the output directory. Falls back to empty state on any error.
     """
     mind = ReaderMind()
     journal: list[JournalEntry] = []
     completed: list[str] = []
 
-    # Restore mind from mind.jsonl (take the latest snapshot before start_at)
+    # Restore mind + journal entries from mind.jsonl
     mind_path = output_dir / "mind.jsonl"
     if mind_path.exists():
         try:
@@ -834,13 +860,24 @@ def _try_resume(
                 if not line.strip():
                     continue
                 entry = json.loads(line)
-                if entry.get("position", 0) <= start_at:
+                pos = entry.get("position", 0)
+                if pos <= start_at:
                     latest = entry
+                    # Build journal entry from mind snapshot
+                    journal.append(JournalEntry(
+                        position=pos,
+                        label=entry.get("label", f"{pos:.0%}"),
+                        events=entry.get("events_summary", ""),
+                        reaction=entry.get("reaction", "(resumed)"),
+                        mood=entry.get("mind", {}).get("emotional_state", ""),
+                    ))
             if latest and "mind" in latest:
                 mind = ReaderMind.from_dict(latest["mind"])
-                logger.info("Resumed mind state from position %.2f", latest["position"])
+                logger.info("Resumed mind state from position %.2f (%d journal entries)",
+                            latest["position"], len(journal))
         except Exception as e:
             logger.warning("Failed to resume mind state: %s", e)
+            journal = []
 
     # Restore state.json for completed stops
     state_path = output_dir / "state.json"
