@@ -31,6 +31,7 @@ class GeneratedQuestion:
     motivation: str                # why the reader would ask this
     expected_answer: str           # sketch of good answer (for judge)
     triggered_by: str | None       # "theory:3" or "unresolved:1" or None (organic)
+    answerable_by_retrieval: bool = True  # false → direct answer (interpretation/analysis)
 
 
 def _type_guidance(position: float) -> str:
@@ -135,6 +136,13 @@ async def generate_questions(
                 logger.warning("  Hallucinated selected_text for question: %s", question_text[:60])
                 selected = ""
 
+        # Determine if this question can be answered by passage retrieval
+        raw_answerable = q.get("answerable_by_retrieval")
+        if isinstance(raw_answerable, bool):
+            answerable = raw_answerable
+        else:
+            answerable = qtype in ("vocabulary", "lookup")
+
         questions.append(GeneratedQuestion(
             question=question_text,
             selected_text=selected,
@@ -142,6 +150,7 @@ async def generate_questions(
             motivation=str(q.get("motivation", "")),
             expected_answer=str(q.get("expected_answer", "")),
             triggered_by=q.get("triggered_by"),
+            answerable_by_retrieval=answerable,
         ))
 
     logger.info("  Generated %d valid questions (of %d returned)", len(questions), len(parsed))

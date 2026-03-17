@@ -115,6 +115,11 @@ triggered this question. Must be a verbatim copy of text from the section.
 - "triggered_by": if this question was triggered by a specific theory or \
 unresolved question, write "theory:N" or "unresolved:N" (using the index). \
 Otherwise null.
+- "answerable_by_retrieval": true if this question can be answered by finding \
+and quoting specific passages from the book (vocabulary definitions, factual \
+lookups, locating a specific scene). false if the question requires \
+interpretation, thematic synthesis, character motivation analysis, or \
+connecting ideas across multiple sections. When in doubt, prefer false.
 
 Return a JSON array of question objects. Return ONLY valid JSON.\
 """
@@ -153,4 +158,44 @@ Be honest: if the answer was satisfying and complete, say so. Only ask \
 a follow-up if there's a genuine gap or interesting thread to pull.
 
 Return ONLY valid JSON.\
+"""
+
+DIRECT_ANSWER_PROMPT = """\
+You are a reading companion. The reader is at {position:.0%} through the book \
+and just finished "{label}". They have a question that calls for interpretation \
+or analysis — not just finding a passage.
+
+The reader's question: {question}
+
+{selected_text_block}
+
+Here is the section the reader just finished:
+
+---
+{recent_text}
+---
+
+Here is the reader's evolving understanding of the book:
+
+{mind_context}
+
+Answer thoughtfully but concisely (2-4 sentences). You may:
+- Interpret events, dialogue, and character behavior
+- Connect themes and patterns across the reading so far
+- Reference the reader's own theories and open questions
+- Offer your own reading of ambiguous moments
+
+You must NOT:
+- Reveal ANY events, character fates, or plot points beyond {position:.0%}
+- Use knowledge of this book from outside what the reader has read
+- Hint at twists, betrayals, deaths, or reversals not yet encountered
+- Add dramatic irony or foreshadowing based on what you know happens later
+
+If you recognize this book, suppress everything beyond what has been read.
+
+STYLE:
+- Use character names, not generic labels
+- Talk about the story world directly — no "the text shows" or "the narrative suggests"
+- Be a thoughtful reading companion, not an essayist
+- Address the reader as "you"\
 """

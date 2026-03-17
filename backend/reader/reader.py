@@ -19,12 +19,45 @@ from badger.core.vector_store import VectorStore
 from benchmarks.judge import score_response
 from benchmarks.run import compute_retrieval_metrics
 
-from reader.mind import ReaderMind, MindUpdate, TokenUsage, react_to_section, update_mind
+from reader.mind import ReaderMind, MindUpdate, TokenUsage, _usage, react_to_section, update_mind
 from reader.journal import JournalEntry, format_journal_context, render_journal_markdown
+from reader.prompts import DIRECT_ANSWER_PROMPT
 from reader.questions import generate_questions
 from reader.reflection import reflect_on_response
 
 logger = logging.getLogger(__name__)
+
+
+async def direct_answer(
+    client, question, selected_text, recent_text, mind, position, label, model,
+) -> tuple[str, TokenUsage]:
+    """Answer an interpretive/analytical question directly (no RAG retrieval)."""
+    if selected_text:
+        selected_text_block = f'The reader highlighted this passage:\n\n> {selected_text}'
+    else:
+        selected_text_block = ""
+
+    prompt = DIRECT_ANSWER_PROMPT.format(
+        position=position,
+        label=label,
+        question=question,
+        selected_text_block=selected_text_block,
+        recent_text=recent_text[:12000],
+        mind_context=mind.to_prompt_context(),
+    )
+
+    response = await asyncio.to_thread(
+        client.messages.create,
+        model=model,
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    usage = _usage(response, "direct_answer")
+    text = ""
+    if response.content and hasattr(response.content[0], "text"):
+        text = response.content[0].text.strip()
+    return text, usage
 
 # Chapter titles to skip: front-matter, back-matter, footnotes (case-insensitive)
 SKIP_CHAPTER_RE = re.compile(
@@ -120,6 +153,9 @@ async def _resolve_chapter_stops(
     all_results = await vector_store.get_chunks_by_range(book_id, 0, total_chunks - 1)
     if not all_results:
         return _resolve_pct_stops(total_chunks, 10)
+
+    # Qdrant doesn't guarantee order — sort by chunk_index
+    all_results.sort(key=lambda r: r.chunk.metadata.get("chunk_index", 0))
 
     # Group chunks by chapter_title
     chapters: list[dict] = []  # [{title, start_idx, end_idx, chapter_index}]
@@ -372,16 +408,39 @@ async def run_readthrough(
                 stop_questions += 1
                 total_questions += 1
 
-                # 6a. QUERY — run through the agent
-                agent_result = await agent["run_agent"](
-                    book_id=cfg.book_id,
-                    question=q.question,
-                    selected_text=q.selected_text or None,
-                    reader_position=stop.position,
-                )
-                answer = agent_result.get("answer", "")
-                sources = agent_result.get("sources", [])
-                tool_calls = agent_result.get("tool_calls", [])
+                # 6a. QUERY — route based on question type
+                if q.answerable_by_retrieval:
+                    # RAG path: retrieve passages and ground answer
+                    agent_result = await agent["run_agent"](
+                        book_id=cfg.book_id,
+                        question=q.question,
+                        selected_text=q.selected_text or None,
+                        reader_position=stop.position,
+                    )
+                    answer = agent_result.get("answer", "")
+                    sources = agent_result.get("sources", [])
+                    tool_calls = agent_result.get("tool_calls", [])
+                    answer_mode = "rag"
+
+                    # Fallback: if RAG returns empty, use direct path
+                    if not answer.strip():
+                        logger.warning("Empty RAG answer for q%d, falling back to direct", q_idx)
+                        answer_mode = "direct_fallback"
+                        answer, direct_usage = await direct_answer(
+                            anthropic, q.question, q.selected_text, recent_text,
+                            mind, stop.position, stop.label, cfg.think_model,
+                        )
+                        stop_tokens.append(direct_usage)
+                else:
+                    # Direct path: interpretation/analysis without retrieval
+                    answer, direct_usage = await direct_answer(
+                        anthropic, q.question, q.selected_text, recent_text,
+                        mind, stop.position, stop.label, cfg.think_model,
+                    )
+                    stop_tokens.append(direct_usage)
+                    sources = []
+                    tool_calls = []
+                    answer_mode = "direct"
 
                 # Build state dict for judge/metrics
                 q_state = {
@@ -446,9 +505,17 @@ async def run_readthrough(
                     "motivation": q.motivation,
                     "expected_answer": q.expected_answer,
                     "triggered_by": q.triggered_by,
+                    "answerable_by_retrieval": q.answerable_by_retrieval,
+                    "answer_mode": answer_mode,
                     "answer": answer,
                     "tool_calls": tool_calls,
                     "sources_count": len(sources),
+                    "sources": [
+                        {"text": s.get("full_text", s.get("text", ""))[:500],
+                         "chunk_index": s.get("chunk_index"),
+                         "score": round(s.get("score", 0), 4)}
+                        for s in sources
+                    ],
                     "retrieval_metrics": retrieval_metrics,
                     "judge": judge_scores,
                     "reflection": {
@@ -477,15 +544,27 @@ async def run_readthrough(
                     stop_follow_ups += 1
                     total_follow_ups += 1
 
-                    fu_result = await agent["run_agent"](
-                        book_id=cfg.book_id,
-                        question=reflection.follow_up,
-                        selected_text=q.selected_text or None,
-                        reader_position=stop.position,
-                    )
-                    fu_answer = fu_result.get("answer", "")
-                    fu_sources = fu_result.get("sources", [])
-                    fu_tool_calls = fu_result.get("tool_calls", [])
+                    if answer_mode in ("direct", "direct_fallback"):
+                        # Follow-up also uses direct path
+                        fu_answer, fu_direct_usage = await direct_answer(
+                            anthropic, reflection.follow_up, q.selected_text,
+                            recent_text, mind, stop.position, stop.label, cfg.think_model,
+                        )
+                        stop_tokens.append(fu_direct_usage)
+                        fu_sources = []
+                        fu_tool_calls = []
+                        fu_answer_mode = "direct"
+                    else:
+                        fu_result = await agent["run_agent"](
+                            book_id=cfg.book_id,
+                            question=reflection.follow_up,
+                            selected_text=q.selected_text or None,
+                            reader_position=stop.position,
+                        )
+                        fu_answer = fu_result.get("answer", "")
+                        fu_sources = fu_result.get("sources", [])
+                        fu_tool_calls = fu_result.get("tool_calls", [])
+                        fu_answer_mode = "rag"
 
                     fu_q_state = {
                         "answer": fu_answer,
@@ -547,9 +626,17 @@ async def run_readthrough(
                         "motivation": reflection.follow_up_reason or "",
                         "expected_answer": "",
                         "triggered_by": f"follow_up:{q_idx}",
+                        "answerable_by_retrieval": q.answerable_by_retrieval,
+                        "answer_mode": fu_answer_mode,
                         "answer": fu_answer,
                         "tool_calls": fu_tool_calls,
                         "sources_count": len(fu_sources),
+                        "sources": [
+                            {"text": s.get("full_text", s.get("text", ""))[:500],
+                             "chunk_index": s.get("chunk_index"),
+                             "score": round(s.get("score", 0), 4)}
+                            for s in fu_sources
+                        ],
                         "retrieval_metrics": fu_metrics,
                         "judge": fu_judge,
                         "reflection": {
@@ -579,6 +666,7 @@ async def run_readthrough(
                     "motivation": q.motivation,
                     "expected_answer": q.expected_answer,
                     "triggered_by": q.triggered_by,
+                    "answerable_by_retrieval": q.answerable_by_retrieval,
                 })
 
                 _append_jsonl(responses_path, {
@@ -586,6 +674,8 @@ async def run_readthrough(
                     "position": stop.position,
                     "question": q.question,
                     "answer": answer,
+                    "answer_mode": answer_mode,
+                    "sources": trace["sources"],
                     "judge": judge_scores,
                     "reflection": trace["reflection"],
                 })
@@ -825,7 +915,7 @@ def generate_readthrough_report(
         stage_totals["judge"] = [judge_in, judge_out]
 
     grand_in = grand_out = 0
-    for stage in ["react", "think", "question_gen", "reflect", "judge"]:
+    for stage in ["react", "think", "question_gen", "direct_answer", "reflect", "judge"]:
         if stage in stage_totals:
             sin, sout = stage_totals[stage]
             grand_in += sin
@@ -868,6 +958,157 @@ def generate_readthrough_report(
         lines.append("")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Rejudge
+# ---------------------------------------------------------------------------
+
+def rejudge_run(
+    book_id: str,
+    run_id: str,
+    anthropic,
+) -> None:
+    """Re-score all traces in a run using the LLM judge, then regenerate the report."""
+    dims = ["relevance", "conciseness", "accuracy", "spoiler_safety"]
+    output_dir = Path(f".data/readthrough/{book_id}/{run_id}")
+    traces_path = output_dir / "traces.jsonl"
+
+    if not traces_path.exists():
+        print(f"ERROR: No traces found at {traces_path}")
+        return
+
+    # Load all traces
+    traces = []
+    for line in traces_path.read_text().strip().split("\n"):
+        if line.strip():
+            traces.append(json.loads(line))
+
+    print(f"Rejudging {len(traces)} traces from {run_id}...")
+
+    # Score each trace
+    for i, trace in enumerate(traces):
+        sources = trace.get("sources", [])
+        judge_chunks = [
+            {
+                "text": s.get("text", ""),
+                "label": s.get("label", "?"),
+                "chunk_index": s.get("chunk_index"),
+                "score": s.get("score", 0),
+            }
+            for s in sources
+        ]
+        judge_case = {
+            "id": f"reader-{trace['stop_index']}-{trace.get('question_index', i)}",
+            "question": trace["question"],
+            "selected_text": trace.get("selected_text", ""),
+            "reader_position": trace.get("position", 0),
+            "expected_gist": trace.get("expected_answer", ""),
+            "tags": [trace.get("question_type", "unknown")],
+        }
+        judge_scores = score_response(
+            anthropic=anthropic,
+            case=judge_case,
+            chunks=judge_chunks,
+            response=trace.get("answer", ""),
+        )
+        trace["judge"] = judge_scores
+
+        valid = [judge_scores[d] for d in dims if judge_scores.get(d, -1) >= 0]
+        avg = round(sum(valid) / len(valid), 1) if valid else 0
+        fu = " (follow-up)" if trace.get("is_follow_up") else ""
+        print(f"  [{i+1}/{len(traces)}] {avg}/3 — {trace['question'][:60]}{fu}")
+
+    # Rewrite traces.jsonl
+    with open(traces_path, "w") as f:
+        for trace in traces:
+            f.write(json.dumps(trace, default=str) + "\n")
+
+    # Rewrite responses.jsonl
+    responses_path = output_dir / "responses.jsonl"
+    with open(responses_path, "w") as f:
+        for trace in traces:
+            f.write(json.dumps({
+                "stop_index": trace["stop_index"],
+                "position": trace["position"],
+                "question": trace["question"],
+                "answer": trace.get("answer", ""),
+                "answer_mode": trace.get("answer_mode", ""),
+                "sources": trace.get("sources", []),
+                "judge": trace["judge"],
+                "reflection": trace.get("reflection", {}),
+            }, default=str) + "\n")
+
+    # Reconstruct stop_summaries from traces
+    stop_data: dict[int, dict] = {}
+    for trace in traces:
+        si = trace["stop_index"]
+        if si not in stop_data:
+            stop_data[si] = {
+                "stop_index": si,
+                "label": trace.get("stop_label", ""),
+                "position": trace.get("position", 0),
+                "questions": 0,
+                "follow_ups": 0,
+                "scores": [],
+                "elapsed": 0,
+                "tokens_in": 0,
+                "tokens_out": 0,
+            }
+        sd = stop_data[si]
+        if trace.get("is_follow_up"):
+            sd["follow_ups"] += 1
+        else:
+            sd["questions"] += 1
+        valid = [trace["judge"][d] for d in dims if trace["judge"].get(d, -1) >= 0]
+        if valid:
+            sd["scores"].append(sum(valid) / len(valid))
+
+    stop_summaries = []
+    for si in sorted(stop_data.keys()):
+        sd = stop_data[si]
+        scores = sd.pop("scores")
+        sd["avg_score"] = round(sum(scores) / len(scores), 2) if scores else 0
+        stop_summaries.append(sd)
+
+    # Restore mind from mind.jsonl
+    mind = ReaderMind()
+    mind_path = output_dir / "mind.jsonl"
+    if mind_path.exists():
+        for line in mind_path.read_text().strip().split("\n"):
+            if line.strip():
+                entry = json.loads(line)
+                if "mind" in entry:
+                    mind = ReaderMind.from_dict(entry["mind"])
+
+    # Build minimal config for report
+    cfg = ReadthroughConfig(book_id=book_id)
+
+    # Regenerate report
+    report = generate_readthrough_report(
+        cfg=cfg,
+        run_id=run_id,
+        stops=[],  # not needed for detail rendering (uses all_results)
+        all_results=traces,
+        stop_summaries=stop_summaries,
+        mind=mind,
+        journal=[],
+        output_dir=output_dir,
+    )
+    report_path = output_dir / "report.md"
+    report_path.write_text(report)
+
+    # Summary
+    all_valid = []
+    for trace in traces:
+        valid = [trace["judge"][d] for d in dims if trace["judge"].get(d, -1) >= 0]
+        if valid:
+            all_valid.append(sum(valid) / len(valid))
+    overall = round(sum(all_valid) / len(all_valid), 2) if all_valid else 0
+    print(f"\nDone. Overall: {overall}/3.00")
+    print(f"Updated: {traces_path}")
+    print(f"Updated: {responses_path}")
+    print(f"Updated: {report_path}")
 
 
 # ---------------------------------------------------------------------------

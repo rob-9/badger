@@ -6,6 +6,8 @@ Usage:
     python -m reader.run --book-id babel --stops pct:10 --max-questions 3
     python -m reader.run --book-id babel --dry-run
     python -m reader.run --book-id babel --start-at 0.5 --skip-judge
+    python -m reader.run --book-id babel --rejudge 20260316-140707
+    python -m reader.run --book-id babel --rejudge 20260316-140707 --rejudge-api
 """
 
 import argparse
@@ -26,7 +28,7 @@ from badger.core.agent import build_agent
 from benchmarks.run import BOOK_ALIASES, TeeOutput
 from benchmarks.judge import set_cache_enabled, flush_judge_cache
 
-from reader.reader import ReadthroughConfig, run_readthrough
+from reader.reader import ReadthroughConfig, run_readthrough, rejudge_run
 
 
 def main():
@@ -81,6 +83,14 @@ def main():
         "--reflect-model", default="",
         help=f"Model for reflection (default: {config.CLAUDE_HAIKU_MODEL})",
     )
+    parser.add_argument(
+        "--rejudge", metavar="RUN_ID",
+        help="Re-score an existing run (e.g. 20260316-140707). Uses Claude Code CLI by default.",
+    )
+    parser.add_argument(
+        "--rejudge-api", action="store_true",
+        help="Use direct API calls for rejudge instead of Claude Code CLI",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -101,8 +111,30 @@ def main():
     else:
         set_cache_enabled(True)
 
+    # --- Rejudge mode ---
+    if args.rejudge:
+        if args.rejudge_api:
+            # Direct API calls (needs ANTHROPIC_API_KEY with credits)
+            anthropic = Anthropic(api_key=config.ANTHROPIC_API_KEY)
+            try:
+                rejudge_run(book_id, args.rejudge, anthropic)
+            finally:
+                flush_judge_cache()
+        else:
+            # Claude Code CLI (default — uses Claude Code subscription)
+            import subprocess
+            run_dir = Path(f".data/readthrough/{book_id}/{args.rejudge}")
+            if not (run_dir / "traces.jsonl").exists():
+                print(f"ERROR: No traces found at {run_dir}/traces.jsonl")
+                sys.exit(1)
+            subprocess.run(
+                [sys.executable, "-m", "reader.rejudge_cc", str(run_dir)],
+                cwd=Path(__file__).resolve().parent.parent,
+            )
+        return
+
     # Initialize services
-    rag_service = RAGService(storage_dir=config.VECTOR_STORAGE_DIR)
+    rag_service = RAGService()
     anthropic = Anthropic(api_key=config.ANTHROPIC_API_KEY)
     async_anthropic = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
     vector_store = rag_service.vector_store
