@@ -788,27 +788,41 @@ def generate_readthrough_report(
     lines.append("")
 
     # 1. Overall scores
+    # Detect if judge was skipped (all scores are -1)
+    any_judged = any(
+        r.get("judge", {}).get("relevance", -1) >= 0 for r in all_results
+    )
+
     agg: dict[str, dict] = {}
     for d in dims:
         vals = [r["judge"][d] for r in all_results if r.get("judge", {}).get(d, -1) >= 0]
         agg[d] = {
-            "mean": round(sum(vals) / len(vals), 2) if vals else 0,
-            "min": min(vals) if vals else 0,
-            "max": max(vals) if vals else 0,
+            "mean": round(sum(vals) / len(vals), 2) if vals else None,
+            "min": min(vals) if vals else None,
+            "max": max(vals) if vals else None,
         }
 
     lines.append("## Overall Scores")
+    if not any_judged:
+        lines.append("**Note:** Judge evaluation was skipped for this run. Use `--rejudge` to score.")
+        lines.append("")
     lines.append("| Dimension | Mean | Min | Max |")
     lines.append("|-----------|------|-----|-----|")
     overall_scores = []
     for d in dims:
         a = agg[d]
         label = d.replace("_", " ").title()
-        lines.append(f"| {label} | {a['mean']} | {a['min']} | {a['max']} |")
-        overall_scores.append(a["mean"])
-    overall = round(sum(overall_scores) / len(overall_scores), 2) if overall_scores else 0
+        if a["mean"] is None:
+            lines.append(f"| {label} | N/A | N/A | N/A |")
+        else:
+            lines.append(f"| {label} | {a['mean']} | {a['min']} | {a['max']} |")
+            overall_scores.append(a["mean"])
+    overall = round(sum(overall_scores) / len(overall_scores), 2) if overall_scores else None
     lines.append("")
-    lines.append(f"**Overall: {overall} / 3.00**")
+    if overall is not None:
+        lines.append(f"**Overall: {overall} / 3.00**")
+    else:
+        lines.append(f"**Overall: N/A**")
     lines.append("")
 
     # 2. Quality vs position curve
@@ -817,9 +831,10 @@ def generate_readthrough_report(
     lines.append("|------|-------|----------|-----------|-----------|--------|------|")
     for ss in stop_summaries:
         tok = ss.get("tokens_in", 0) + ss.get("tokens_out", 0)
+        score_str = f"{ss['avg_score']}/3" if ss.get("avg_score", 0) > 0 else "N/A"
         lines.append(
             f"| {ss['stop_index'] + 1} | {ss['label']} | {ss['position']:.0%} "
-            f"| {ss['questions']} | {ss['avg_score']}/3 | {tok:,} | {ss['elapsed']}s |"
+            f"| {ss['questions']} | {score_str} | {tok:,} | {ss['elapsed']}s |"
         )
     lines.append("")
 
@@ -876,12 +891,13 @@ def generate_readthrough_report(
             vals = [r["judge"][d] for d in dims if r.get("judge", {}).get(d, -1) >= 0]
             if vals:
                 orig_avgs.append(sum(vals) / len(vals))
-        fu_mean = round(sum(fu_avgs) / len(fu_avgs), 2) if fu_avgs else 0
-        orig_mean = round(sum(orig_avgs) / len(orig_avgs), 2) if orig_avgs else 0
-        lines.append(f"- Follow-up avg score: {fu_mean}/3")
-        lines.append(f"- Original avg score: {orig_mean}/3")
-        improvement = round(fu_mean - orig_mean, 2)
-        lines.append(f"- Delta: {'+' if improvement >= 0 else ''}{improvement}")
+        fu_mean = round(sum(fu_avgs) / len(fu_avgs), 2) if fu_avgs else None
+        orig_mean = round(sum(orig_avgs) / len(orig_avgs), 2) if orig_avgs else None
+        lines.append(f"- Follow-up avg score: {f'{fu_mean}/3' if fu_mean is not None else 'N/A'}")
+        lines.append(f"- Original avg score: {f'{orig_mean}/3' if orig_mean is not None else 'N/A'}")
+        if fu_mean is not None and orig_mean is not None:
+            improvement = round(fu_mean - orig_mean, 2)
+            lines.append(f"- Delta: {'+' if improvement >= 0 else ''}{improvement}")
     lines.append("")
 
     # 6. Question type distribution
@@ -944,14 +960,19 @@ def generate_readthrough_report(
             if r.get("stop_index") == ss["stop_index"]
         ]
         lines.append(f"### {ss['label']} ({ss['position']:.0%})")
-        lines.append(f"*{ss['questions']} questions, {ss['follow_ups']} follow-ups, avg={ss['avg_score']}/3, {ss['elapsed']}s*")
+        score_str = f"avg={ss['avg_score']}/3" if ss.get("avg_score", 0) > 0 else "avg=N/A"
+        lines.append(f"*{ss['questions']} questions, {ss['follow_ups']} follow-ups, {score_str}, {ss['elapsed']}s*")
         lines.append("")
         for r in stop_results:
             j = r.get("judge", {})
             valid = [j[d] for d in dims if j.get(d, -1) >= 0]
-            avg = round(sum(valid) / len(valid), 1) if valid else 0
+            if valid:
+                avg = round(sum(valid) / len(valid), 1)
+                avg_str = f"{avg}/3"
+            else:
+                avg_str = "—"
             fu_marker = " (follow-up)" if r.get("is_follow_up") else ""
-            lines.append(f"- [{r.get('question_type', '?')}] \"{r['question'][:80]}\" — {avg}/3{fu_marker}")
+            lines.append(f"- [{r.get('question_type', '?')}] \"{r['question'][:80]}\" — {avg_str}{fu_marker}")
             notes = j.get("notes", "")
             if notes and notes != "judge skipped":
                 lines.append(f"  - {notes}")
