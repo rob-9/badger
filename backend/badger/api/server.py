@@ -317,7 +317,7 @@ async def agent_assist(request: AgentRequest):
         raise HTTPException(status_code=503, detail="Anthropic client not initialized")
 
     try:
-        prompt = f"""You are a reading assistant AI. A user is reading "{request.document_title or 'a document'}" and has selected the following text: "{request.selected_text}".
+        prompt = f"""You are a reading assistant AI. A user is reading a book and has selected the following text: "{request.selected_text}".
 
 Here is the surrounding context:
 "{request.surrounding_text or 'No surrounding context provided.'}"
