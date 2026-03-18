@@ -60,6 +60,11 @@ def _adaptive_cutoff(chunks: list[dict]) -> list[dict]:
         cut_at = floor
 
     kept = chunks[:cut_at]
+
+    # Drop chunks below the minimum relevance floor
+    if config.RELEVANCE_FLOOR > 0:
+        kept = [c for c in kept if c["score"] >= config.RELEVANCE_FLOOR]
+
     logger.info("  Adaptive cutoff: %d → %d chunks (max drop=%.4f at position %d)",
                 len(chunks), len(kept), max_drop, cut_at)
     return kept
@@ -284,11 +289,17 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         selected_text: str | None,
         source_counter: int,
         seen_chunk_indices: set[int],
+        is_first_search: list[bool] | None = None,
     ) -> tuple[str, list[dict], int]:
         """Execute search_book tool. Returns (formatted_text, raw_chunks, new_counter)."""
         query = tool_input["query"]
         strategy = tool_input.get("strategy", "hybrid")
         top_k = max(1, min(int(tool_input.get("top_k", 20)), 50))
+
+        # On the first search, append selected_text to ground the query
+        if is_first_search and is_first_search[0] and selected_text:
+            query = f"{query} {selected_text}"
+            is_first_search[0] = False
 
         total_chunks = await vector_store.get_total_chunks(book_id)
 
@@ -392,6 +403,7 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         "search_book": execute_search_book,
         "get_surrounding_context": execute_get_surrounding_context,
         "get_chapter_summary": execute_get_chapter_summary,
+        "embed_query": _embed_query,
     }
 
 
@@ -404,6 +416,7 @@ async def _anchor_lookup(
     book_id: str,
     selected_text: str,
     reader_position: float,
+    embed_fn=None,
 ) -> tuple[str, list[dict], int]:
     """Find the chunk containing selected_text and return +-1 context as ANCHOR sources.
 
@@ -411,6 +424,19 @@ async def _anchor_lookup(
     is formatted source blocks to prepend to the user message.
     """
     idx = await vector_store.find_chunk_containing(book_id, selected_text)
+
+    # Fallback: if substring match fails, try embedding search
+    if idx is None and embed_fn is not None:
+        try:
+            embedding = await embed_fn(selected_text)
+            sem_results = await vector_store.search(book_id, embedding, top_k=3)
+            if sem_results and sem_results[0].score > 0.5:
+                idx = sem_results[0].chunk.metadata["chunk_index"]
+                logger.info("  Anchor fallback: embedding search matched chunk %d (score=%.3f)",
+                            idx, sem_results[0].score)
+        except Exception as e:
+            logger.warning("  Anchor embedding fallback failed: %s", e)
+
     if idx is None:
         return "", [], 1
 
@@ -458,6 +484,7 @@ def _build_user_message(
     selected_text: str | None,
     anchor_text: str = "",
     reader_position: float = 0.0,
+    source_count: int = 0,
 ) -> str:
     """Build the initial user message for the agent."""
     parts = []
@@ -466,11 +493,24 @@ def _build_user_message(
         parts.append(f"[The reader is {pct}% through the book. Answer from this point in the story — not earlier, not later.]")
     if anchor_text:
         parts.append(f"[ANCHOR — passage around the reader's selection]\n\n{anchor_text}")
+    if source_count > 0:
+        parts.append(f"[You have {source_count} sources numbered 1 through {source_count}. Only cite these sources.]")
     if selected_text:
         parts.append(f'The reader selected this text: "{selected_text}"')
     prefix = "Their question" if selected_text else "The reader's question"
     parts.append(f"{prefix}: {question}")
     return "\n\n".join(parts)
+
+
+def _audit_citations(answer: str, max_source: int) -> str:
+    """Strip phantom [Source N] citations where N > max_source. Log any removed."""
+    def _replace(m):
+        n = int(m.group(1))
+        if n < 1 or n > max_source:
+            logger.warning("  Stripped phantom citation [Source %d] (max valid: %d)", n, max_source)
+            return ""
+        return m.group(0)
+    return re.sub(r'\[Source (\d+)\]', _replace, answer)
 
 
 async def _dispatch_tool(
@@ -482,10 +522,12 @@ async def _dispatch_tool(
     selected_text,
     source_counter: int,
     seen_chunk_indices: set[int],
+    is_first_search: list[bool] | None = None,
 ) -> tuple[str, list[dict], int]:
     if tool_name == "search_book":
         return await executors["search_book"](
             tool_input, book_id, reader_position, selected_text, source_counter, seen_chunk_indices,
+            is_first_search=is_first_search,
         )
     elif tool_name == "get_surrounding_context":
         return await executors["get_surrounding_context"](
@@ -515,9 +557,11 @@ async def run_agent(
     anchor_text = ""
 
     # Anchor lookup: find the chunk containing selected_text before the tool loop
+    embed_fn = executors.get("embed_query")
     if selected_text and book_id and vector_store:
         anchor_text, anchor_chunks, source_counter = await _anchor_lookup(
             vector_store, book_id, selected_text, reader_position,
+            embed_fn=embed_fn,
         )
         if anchor_chunks:
             all_chunks.extend(anchor_chunks)
@@ -526,10 +570,14 @@ async def run_agent(
             logger.info("  Anchor lookup: %d chunks (indices %s)",
                         len(anchor_chunks), [c["chunk_index"] for c in anchor_chunks])
 
-    messages = [{"role": "user", "content": _build_user_message(question, selected_text, anchor_text, reader_position)}]
+    messages = [{"role": "user", "content": _build_user_message(
+        question, selected_text, anchor_text, reader_position,
+        source_count=len(all_chunks),
+    )}]
     tool_calls_log: list[dict] = []
     answer = ""
     empty_streak = 0
+    is_first_search: list[bool] = [True]
 
     for turn in range(MAX_TURNS):
         response = await asyncio.to_thread(
@@ -565,6 +613,7 @@ async def run_agent(
             formatted, chunks, source_counter = await _dispatch_tool(
                 executors, tool_name, tool_input, book_id, reader_position,
                 selected_text, source_counter, seen_chunk_indices,
+                is_first_search=is_first_search,
             )
 
             # Track consecutive empty results
@@ -594,12 +643,35 @@ async def run_agent(
 
         messages.append({"role": "assistant", "content": assistant_content})
         messages.append({"role": "user", "content": tool_results})
-    else:
-        # Max turns reached — get final answer
+
+    # Cap total accumulated chunks — keep highest-scored
+    MAX_TOTAL_CHUNKS = 8
+    if len(all_chunks) > MAX_TOTAL_CHUNKS:
+        all_chunks.sort(key=lambda c: c.get("score", 0), reverse=True)
+        all_chunks = all_chunks[:MAX_TOTAL_CHUNKS]
+
+    if not answer:
+        # Inject no-context constraint when retrieval returned nothing
+        if not all_chunks:
+            no_context_msg = (
+                "You retrieved NO passages from the book. You MUST:\n"
+                "- Say you don't have enough context from what the reader has read so far\n"
+                "- Do NOT answer from your own knowledge of this book\n"
+                "- Suggest the reader keep reading or ask about a specific passage"
+            )
+            # Append to last user message to avoid consecutive user messages
+            last = messages[-1]
+            if last["role"] == "user" and isinstance(last["content"], str):
+                messages[-1] = {"role": "user", "content": last["content"] + "\n\n" + no_context_msg}
+            else:
+                messages.append({"role": "assistant", "content": "I was unable to find relevant passages."})
+                messages.append({"role": "user", "content": no_context_msg})
+
+        # Max turns reached or no-context injected — get final answer
         response = await asyncio.to_thread(
             anthropic.messages.create,
             model=config.CLAUDE_MODEL,
-            max_tokens=1024,
+            max_tokens=1500,
             system=AGENT_SYSTEM_PROMPT,
             messages=messages,
         )
@@ -607,6 +679,11 @@ async def run_agent(
         for block in response.content:
             if block.type == "text":
                 answer += block.text
+
+    # Post-generation: audit citations and detect truncation
+    answer = _audit_citations(answer, len(all_chunks))
+    if answer and not answer.rstrip().endswith(('.', '!', '?', '"', ')', ']')):
+        answer = answer.rstrip() + "..."
 
     sources = [
         {
@@ -655,9 +732,11 @@ async def run_agent_streaming(
     anchor_text = ""
 
     # Anchor lookup: find the chunk containing selected_text before the tool loop
+    embed_fn = executors.get("embed_query")
     if selected_text and book_id and vector_store:
         anchor_text, anchor_chunks, source_counter = await _anchor_lookup(
             vector_store, book_id, selected_text, reader_position,
+            embed_fn=embed_fn,
         )
         if anchor_chunks:
             all_chunks.extend(anchor_chunks)
@@ -666,13 +745,17 @@ async def run_agent_streaming(
             logger.info("  Anchor lookup: %d chunks (indices %s)",
                         len(anchor_chunks), [c["chunk_index"] for c in anchor_chunks])
 
-    messages = [{"role": "user", "content": _build_user_message(question, selected_text, anchor_text, reader_position)}]
+    messages = [{"role": "user", "content": _build_user_message(
+        question, selected_text, anchor_text, reader_position,
+        source_count=len(all_chunks),
+    )}]
 
     # Phase 1: Tool-calling loop (non-streaming)
     yield {"type": "status", "stage": "thinking"}
 
     final_response = None
     empty_streak = 0
+    is_first_search: list[bool] = [True]
     for turn in range(MAX_TURNS):
         response = await asyncio.to_thread(
             anthropic.messages.create,
@@ -705,6 +788,7 @@ async def run_agent_streaming(
             formatted, chunks, source_counter = await _dispatch_tool(
                 executors, tool_name, tool_input, book_id, reader_position,
                 selected_text, source_counter, seen_chunk_indices,
+                is_first_search=is_first_search,
             )
 
             # Track consecutive empty results
@@ -735,6 +819,27 @@ async def run_agent_streaming(
         messages.append({"role": "assistant", "content": assistant_content})
         messages.append({"role": "user", "content": tool_results})
 
+    # Cap total accumulated chunks — keep highest-scored
+    MAX_TOTAL_CHUNKS = 8
+    if len(all_chunks) > MAX_TOTAL_CHUNKS:
+        all_chunks.sort(key=lambda c: c.get("score", 0), reverse=True)
+        all_chunks = all_chunks[:MAX_TOTAL_CHUNKS]
+
+    # Inject no-context constraint when retrieval returned nothing
+    if not all_chunks and not final_response:
+        no_context_msg = (
+            "You retrieved NO passages from the book. You MUST:\n"
+            "- Say you don't have enough context from what the reader has read so far\n"
+            "- Do NOT answer from your own knowledge of this book\n"
+            "- Suggest the reader keep reading or ask about a specific passage"
+        )
+        last = messages[-1]
+        if last["role"] == "user" and isinstance(last["content"], str):
+            messages[-1] = {"role": "user", "content": last["content"] + "\n\n" + no_context_msg}
+        else:
+            messages.append({"role": "assistant", "content": "I was unable to find relevant passages."})
+            messages.append({"role": "user", "content": no_context_msg})
+
     # Phase 2: Streaming answer
     sources = [
         {
@@ -758,6 +863,10 @@ async def run_agent_streaming(
         for block in final_response.content:
             if block.type == "text":
                 answer_text += block.text
+        # Post-generation: audit citations and detect truncation
+        answer_text = _audit_citations(answer_text, len(all_chunks))
+        if answer_text and not answer_text.rstrip().endswith(('.', '!', '?', '"', ')', ']')):
+            answer_text = answer_text.rstrip() + "..."
         # Stream in chunks for visual effect
         chunk_size = 12
         for i in range(0, len(answer_text), chunk_size):
@@ -771,7 +880,7 @@ async def run_agent_streaming(
         full_answer = []
         async with async_anthropic.messages.stream(
             model=config.CLAUDE_MODEL,
-            max_tokens=1024,
+            max_tokens=1500,
             system=AGENT_SYSTEM_PROMPT,
             messages=messages,
         ) as stream:
@@ -781,6 +890,12 @@ async def run_agent_streaming(
             final_message = await stream.get_final_message()
 
         answer_text = "".join(full_answer)
+        # Post-generation: detect truncation (send extra token to client)
+        if answer_text and not answer_text.rstrip().endswith(('.', '!', '?', '"', ')', ']')):
+            yield {"type": "token", "text": "..."}
+            answer_text = answer_text.rstrip() + "..."
+        # Audit citations for logging (tokens already sent to client)
+        answer_text = _audit_citations(answer_text, len(all_chunks))
         gen_model = final_message.model
         gen_tokens_in = final_message.usage.input_tokens
         gen_tokens_out = final_message.usage.output_tokens
