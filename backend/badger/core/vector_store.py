@@ -69,9 +69,14 @@ _CJK_RE = re.compile(
 
 
 def _strip_diacritics(text: str) -> str:
-    """Strip diacritical marks from text (e.g., yínfúlù → yinfulu)."""
+    """Strip diacritical marks from text (e.g., yínfúlù → yinfulu).
+
+    Re-composes with NFC afterward to preserve Korean Hangul syllable
+    blocks and other composed characters that NFKD decomposes.
+    """
     nfkd = unicodedata.normalize('NFKD', text)
-    return ''.join(c for c in nfkd if not unicodedata.category(c).startswith('M'))
+    stripped = ''.join(c for c in nfkd if not unicodedata.category(c).startswith('M'))
+    return unicodedata.normalize('NFC', stripped)
 
 
 def _tokenize(text: str) -> list[str]:
@@ -704,10 +709,10 @@ class QdrantVectorStore:
         # Phase 4: BM25 fallback for non-ASCII text (romanized terms, CJK, etc.)
         has_non_ascii = any(ord(c) > 127 for c in text)
         if has_non_ascii and len(text) >= 10:
-            bm25 = self.bm25_indices.get(book_id)
+            bm25 = await self._get_bm25(book_id)
             if bm25:
                 bm25_results = bm25.search(text, top_k=1)
-                if bm25_results and bm25_results[0].score > 0:
+                if bm25_results and bm25_results[0].score > 2.0:
                     return bm25_results[0].chunk.metadata["chunk_index"]
 
         return None
