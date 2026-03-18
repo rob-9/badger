@@ -484,7 +484,6 @@ def _build_user_message(
     selected_text: str | None,
     anchor_text: str = "",
     reader_position: float = 0.0,
-    source_count: int = 0,
 ) -> str:
     """Build the initial user message for the agent."""
     parts = []
@@ -493,8 +492,6 @@ def _build_user_message(
         parts.append(f"[The reader is {pct}% through the book. Answer from this point in the story — not earlier, not later.]")
     if anchor_text:
         parts.append(f"[ANCHOR — passage around the reader's selection]\n\n{anchor_text}")
-    if source_count > 0:
-        parts.append(f"[You have {source_count} sources numbered 1 through {source_count}. Only cite these sources.]")
     if selected_text:
         parts.append(f'The reader selected this text: "{selected_text}"')
     prefix = "Their question" if selected_text else "The reader's question"
@@ -572,7 +569,6 @@ async def run_agent(
 
     messages = [{"role": "user", "content": _build_user_message(
         question, selected_text, anchor_text, reader_position,
-        source_count=len(all_chunks),
     )}]
     tool_calls_log: list[dict] = []
     answer = ""
@@ -681,8 +677,8 @@ async def run_agent(
                 answer += block.text
 
     # Post-generation: audit citations and detect truncation
-    answer = _audit_citations(answer, len(all_chunks))
-    if answer and not answer.rstrip().endswith(('.', '!', '?', '"', ')', ']')):
+    answer = _audit_citations(answer, max((c.get("source_number", 0) for c in all_chunks), default=0))
+    if answer and not answer.rstrip().endswith(('.', '!', '?', '"', ')', ']', ':', ';', '\u201d', '\u2019', '\u2026')):
         answer = answer.rstrip() + "..."
 
     sources = [
@@ -747,7 +743,6 @@ async def run_agent_streaming(
 
     messages = [{"role": "user", "content": _build_user_message(
         question, selected_text, anchor_text, reader_position,
-        source_count=len(all_chunks),
     )}]
 
     # Phase 1: Tool-calling loop (non-streaming)
@@ -864,8 +859,8 @@ async def run_agent_streaming(
             if block.type == "text":
                 answer_text += block.text
         # Post-generation: audit citations and detect truncation
-        answer_text = _audit_citations(answer_text, len(all_chunks))
-        if answer_text and not answer_text.rstrip().endswith(('.', '!', '?', '"', ')', ']')):
+        answer_text = _audit_citations(answer_text, max((c.get("source_number", 0) for c in all_chunks), default=0))
+        if answer_text and not answer_text.rstrip().endswith(('.', '!', '?', '"', ')', ']', ':', ';', '\u201d', '\u2019', '\u2026')):
             answer_text = answer_text.rstrip() + "..."
         # Stream in chunks for visual effect
         chunk_size = 12
@@ -891,11 +886,11 @@ async def run_agent_streaming(
 
         answer_text = "".join(full_answer)
         # Post-generation: detect truncation (send extra token to client)
-        if answer_text and not answer_text.rstrip().endswith(('.', '!', '?', '"', ')', ']')):
+        if answer_text and not answer_text.rstrip().endswith(('.', '!', '?', '"', ')', ']', ':', ';', '\u201d', '\u2019', '\u2026')):
             yield {"type": "token", "text": "..."}
             answer_text = answer_text.rstrip() + "..."
         # Audit citations for logging (tokens already sent to client)
-        answer_text = _audit_citations(answer_text, len(all_chunks))
+        answer_text = _audit_citations(answer_text, max((c.get("source_number", 0) for c in all_chunks), default=0))
         gen_model = final_message.model
         gen_tokens_in = final_message.usage.input_tokens
         gen_tokens_out = final_message.usage.output_tokens
