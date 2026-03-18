@@ -41,7 +41,8 @@ COMPRESS_CONTEXT: bool = _bool_env("COMPRESS_CONTEXT", "true")
 
 # Adaptive cutoff bounds
 CUTOFF_FLOOR: int = _int_env("CUTOFF_FLOOR", "3")
-CUTOFF_CEILING: int = _int_env("CUTOFF_CEILING", "7")
+CUTOFF_CEILING: int = _int_env("CUTOFF_CEILING", "5")
+RELEVANCE_FLOOR: float = float(os.getenv("RELEVANCE_FLOOR", "0.15"))
 
 # RAG pipeline
 _relevance_raw = os.getenv("RELEVANCE_THRESHOLD", "0.3")
