@@ -23,6 +23,7 @@ import uuid
 import logging
 import re
 import json
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -67,13 +68,20 @@ _CJK_RE = re.compile(
 )
 
 
+def _strip_diacritics(text: str) -> str:
+    """Strip diacritical marks from text (e.g., yínfúlù → yinfulu)."""
+    nfkd = unicodedata.normalize('NFKD', text)
+    return ''.join(c for c in nfkd if not unicodedata.category(c).startswith('M'))
+
+
 def _tokenize(text: str) -> list[str]:
     """Split text into lowercase tokens for BM25 matching.
 
     CJK characters become individual tokens (no word boundaries in CJK scripts).
     Latin/Cyrillic/etc. use standard word-boundary splitting.
+    Diacritics are stripped so romanized terms (e.g., yínfúlù) match their ASCII form.
     """
-    return _CJK_RE.findall(text.lower())
+    return _CJK_RE.findall(_strip_diacritics(text).lower())
 
 
 class BM25Index:
@@ -692,6 +700,15 @@ class QdrantVectorStore:
                     combined = sorted_fuzzy[i][0] + " " + sorted_fuzzy[i + 1][0]
                     if boundary_snippet in combined:
                         return sorted_fuzzy[i][1]
+
+        # Phase 4: BM25 fallback for non-ASCII text (romanized terms, CJK, etc.)
+        has_non_ascii = any(ord(c) > 127 for c in text)
+        if has_non_ascii and len(text) >= 10:
+            bm25 = self.bm25_indices.get(book_id)
+            if bm25:
+                bm25_results = bm25.search(text, top_k=1)
+                if bm25_results and bm25_results[0].score > 0:
+                    return bm25_results[0].chunk.metadata["chunk_index"]
 
         return None
 
