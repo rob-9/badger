@@ -108,7 +108,10 @@ Question type guidelines based on your position ({position:.0%}):
 For each question, provide:
 - "question": the question text (natural, conversational)
 - "selected_text": an EXACT substring from the section text above that \
-triggered this question. Must be a verbatim copy of text from the section.
+triggered this question. Must be a verbatim copy of text from the section. \
+REQUIRED (must not be empty) for question_type "vocabulary", "lookup", and \
+"context" — these types need an anchor passage to retrieve the right content. \
+Copy the specific word, phrase, name, or sentence that prompted the question.
 - "question_type": one of "vocabulary", "context", "lookup", "analysis"
 - "motivation": why the reader would ask this (1 sentence)
 - "expected_answer": a sketch of what a good answer would include (2-3 sentences)
@@ -120,6 +123,21 @@ and quoting specific passages from the book (vocabulary definitions, factual \
 lookups, locating a specific scene). false if the question requires \
 interpretation, thematic synthesis, character motivation analysis, or \
 connecting ideas across multiple sections. When in doubt, prefer false.
+
+Examples of correctly filled selected_text:
+
+vocabulary example — the foreign word itself must be copied:
+{{"question": "What does 'mujahid' mean?", "selected_text": "mujahid", \
+"question_type": "vocabulary", "motivation": "Unfamiliar Arabic term.", \
+"expected_answer": "A Muslim fighter in a holy war.", "triggered_by": null, \
+"answerable_by_retrieval": true}}
+
+lookup example — the name or concept phrase must be copied:
+{{"question": "Who is Professor Lovell and why does Letty trust him?", \
+"selected_text": "Professor Lovell", "question_type": "lookup", \
+"motivation": "Lovell appears suddenly and Letty defers to him completely.", \
+"expected_answer": "Lovell is a senior Oxford professor who recruited Robin.", \
+"triggered_by": null, "answerable_by_retrieval": true}}
 
 Return a JSON array of question objects. Return ONLY valid JSON.\
 """
