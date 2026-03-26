@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from dataclasses import dataclass
 
 from fastapi.testclient import TestClient
+from badger import config
 
 
 # ── Mocks ─────────────────────────────────────────────────────────────
@@ -323,6 +324,57 @@ class TestQueryEndpoint:
         )
         assert resp.status_code == 500
 
+    def test_query_oversized_question_returns_422(self, client, mock_services):
+        long_q = "x" * (config.MAX_QUESTION_LENGTH + 1)
+        resp = client.post("/api/rag/query", json={"book_id": "b1", "question": long_q})
+        assert resp.status_code == 422
+
+    def test_query_empty_question_returns_422(self, client, mock_services):
+        resp = client.post("/api/rag/query", json={"book_id": "b1", "question": ""})
+        assert resp.status_code == 422
+
+    def test_query_whitespace_question_returns_422(self, client, mock_services):
+        resp = client.post("/api/rag/query", json={"book_id": "b1", "question": "   "})
+        assert resp.status_code == 422
+
+    def test_query_oversized_selected_text_returns_422(self, client, mock_services):
+        long_text = "x" * (config.MAX_SELECTED_TEXT_LENGTH + 1)
+        resp = client.post(
+            "/api/rag/query",
+            json={"book_id": "b1", "question": "What?", "selected_text": long_text},
+        )
+        assert resp.status_code == 422
+
+    def test_query_reader_position_too_low_returns_422(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query",
+            json={"book_id": "b1", "question": "What?", "reader_position": -0.1},
+        )
+        assert resp.status_code == 422
+
+    def test_query_reader_position_too_high_returns_422(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query",
+            json={"book_id": "b1", "question": "What?", "reader_position": 1.1},
+        )
+        assert resp.status_code == 422
+
+    def test_query_question_at_max_length_ok(self, client, mock_services):
+        exact_q = "x" * config.MAX_QUESTION_LENGTH
+        resp = client.post(
+            "/api/rag/query",
+            json={"book_id": "b1", "question": exact_q},
+        )
+        assert resp.status_code == 200
+
+    def test_query_reader_position_boundary_ok(self, client, mock_services):
+        for pos in [0.0, 1.0]:
+            resp = client.post(
+                "/api/rag/query",
+                json={"book_id": "b1", "question": "What?", "reader_position": pos},
+            )
+            assert resp.status_code == 200
+
 
 # ── Stream endpoint ───────────────────────────────────────────────────
 
@@ -402,6 +454,21 @@ class TestStreamEndpoint:
         assert len(error_events) == 1
         assert "message" in error_events[0]["data"]
 
+    def test_stream_oversized_question_returns_422(self, client, mock_services):
+        long_q = "x" * (config.MAX_QUESTION_LENGTH + 1)
+        resp = client.post(
+            "/api/rag/query/stream",
+            json={"book_id": "b1", "question": long_q},
+        )
+        assert resp.status_code == 422
+
+    def test_stream_empty_question_returns_422(self, client, mock_services):
+        resp = client.post(
+            "/api/rag/query/stream",
+            json={"book_id": "b1", "question": ""},
+        )
+        assert resp.status_code == 422
+
     def test_stream_503_when_not_initialized(self):
         import badger.api.server as server_mod
 
@@ -460,6 +527,46 @@ class TestAgentEndpoint:
         )
         resp = client.post("/api/agent", json={"selected_text": "test"})
         assert resp.status_code == 500
+
+    def test_agent_empty_selected_text_returns_422(self, client, mock_services):
+        resp = client.post("/api/agent", json={"selected_text": ""})
+        assert resp.status_code == 422
+
+    def test_agent_whitespace_selected_text_returns_422(self, client, mock_services):
+        resp = client.post("/api/agent", json={"selected_text": "   "})
+        assert resp.status_code == 422
+
+    def test_agent_oversized_selected_text_returns_422(self, client, mock_services):
+        long_text = "x" * (config.MAX_SELECTED_TEXT_LENGTH + 1)
+        resp = client.post("/api/agent", json={"selected_text": long_text})
+        assert resp.status_code == 422
+
+    def test_agent_oversized_surrounding_text_returns_422(self, client, mock_services):
+        long_text = "x" * (config.MAX_SURROUNDING_TEXT_LENGTH + 1)
+        resp = client.post(
+            "/api/agent",
+            json={"selected_text": "test", "surrounding_text": long_text},
+        )
+        assert resp.status_code == 422
+
+    def test_agent_oversized_document_title_returns_422(self, client, mock_services):
+        long_title = "x" * (config.MAX_DOCUMENT_TITLE_LENGTH + 1)
+        resp = client.post(
+            "/api/agent",
+            json={"selected_text": "test", "document_title": long_title},
+        )
+        assert resp.status_code == 422
+
+    def test_agent_fields_at_max_length_ok(self, client, mock_services):
+        resp = client.post(
+            "/api/agent",
+            json={
+                "selected_text": "x" * config.MAX_SELECTED_TEXT_LENGTH,
+                "surrounding_text": "x" * config.MAX_SURROUNDING_TEXT_LENGTH,
+                "document_title": "x" * config.MAX_DOCUMENT_TITLE_LENGTH,
+            },
+        )
+        assert resp.status_code == 200
 
 
 # ── Service not initialized ───────────────────────────────────────────

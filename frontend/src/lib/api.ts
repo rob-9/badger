@@ -19,6 +19,17 @@ export interface Source {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+// Defense-in-depth limits — must match backend config constants
+const MAX_QUESTION_LENGTH = 2000
+const MAX_SELECTED_TEXT_LENGTH = 10000
+const MAX_SURROUNDING_TEXT_LENGTH = 20000
+const MAX_DOCUMENT_TITLE_LENGTH = 500
+
+function truncate(value: string | undefined, maxLength: number): string | undefined {
+  if (value === undefined) return undefined
+  return value.length > maxLength ? value.slice(0, maxLength) : value
+}
+
 async function parseErrorResponse(response: Response, fallback: string): Promise<string> {
   try {
     const error = await response.json()
@@ -85,8 +96,8 @@ export function queryBookStream(
 
   const requestBody = {
     book_id: params.bookId,
-    question: params.question,
-    selected_text: params.selectedText,
+    question: truncate(params.question, MAX_QUESTION_LENGTH),
+    selected_text: truncate(params.selectedText, MAX_SELECTED_TEXT_LENGTH),
     use_rag: params.useRag ?? !!params.bookId,
     reader_position: params.readerPosition,
   }
@@ -228,9 +239,9 @@ export async function getAgentAssistance(params: {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      selected_text: params.selectedText,
-      surrounding_text: params.surroundingText,
-      document_title: params.documentTitle
+      selected_text: truncate(params.selectedText, MAX_SELECTED_TEXT_LENGTH),
+      surrounding_text: truncate(params.surroundingText, MAX_SURROUNDING_TEXT_LENGTH),
+      document_title: truncate(params.documentTitle, MAX_DOCUMENT_TITLE_LENGTH),
     })
   })
 

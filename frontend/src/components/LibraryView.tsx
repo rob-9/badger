@@ -30,6 +30,12 @@ export default function LibraryView({
   const fileInputRef = uploadInputRef || localInputRef
 
   const handleFile = async (file: File) => {
+    const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`File too large (${(file.size / (1024 * 1024)).toFixed(0)}MB). Maximum is 100MB.`)
+      return
+    }
+
     setIsLoading(true)
 
     try {

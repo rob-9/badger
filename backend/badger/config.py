@@ -67,6 +67,12 @@ EPUB_IMPORT_ALLOWED_DIRS: list[str] = [
 # Maximum input size for book indexing (bytes)
 MAX_INDEX_INPUT_SIZE: int = _int_env("MAX_INDEX_INPUT_SIZE", str(10 * 1024 * 1024))  # 10MB default
 
+# Field-level input limits
+MAX_QUESTION_LENGTH: int = _int_env("MAX_QUESTION_LENGTH", "2000")
+MAX_SELECTED_TEXT_LENGTH: int = _int_env("MAX_SELECTED_TEXT_LENGTH", "10000")
+MAX_SURROUNDING_TEXT_LENGTH: int = _int_env("MAX_SURROUNDING_TEXT_LENGTH", "20000")
+MAX_DOCUMENT_TITLE_LENGTH: int = _int_env("MAX_DOCUMENT_TITLE_LENGTH", "500")
+
 
 def validate_keys() -> None:
     """Exit with a clear error if required API keys are missing."""

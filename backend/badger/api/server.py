@@ -20,7 +20,7 @@ load_dotenv()
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from anthropic import Anthropic, AsyncAnthropic
 
@@ -123,6 +123,29 @@ class QueryBookRequest(BaseModel):
     selected_text: Optional[str] = None
     use_rag: bool = True
     reader_position: Optional[float] = None  # 0-1, where reader currently is
+
+    @field_validator("question")
+    @classmethod
+    def question_not_empty_or_too_long(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Question must not be empty")
+        if len(v) > config.MAX_QUESTION_LENGTH:
+            raise ValueError(f"Question exceeds maximum length of {config.MAX_QUESTION_LENGTH}")
+        return v
+
+    @field_validator("selected_text")
+    @classmethod
+    def selected_text_not_too_long(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > config.MAX_SELECTED_TEXT_LENGTH:
+            raise ValueError(f"Selected text exceeds maximum length of {config.MAX_SELECTED_TEXT_LENGTH}")
+        return v
+
+    @field_validator("reader_position")
+    @classmethod
+    def reader_position_in_range(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and (v < 0.0 or v > 1.0):
+            raise ValueError("Reader position must be between 0.0 and 1.0")
+        return v
 
 
 class QueryResponse(BaseModel):
@@ -296,6 +319,29 @@ class AgentRequest(BaseModel):
     selected_text: str
     surrounding_text: Optional[str] = None
     document_title: Optional[str] = None
+
+    @field_validator("selected_text")
+    @classmethod
+    def selected_text_not_empty_or_too_long(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Selected text must not be empty")
+        if len(v) > config.MAX_SELECTED_TEXT_LENGTH:
+            raise ValueError(f"Selected text exceeds maximum length of {config.MAX_SELECTED_TEXT_LENGTH}")
+        return v
+
+    @field_validator("surrounding_text")
+    @classmethod
+    def surrounding_text_not_too_long(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > config.MAX_SURROUNDING_TEXT_LENGTH:
+            raise ValueError(f"Surrounding text exceeds maximum length of {config.MAX_SURROUNDING_TEXT_LENGTH}")
+        return v
+
+    @field_validator("document_title")
+    @classmethod
+    def document_title_not_too_long(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > config.MAX_DOCUMENT_TITLE_LENGTH:
+            raise ValueError(f"Document title exceeds maximum length of {config.MAX_DOCUMENT_TITLE_LENGTH}")
+        return v
 
 
 class AgentResponse(BaseModel):
