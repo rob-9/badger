@@ -544,6 +544,10 @@ async def run_readthrough(
                     stop_follow_ups += 1
                     total_follow_ups += 1
 
+                    if q.selected_text:
+                        logger.info("  Follow-up inherits selected_text from q%d: %s",
+                                    q_idx, (q.selected_text or "")[:60])
+
                     if answer_mode in ("direct", "direct_fallback"):
                         # Follow-up also uses direct path
                         fu_answer, fu_direct_usage = await direct_answer(

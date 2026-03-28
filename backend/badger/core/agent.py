@@ -662,6 +662,18 @@ async def run_agent(
             else:
                 messages.append({"role": "assistant", "content": "I was unable to find relevant passages."})
                 messages.append({"role": "user", "content": no_context_msg})
+        elif not selected_text:
+            grounding_msg = (
+                "IMPORTANT: No specific passage was highlighted for this question. "
+                "Only state information that literally appears in the provided sources. "
+                "If the sources don't contain the answer, tell the reader you couldn't find the relevant passage."
+            )
+            last = messages[-1]
+            if last["role"] == "user" and isinstance(last["content"], str):
+                messages[-1] = {"role": "user", "content": last["content"] + "\n\n" + grounding_msg}
+            else:
+                messages.append({"role": "assistant", "content": "I have retrieved some passages."})
+                messages.append({"role": "user", "content": grounding_msg})
 
         # Max turns reached or no-context injected — get final answer
         response = await asyncio.to_thread(
@@ -834,6 +846,18 @@ async def run_agent_streaming(
         else:
             messages.append({"role": "assistant", "content": "I was unable to find relevant passages."})
             messages.append({"role": "user", "content": no_context_msg})
+    elif all_chunks and not selected_text and not final_response:
+        grounding_msg = (
+            "IMPORTANT: No specific passage was highlighted for this question. "
+            "Only state information that literally appears in the provided sources. "
+            "If the sources don't contain the answer, tell the reader you couldn't find the relevant passage."
+        )
+        last = messages[-1]
+        if last["role"] == "user" and isinstance(last["content"], str):
+            messages[-1] = {"role": "user", "content": last["content"] + "\n\n" + grounding_msg}
+        else:
+            messages.append({"role": "assistant", "content": "I have retrieved some passages."})
+            messages.append({"role": "user", "content": grounding_msg})
 
     # Phase 2: Streaming answer
     sources = [

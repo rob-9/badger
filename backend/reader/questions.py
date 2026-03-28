@@ -23,6 +23,69 @@ def _normalize_ws(text: str) -> str:
     return re.sub(r'\s+', ' ', text).strip()
 
 
+def _repair_selected_text(question: str, recent_text: str) -> str:
+    """Attempt to extract a ~120-char anchor window from recent_text for a question.
+
+    Tries candidates in priority order:
+      1. Quoted phrases (any quote marks including smart quotes)
+      2. Words with non-ASCII characters (diacritics, CJK) — foreign terms
+      3. Multi-word capitalized sequences (proper names)
+      4. Single capitalized words that aren't sentence-initial
+
+    For the first candidate found in recent_text, returns a ~120-char window
+    centered on the match snapped to word boundaries. Returns empty string if
+    no candidate matches.
+    """
+    candidates: list[str] = []
+
+    # 1. Quoted phrases
+    for m in re.finditer(r'[\u201c\u2018\u0022\u0027]([^\u201d\u2019\u0022\u0027]{2,60})[\u201d\u2019\u0022\u0027]', question):
+        candidates.append(m.group(1).strip())
+
+    # 2. Words with non-ASCII characters
+    for m in re.finditer(r'\b\w*[^\x00-\x7F]\w*\b', question):
+        candidates.append(m.group(0))
+
+    # 3. Multi-word capitalized sequences (2+ consecutive title-case words)
+    for m in re.finditer(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', question):
+        candidates.append(m.group(1))
+
+    # 4. Single capitalized words that aren't sentence-initial (preceded by non-period)
+    for m in re.finditer(r'(?<=[a-z,;:]\s)([A-Z][a-z]{2,})\b', question):
+        candidates.append(m.group(1))
+
+    for candidate in candidates:
+        # Case-sensitive search first, then case-insensitive fallback
+        idx = recent_text.find(candidate)
+        if idx == -1:
+            lower_text = recent_text.lower()
+            lower_candidate = candidate.lower()
+            idx = lower_text.find(lower_candidate)
+        if idx == -1:
+            continue
+
+        # Build ~120-char window centered on match, snapped to word boundaries
+        half = 60
+        start = max(0, idx - half)
+        end = min(len(recent_text), idx + len(candidate) + half)
+
+        # Snap start forward to next word boundary
+        if start > 0:
+            space = recent_text.find(' ', start)
+            if space != -1 and space < idx:
+                start = space + 1
+
+        # Snap end back to previous word boundary
+        if end < len(recent_text):
+            space = recent_text.rfind(' ', idx + len(candidate), end)
+            if space != -1:
+                end = space
+
+        return recent_text[start:end].strip()
+
+    return ""
+
+
 @dataclass
 class GeneratedQuestion:
     question: str
@@ -115,6 +178,10 @@ async def generate_questions(
     normalized_text = _normalize_ws(recent_text)
 
     questions: list[GeneratedQuestion] = []
+    total_answerable = 0
+    has_anchor = 0
+    repaired = 0
+
     for q in parsed[:max_questions]:
         if not isinstance(q, dict):
             continue
@@ -136,12 +203,24 @@ async def generate_questions(
                 logger.warning("  Hallucinated selected_text for question: %s", question_text[:60])
                 selected = ""
 
+        # Repair missing selected_text for retrieval-anchor types
+        if not selected and qtype in ("vocabulary", "lookup", "context"):
+            repaired_text = _repair_selected_text(question_text, recent_text)
+            if repaired_text:
+                selected = repaired_text
+                repaired += 1
+
         # Determine if this question can be answered by passage retrieval
         raw_answerable = q.get("answerable_by_retrieval")
         if isinstance(raw_answerable, bool):
             answerable = raw_answerable
         else:
             answerable = qtype in ("vocabulary", "lookup")
+
+        if answerable:
+            total_answerable += 1
+            if selected:
+                has_anchor += 1
 
         questions.append(GeneratedQuestion(
             question=question_text,
@@ -154,4 +233,6 @@ async def generate_questions(
         ))
 
     logger.info("  Generated %d valid questions (of %d returned)", len(questions), len(parsed))
+    logger.info("  selected_text: %d/%d answerable questions have anchors (%d repaired)",
+                has_anchor, total_answerable, repaired)
     return questions, usage
