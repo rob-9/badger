@@ -74,6 +74,10 @@ TOOL USAGE:
 - For passage explanation: use get_surrounding_context to see what happens around the selected text
 - For factual lookups: search_book with specific terms
 - For analysis/thematic questions: search broadly, consider get_chapter_summary for wider context
+- For chapter-specific questions: use search_by_chapter with chapter_index (use get_book_structure to find it)
+- For "when was X first mentioned" or first-appearance: use find_first_mention with the exact term
+- For "what just happened?" or recap questions: use get_reading_position_context
+- For book structure/navigation ("what chapter am I in?"): use get_book_structure (no search needed)
 - You do NOT need to search if the answer is obvious from the selected text or [ANCHOR] passages alone
 
 SEARCH DISCIPLINE:

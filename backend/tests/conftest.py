@@ -54,9 +54,9 @@ def make_chunk(book_id: str, index: int, text: str, **extra_meta) -> TextChunk:
     return TextChunk(id=f"{book_id}-chunk-{index}", text=text, metadata=meta)
 
 
-def make_entry(book_id: str, index: int, text: str, embedding: list[float]) -> VectorEntry:
+def make_entry(book_id: str, index: int, text: str, embedding: list[float], **extra_meta) -> VectorEntry:
     """Helper to create a VectorEntry."""
-    chunk = make_chunk(book_id, index, text)
+    chunk = make_chunk(book_id, index, text, **extra_meta)
     return VectorEntry(chunk=chunk, embedding=embedding)
 
 
@@ -69,6 +69,27 @@ def sample_entries():
         make_entry("book1", 2, "She found a mysterious artifact.", [0.0, 0.0, 1.0]),
         make_entry("book1", 3, "The villain appeared unexpectedly.", [0.7, 0.7, 0.0]),
         make_entry("book1", 4, "The story reached its climax.", [0.0, 0.7, 0.7]),
+    ]
+
+
+@pytest.fixture
+def sample_entries_with_chapters():
+    """7 entries across 2 chapters with chapter metadata."""
+    return [
+        make_entry("book1", 0, "The beginning of the story.", [1.0, 0.0, 0.0],
+                    chapter_title="The Beginning", chapter_index=0),
+        make_entry("book1", 1, "Alice went on a journey.", [0.0, 1.0, 0.0],
+                    chapter_title="The Beginning", chapter_index=0),
+        make_entry("book1", 2, "She found a mysterious artifact.", [0.0, 0.0, 1.0],
+                    chapter_title="The Beginning", chapter_index=0),
+        make_entry("book1", 3, "The villain appeared unexpectedly.", [0.7, 0.7, 0.0],
+                    chapter_title="The Journey", chapter_index=1),
+        make_entry("book1", 4, "The story reached its climax.", [0.0, 0.7, 0.7],
+                    chapter_title="The Journey", chapter_index=1),
+        make_entry("book1", 5, "Alice confronted the villain.", [0.5, 0.5, 0.0],
+                    chapter_title="The Journey", chapter_index=1),
+        make_entry("book1", 6, "The journey continued north.", [0.3, 0.3, 0.3],
+                    chapter_title="The Journey", chapter_index=1),
     ]
 
 

@@ -2,11 +2,15 @@
 Tool-calling agent for the RAG pipeline.
 
 Replaces the fixed LangGraph DAG with a loop where Claude decides which
-tools to call, how many times, and in what order. Three tools:
+tools to call, how many times, and in what order. Seven tools:
 
 - search_book: semantic / keyword / hybrid search with reranking
 - get_surrounding_context: proximity retrieval around a chunk
 - get_chapter_summary: broad thematic search over chapter summaries
+- search_by_chapter: scoped search within a single chapter
+- find_first_mention: earliest occurrence of a term by position
+- get_reading_position_context: chunks before reader's current position
+- get_book_structure: chapter list with PAST/CURRENT/AHEAD labels
 
 The agent loop runs tool-call turns non-streaming (fast, 1-2 turns typical),
 then streams only the final answer. This preserves the SSE event sequence
@@ -192,6 +196,87 @@ TOOL_SCHEMAS = [
                 },
             },
             "required": ["query"],
+        },
+    },
+    {
+        "name": "search_by_chapter",
+        "description": (
+            "Search within a specific chapter for relevant passages. "
+            "Use when the reader asks about events in a particular chapter. "
+            "Requires a chapter_index (use get_book_structure to find it)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query.",
+                },
+                "chapter_index": {
+                    "type": "integer",
+                    "description": "The 0-based chapter index to search within.",
+                },
+                "strategy": {
+                    "type": "string",
+                    "enum": ["semantic", "keyword", "hybrid"],
+                    "description": "Search strategy (default 'hybrid').",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of results to retrieve (default 20, reranked to ~5).",
+                },
+            },
+            "required": ["query", "chapter_index"],
+        },
+    },
+    {
+        "name": "find_first_mention",
+        "description": (
+            "Find the earliest occurrence(s) of a term in the book by position. "
+            "Use for 'when was X first introduced/mentioned?' questions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "term": {
+                    "type": "string",
+                    "description": "The exact term to search for (case-insensitive).",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum earliest mentions to return (default 3, max 10).",
+                },
+            },
+            "required": ["term"],
+        },
+    },
+    {
+        "name": "get_reading_position_context",
+        "description": (
+            "Get the chunks immediately before the reader's current position. "
+            "Use for 'what just happened?' or recap questions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "window": {
+                    "type": "integer",
+                    "description": "Number of chunks to retrieve (default 5, max 10).",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_book_structure",
+        "description": (
+            "Get the book's chapter list with titles and reading progress. "
+            "Use for 'what chapter am I in?' or navigation questions. No search needed."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
         },
     },
 ]
@@ -399,10 +484,219 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         formatted, source_counter = _format_sources(past_only, source_counter, seen_chunk_indices, include_chunk_id=False)
         return formatted, past_only, source_counter
 
+    async def execute_search_by_chapter(
+        tool_input: dict,
+        book_id: str,
+        reader_position: float,
+        selected_text: str | None,
+        source_counter: int,
+        seen_chunk_indices: set[int],
+        is_first_search: list[bool] | None = None,
+    ) -> tuple[str, list[dict], int]:
+        """Execute search_by_chapter tool. Falls back to search_book if no chapter metadata."""
+        chapter_index = tool_input["chapter_index"]
+
+        # Fall back to search_book if book lacks chapter metadata
+        if not await vector_store.has_chapter_metadata(book_id):
+            return await execute_search_book(
+                tool_input, book_id, reader_position, selected_text,
+                source_counter, seen_chunk_indices, is_first_search=is_first_search,
+            )
+
+        query = tool_input["query"]
+        strategy = tool_input.get("strategy", "hybrid")
+        top_k = max(1, min(int(tool_input.get("top_k", 20)), 50))
+
+        # On the first search, append selected_text to ground the query
+        if is_first_search and is_first_search[0] and selected_text:
+            query = f"{query} {selected_text}"
+            is_first_search[0] = False
+
+        total_chunks = await vector_store.get_total_chunks(book_id)
+
+        if strategy == "keyword":
+            bm25 = await vector_store._get_bm25(book_id)
+            all_results = bm25.search(query, top_k=top_k * 3) if bm25 else []
+            results = [
+                r for r in all_results
+                if r.chunk.metadata.get("chapter_index") == chapter_index
+            ][:top_k]
+        else:
+            embedding = await _embed_query(query)
+            if strategy == "semantic":
+                # Use chapter-filtered search via Qdrant
+                from .vector_store import Filter, FieldCondition, MatchValue
+                chapter_filter = Filter(
+                    must=[
+                        FieldCondition(key="book_id", match=MatchValue(value=book_id)),
+                        FieldCondition(key="chapter_index", match=MatchValue(value=chapter_index)),
+                    ]
+                )
+                raw = await vector_store._ac.query_points(
+                    collection_name="chunks",
+                    query=embedding,
+                    query_filter=chapter_filter,
+                    limit=top_k,
+                    with_payload=True,
+                )
+                results = [vector_store._point_to_result(p, p.score) for p in raw.points]
+            else:  # hybrid
+                results = await vector_store.search_by_chapter(
+                    book_id, chapter_index, embedding, query_text=query, top_k=top_k,
+                )
+
+        labeled = label_chunks(results, reader_position, total_chunks)
+        reranked = await _rerank_and_cutoff(labeled, query, selected_text)
+
+        past_only = [
+            c for c in reranked
+            if c["label"] == "PAST" and c["chunk_index"] not in seen_chunk_indices
+        ]
+
+        if not past_only:
+            return "No relevant passages found in this chapter from content you've already read.", [], source_counter
+
+        past_only = _bookend_reorder(past_only)
+
+        display_chunks = [
+            {**c, "text": _extract_relevant_sentences(c["text"], query) if config.COMPRESS_CONTEXT else c["text"]}
+            for c in past_only
+        ]
+        formatted, source_counter = _format_sources(display_chunks, source_counter, seen_chunk_indices)
+        for c, dc in zip(past_only, display_chunks):
+            c["source_number"] = dc["source_number"]
+        return formatted, past_only, source_counter
+
+    async def execute_find_first_mention(
+        tool_input: dict,
+        book_id: str,
+        reader_position: float,
+        source_counter: int,
+        seen_chunk_indices: set[int],
+    ) -> tuple[str, list[dict], int]:
+        """Execute find_first_mention tool. Returns earliest occurrences by chunk position."""
+        term = tool_input["term"]
+        max_results = max(1, min(int(tool_input.get("max_results", 3)), 10))
+
+        if len(term.strip()) < 2:
+            return "Term too short — please provide at least 2 characters.", [], source_counter
+
+        total_chunks = await vector_store.get_total_chunks(book_id)
+        results = await vector_store.keyword_search(book_id, term)
+
+        if not results:
+            return f'No matches found for "{term}" in the book.', [], source_counter
+
+        # Sort by chunk_index ascending (earliest first)
+        results.sort(key=lambda r: r.chunk.metadata["chunk_index"])
+
+        labeled = label_chunks(results, reader_position, total_chunks)
+
+        past_only = [
+            c for c in labeled
+            if c["label"] == "PAST" and c["chunk_index"] not in seen_chunk_indices
+        ]
+
+        if not past_only:
+            return f'"{term}" appears in the book, but all mentions are in sections you haven\'t read yet. Keep reading!', [], source_counter
+
+        total_past = len(past_only)
+        first_mentions = past_only[:max_results]
+
+        formatted, source_counter = _format_sources(first_mentions, source_counter, seen_chunk_indices)
+        summary = f'\nShowing {len(first_mentions)} earliest mention(s) of "{term}" (of {total_past} total in content you\'ve read).'
+        return formatted + "\n\n" + summary, first_mentions, source_counter
+
+    async def execute_get_reading_position_context(
+        tool_input: dict,
+        book_id: str,
+        reader_position: float,
+        source_counter: int,
+        seen_chunk_indices: set[int],
+    ) -> tuple[str, list[dict], int]:
+        """Execute get_reading_position_context tool. Returns chunks before reader's position."""
+        window = max(1, min(int(tool_input.get("window", 5)), 10))
+
+        total_chunks = await vector_store.get_total_chunks(book_id)
+        if total_chunks == 0:
+            return "No content indexed for this book.", [], source_counter
+
+        reader_idx = min(int(reader_position * total_chunks), total_chunks - 1)
+        start = max(0, reader_idx - window + 1)
+        end = reader_idx
+
+        results = await vector_store.get_chunks_by_range(book_id, start, end)
+        labeled = label_chunks(results, reader_position, total_chunks)
+
+        past_only = [
+            c for c in labeled
+            if c["label"] == "PAST" and c["chunk_index"] not in seen_chunk_indices
+        ]
+
+        if not past_only:
+            return "No context available at your current reading position.", [], source_counter
+
+        formatted, source_counter = _format_sources(past_only, source_counter, seen_chunk_indices)
+        return formatted, past_only, source_counter
+
+    async def execute_get_book_structure(
+        tool_input: dict,
+        book_id: str,
+        reader_position: float,
+        source_counter: int,
+        seen_chunk_indices: set[int],
+    ) -> tuple[str, list[dict], int]:
+        """Execute get_book_structure tool. Returns chapter list with reading progress."""
+        chapters = await vector_store.get_chapter_list(book_id)
+
+        if not chapters:
+            return "Chapter structure is not available for this book.", [], source_counter
+
+        total_chunks = await vector_store.get_total_chunks(book_id)
+        reader_idx = int(reader_position * total_chunks) if total_chunks > 0 else 0
+
+        # Find current chapter
+        current_chapter = None
+        for ch in chapters:
+            if ch["first_chunk_index"] <= reader_idx <= ch["last_chunk_index"]:
+                current_chapter = ch["chapter_index"]
+                break
+        # If between chapters, pick the last one whose first_chunk_index <= reader_idx
+        if current_chapter is None:
+            for ch in reversed(chapters):
+                if ch["first_chunk_index"] <= reader_idx:
+                    current_chapter = ch["chapter_index"]
+                    break
+
+        lines = []
+        current_name = None
+        for ch in chapters:
+            ci = ch["chapter_index"]
+            title = ch["chapter_title"] or f"Chapter {ci + 1}"
+            if ch["last_chunk_index"] <= reader_idx:
+                label = "PAST"
+            elif ch["first_chunk_index"] > reader_idx:
+                label = "AHEAD"
+            else:
+                label = "CURRENT"
+
+            marker = ">>>" if ci == current_chapter else "   "
+            lines.append(f"{marker} {ci + 1}. {title} [{label}]")
+            if ci == current_chapter:
+                current_name = title
+
+        pct = int(reader_position * 100)
+        header = f"Currently reading: {current_name or 'Unknown'} ({pct}% through the book, {len(chapters)} chapters total)"
+        return header + "\n\n" + "\n".join(lines), [], source_counter
+
     return {
         "search_book": execute_search_book,
         "get_surrounding_context": execute_get_surrounding_context,
         "get_chapter_summary": execute_get_chapter_summary,
+        "search_by_chapter": execute_search_by_chapter,
+        "find_first_mention": execute_find_first_mention,
+        "get_reading_position_context": execute_get_reading_position_context,
+        "get_book_structure": execute_get_book_structure,
         "embed_query": _embed_query,
     }
 
@@ -534,6 +828,23 @@ async def _dispatch_tool(
         return await executors["get_chapter_summary"](
             tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
         )
+    elif tool_name == "search_by_chapter":
+        return await executors["search_by_chapter"](
+            tool_input, book_id, reader_position, selected_text, source_counter, seen_chunk_indices,
+            is_first_search=is_first_search,
+        )
+    elif tool_name == "find_first_mention":
+        return await executors["find_first_mention"](
+            tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
+        )
+    elif tool_name == "get_reading_position_context":
+        return await executors["get_reading_position_context"](
+            tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
+        )
+    elif tool_name == "get_book_structure":
+        return await executors["get_book_structure"](
+            tool_input, book_id, reader_position, source_counter, seen_chunk_indices,
+        )
     else:
         return f"Unknown tool: {tool_name}", [], source_counter
 
@@ -612,8 +923,8 @@ async def run_agent(
                 is_first_search=is_first_search,
             )
 
-            # Track consecutive empty results
-            if not chunks:
+            # Track consecutive empty results (get_book_structure always returns [] by design)
+            if not chunks and tool_name != "get_book_structure":
                 empty_streak += 1
             else:
                 empty_streak = 0
@@ -787,7 +1098,12 @@ async def run_agent_streaming(
             tool_name = block.name
             tool_input = block.input
 
-            detail = f"{tool_name}: {tool_input.get('query', tool_input.get('chunk_index', ''))}"
+            if tool_name == "get_reading_position_context":
+                detail = f"{tool_name}: last {tool_input.get('window', 5)} chunks"
+            elif tool_name == "get_book_structure":
+                detail = f"{tool_name}"
+            else:
+                detail = f"{tool_name}: {tool_input.get('query', tool_input.get('chunk_index', tool_input.get('term', '')))}"
             yield {"type": "status", "stage": "searching", "detail": detail}
 
             logger.info("  Agent tool call [turn %d]: %s(%s)", turn + 1, tool_name, json.dumps(tool_input)[:200])
@@ -798,8 +1114,8 @@ async def run_agent_streaming(
                 is_first_search=is_first_search,
             )
 
-            # Track consecutive empty results
-            if not chunks:
+            # Track consecutive empty results (get_book_structure always returns [] by design)
+            if not chunks and tool_name != "get_book_structure":
                 empty_streak += 1
             else:
                 empty_streak = 0

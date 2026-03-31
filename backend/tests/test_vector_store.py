@@ -479,3 +479,62 @@ class TestBM25LazyBuild:
         results = await store.hybrid_search("book1", [1.0, 0.0, 0.0], "beginning", top_k=3)
         assert "book1" in store.bm25_indices
         assert len(results) >= 1
+
+
+class TestChapterMethods:
+    """Tests for chapter-aware vector store methods."""
+
+    @pytest.mark.asyncio
+    async def test_has_chapter_metadata_true(self, vector_store, sample_entries_with_chapters):
+        await vector_store.add_book("book1", sample_entries_with_chapters)
+        assert await vector_store.has_chapter_metadata("book1") is True
+
+    @pytest.mark.asyncio
+    async def test_has_chapter_metadata_false(self, vector_store, sample_entries):
+        await vector_store.add_book("book1", sample_entries)
+        assert await vector_store.has_chapter_metadata("book1") is False
+
+    @pytest.mark.asyncio
+    async def test_has_chapter_metadata_no_book(self, vector_store):
+        assert await vector_store.has_chapter_metadata("nobook") is False
+
+    @pytest.mark.asyncio
+    async def test_get_chapter_list(self, vector_store, sample_entries_with_chapters):
+        await vector_store.add_book("book1", sample_entries_with_chapters)
+        chapters = await vector_store.get_chapter_list("book1")
+        assert len(chapters) == 2
+        assert chapters[0]["chapter_index"] == 0
+        assert chapters[0]["chapter_title"] == "The Beginning"
+        assert chapters[0]["first_chunk_index"] == 0
+        assert chapters[0]["last_chunk_index"] == 2
+        assert chapters[1]["chapter_index"] == 1
+        assert chapters[1]["chapter_title"] == "The Journey"
+        assert chapters[1]["first_chunk_index"] == 3
+        assert chapters[1]["last_chunk_index"] == 6
+
+    @pytest.mark.asyncio
+    async def test_get_chapter_list_no_chapters(self, vector_store, sample_entries):
+        await vector_store.add_book("book1", sample_entries)
+        chapters = await vector_store.get_chapter_list("book1")
+        assert chapters == []
+
+    @pytest.mark.asyncio
+    async def test_search_by_chapter(self, vector_store, sample_entries_with_chapters):
+        await vector_store.add_book("book1", sample_entries_with_chapters)
+        # Search chapter 1 (The Journey) for "villain"
+        results = await vector_store.search_by_chapter(
+            "book1", 1, [0.7, 0.7, 0.0], "villain", top_k=5,
+        )
+        assert len(results) >= 1
+        # All results should be from chapter 1
+        for r in results:
+            assert r.chunk.metadata.get("chapter_index") == 1
+
+    @pytest.mark.asyncio
+    async def test_search_by_chapter_no_results(self, vector_store, sample_entries_with_chapters):
+        await vector_store.add_book("book1", sample_entries_with_chapters)
+        # Search nonexistent chapter
+        results = await vector_store.search_by_chapter(
+            "book1", 99, [1.0, 0.0, 0.0], "anything", top_k=5,
+        )
+        assert results == []

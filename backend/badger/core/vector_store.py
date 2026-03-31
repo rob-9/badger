@@ -282,6 +282,11 @@ class QdrantVectorStore:
             field_name="book_id",
             field_schema=PayloadSchemaType.KEYWORD,
         )
+        await self._ac.create_payload_index(
+            collection_name=CHUNKS_COLLECTION,
+            field_name="chapter_index",
+            field_schema=PayloadSchemaType.INTEGER,
+        )
 
         await self._auto_migrate()
         self._initialized = True
@@ -529,6 +534,13 @@ class QdrantVectorStore:
         except Exception:
             return False
 
+    async def has_chapter_metadata(self, book_id: str) -> bool:
+        """Check if a book's chunks have chapter metadata (from structured chunking)."""
+        entries = await self._scroll_book_entries(book_id)
+        if not entries:
+            return False
+        return "chapter_index" in entries[0].chunk.metadata
+
     async def get_total_chunks(self, book_id: str) -> int:
         """Return total number of indexed chunks for a book."""
         await self._ensure_initialized()
@@ -542,6 +554,33 @@ class QdrantVectorStore:
             return result.count
         except Exception:
             return 0
+
+    async def get_chapter_list(self, book_id: str) -> list[dict]:
+        """Return chapter list with titles and chunk ranges.
+
+        Returns [{chapter_index, chapter_title, first_chunk_index, last_chunk_index}, ...]
+        or [] for books without chapter metadata.
+        """
+        entries = await self._scroll_book_entries(book_id)
+        if not entries or "chapter_index" not in entries[0].chunk.metadata:
+            return []
+
+        chapters: dict[int, dict] = {}
+        for e in entries:
+            ci = e.chunk.metadata["chapter_index"]
+            chunk_idx = e.chunk.metadata["chunk_index"]
+            if ci not in chapters:
+                chapters[ci] = {
+                    "chapter_index": ci,
+                    "chapter_title": e.chunk.metadata.get("chapter_title", ""),
+                    "first_chunk_index": chunk_idx,
+                    "last_chunk_index": chunk_idx,
+                }
+            else:
+                chapters[ci]["first_chunk_index"] = min(chapters[ci]["first_chunk_index"], chunk_idx)
+                chapters[ci]["last_chunk_index"] = max(chapters[ci]["last_chunk_index"], chunk_idx)
+
+        return sorted(chapters.values(), key=lambda c: c["chapter_index"])
 
     async def search(
         self,
@@ -611,6 +650,51 @@ class QdrantVectorStore:
         fused = reciprocal_rank_fusion(semantic_results, bm25_results)[:top_k]
 
         logger.debug("Fused: %d results", len(fused))
+        return fused
+
+    async def search_by_chapter(
+        self,
+        book_id: str,
+        chapter_index: int,
+        query_embedding: list[float],
+        query_text: str,
+        top_k: int = 20,
+    ) -> list[SearchResult]:
+        """Hybrid search scoped to a single chapter.
+
+        Semantic search uses a Qdrant filter on both book_id and chapter_index.
+        BM25 results are post-filtered to the target chapter.
+        Results are fused via RRF.
+        """
+        await self._ensure_initialized()
+
+        # Semantic search filtered to chapter
+        chapter_filter = Filter(
+            must=[
+                FieldCondition(key="book_id", match=MatchValue(value=book_id)),
+                FieldCondition(key="chapter_index", match=MatchValue(value=chapter_index)),
+            ]
+        )
+        semantic_results_raw = await self._ac.query_points(
+            collection_name=CHUNKS_COLLECTION,
+            query=query_embedding,
+            query_filter=chapter_filter,
+            limit=top_k,
+            with_payload=True,
+        )
+        semantic_results = [self._point_to_result(p, p.score) for p in semantic_results_raw.points]
+
+        # BM25 with post-filter to chapter
+        bm25 = await self._get_bm25(book_id)
+        bm25_results = []
+        if bm25:
+            all_bm25 = bm25.search(query_text, top_k=top_k * 3)
+            bm25_results = [
+                r for r in all_bm25
+                if r.chunk.metadata.get("chapter_index") == chapter_index
+            ][:top_k]
+
+        fused = reciprocal_rank_fusion(semantic_results, bm25_results)[:top_k]
         return fused
 
     async def keyword_search(self, book_id: str, text: str) -> list[SearchResult]:
