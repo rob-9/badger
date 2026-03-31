@@ -94,8 +94,9 @@ def sample_entries_with_chapters():
 
 
 @pytest.fixture
-async def vector_store():
+async def vector_store(tmp_path):
     """VectorStore backed by in-memory Qdrant (3-dimensional for test speed)."""
     store = VectorStore(location=":memory:", embedding_dim=3)
+    store._old_json_dir = tmp_path / "no_legacy"  # prevent real .data/vectors from corrupting tests
     await store.initialize()
     return store

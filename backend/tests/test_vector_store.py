@@ -466,9 +466,10 @@ class TestMultiBookIsolation:
 
 class TestBM25LazyBuild:
     @pytest.mark.asyncio
-    async def test_bm25_built_lazily_on_hybrid_search(self, sample_entries):
+    async def test_bm25_built_lazily_on_hybrid_search(self, sample_entries, tmp_path):
         """BM25 index should be built on demand when not yet cached."""
         store = VectorStore(location=":memory:", embedding_dim=3)
+        store._old_json_dir = tmp_path / "no_legacy"
         await store.initialize()
         await store.add_book("book1", sample_entries)
         # Clear the BM25 cache to simulate cold start
