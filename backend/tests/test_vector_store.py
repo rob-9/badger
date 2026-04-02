@@ -80,6 +80,34 @@ class TestBM25Index:
         results = index.search("common", top_k=3)
         assert len(results) == 3
 
+    def test_max_chunk_index_filters_ahead(self):
+        """Position pre-filter ensures only PAST chunks are returned."""
+        entries = [
+            make_entry("b", 0, "Lanistia arrived at dawn.", [0.0]),
+            make_entry("b", 1, "The weather was clear.", [0.0]),
+            make_entry("b", 2, "Lanistia spoke firmly.", [0.0]),
+            make_entry("b", 3, "Lanistia trained hard.", [0.0]),
+        ]
+        index = BM25Index(entries)
+
+        # Without filter: all 3 matching chunks returned
+        all_results = index.search("Lanistia", top_k=5)
+        assert len(all_results) == 3
+        indices = {r.chunk.metadata["chunk_index"] for r in all_results}
+        assert indices == {0, 2, 3}
+
+        # With filter at chunk 1: only chunk 0 is returned
+        filtered = index.search("Lanistia", top_k=5, max_chunk_index=1)
+        assert len(filtered) == 1
+        assert filtered[0].chunk.metadata["chunk_index"] == 0
+
+    def test_max_chunk_index_none_returns_all(self):
+        """max_chunk_index=None behaves like no filter."""
+        entries = [make_entry("b", i, f"word{i} common term", [0.0]) for i in range(5)]
+        index = BM25Index(entries)
+        results = index.search("common", top_k=10, max_chunk_index=None)
+        assert len(results) == 5
+
 
 # ── reciprocal_rank_fusion ────────────────────────────────────────────
 

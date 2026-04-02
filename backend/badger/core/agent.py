@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 LOG_DIR = Path(".data/logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-MAX_TURNS = 3
+MAX_TURNS = config.AGENT_MAX_TURNS
 
 
 def _format_conversation_history(
@@ -426,7 +426,7 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
     async def _rerank_and_cutoff(
         chunks: list[dict], query: str, selected_text: str | None,
     ) -> list[dict]:
-        """Rerank with Voyage rerank-2.5, apply AHEAD penalty + adaptive cutoff."""
+        """Rerank with Voyage rerank-2.5, apply adaptive cutoff."""
         if len(chunks) <= 3:
             return chunks
 
@@ -449,10 +449,6 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         else:
             reranked = list(chunks)
 
-        # Penalize AHEAD chunks
-        for c in reranked:
-            if c["label"] == "AHEAD":
-                c["score"] *= 0.3
         reranked.sort(key=lambda c: c["score"], reverse=True)
 
         return _adaptive_cutoff(reranked)
@@ -477,28 +473,34 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
             is_first_search[0] = False
 
         total_chunks = await vector_store.get_total_chunks(book_id)
+        # Pre-filter retrieval to PAST chunks only — avoids AHEAD results
+        # crowding out PAST results in the top-k window
+        reader_idx = int(reader_position * total_chunks) if total_chunks > 0 else None
 
         if strategy == "keyword":
             bm25 = await vector_store._get_bm25(book_id)
-            results = bm25.search(query, top_k=top_k) if bm25 else []
+            results = bm25.search(query, top_k=top_k, max_chunk_index=reader_idx) if bm25 else []
         else:
             embedding = await _embed_query(query)
             if strategy == "semantic":
-                results = await vector_store.search(book_id, embedding, top_k=top_k)
+                results = await vector_store.search(
+                    book_id, embedding, top_k=top_k, max_chunk_index=reader_idx,
+                )
             else:  # hybrid
                 results = await vector_store.hybrid_search(
                     book_id, embedding, query_text=query, top_k=top_k,
+                    max_chunk_index=reader_idx,
                 )
 
         labeled = label_chunks(results, reader_position, total_chunks)
 
-        # Rerank
+        # Rerank (all results are PAST now, no AHEAD waste)
         reranked = await _rerank_and_cutoff(labeled, query, selected_text)
 
-        # Filter to PAST only, dedup before numbering
+        # Dedup before numbering
         past_only = [
             c for c in reranked
-            if c["label"] == "PAST" and c["chunk_index"] not in seen_chunk_indices
+            if c["chunk_index"] not in seen_chunk_indices
         ]
 
         if not past_only:
@@ -603,10 +605,11 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
             is_first_search[0] = False
 
         total_chunks = await vector_store.get_total_chunks(book_id)
+        reader_idx = int(reader_position * total_chunks) if total_chunks > 0 else None
 
         if strategy == "keyword":
             bm25 = await vector_store._get_bm25(book_id)
-            all_results = bm25.search(query, top_k=top_k * 3) if bm25 else []
+            all_results = bm25.search(query, top_k=top_k * 3, max_chunk_index=reader_idx) if bm25 else []
             results = [
                 r for r in all_results
                 if r.chunk.metadata.get("chapter_index") == chapter_index
@@ -614,14 +617,17 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         else:
             embedding = await _embed_query(query)
             if strategy == "semantic":
-                # Use chapter-filtered search via Qdrant
-                from .vector_store import Filter, FieldCondition, MatchValue
-                chapter_filter = Filter(
-                    must=[
-                        FieldCondition(key="book_id", match=MatchValue(value=book_id)),
-                        FieldCondition(key="chapter_index", match=MatchValue(value=chapter_index)),
-                    ]
-                )
+                # Use chapter + position filtered search via Qdrant
+                from .vector_store import Filter, FieldCondition, MatchValue, Range
+                conditions = [
+                    FieldCondition(key="book_id", match=MatchValue(value=book_id)),
+                    FieldCondition(key="chapter_index", match=MatchValue(value=chapter_index)),
+                ]
+                if reader_idx is not None:
+                    conditions.append(
+                        FieldCondition(key="chunk_index", range=Range(lte=reader_idx))
+                    )
+                chapter_filter = Filter(must=conditions)
                 raw = await vector_store._ac.query_points(
                     collection_name="chunks",
                     query=embedding,
@@ -640,7 +646,7 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
 
         past_only = [
             c for c in reranked
-            if c["label"] == "PAST" and c["chunk_index"] not in seen_chunk_indices
+            if c["chunk_index"] not in seen_chunk_indices
         ]
 
         if not past_only:
@@ -1560,6 +1566,8 @@ def build_agent(
             yield event
 
     async def _evaluate(state: dict) -> dict:
+        if config.AGENT_SKIP_EVAL:
+            return {}
         return await evaluate_answer(state, anthropic)
 
     return {

@@ -107,10 +107,16 @@ class BM25Index:
         corpus = [_tokenize(e.chunk.text) for e in entries]
         self.bm25 = BM25Okapi(corpus)
 
-    def search(self, query: str, top_k: int = 20) -> list[SearchResult]:
+    def search(self, query: str, top_k: int = 20, max_chunk_index: int | None = None) -> list[SearchResult]:
         tokens = _tokenize(query)
         scores = self.bm25.get_scores(tokens)
-        ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)[:top_k]
+        candidates = list(enumerate(scores))
+        if max_chunk_index is not None:
+            candidates = [
+                (i, s) for i, s in candidates
+                if self.entries[i].chunk.metadata["chunk_index"] <= max_chunk_index
+            ]
+        ranked = sorted(candidates, key=lambda x: x[1], reverse=True)[:top_k]
         return [
             SearchResult(chunk=self.entries[idx].chunk, score=float(score))
             for idx, score in ranked
@@ -587,6 +593,7 @@ class QdrantVectorStore:
         book_id: str,
         query_embedding: list[float],
         top_k: int = 5,
+        max_chunk_index: int | None = None,
     ) -> list[SearchResult]:
         """
         Search for similar chunks within a book.
@@ -595,16 +602,20 @@ class QdrantVectorStore:
             book_id: The book to search in
             query_embedding: The embedded question
             top_k: Number of results to return
+            max_chunk_index: If set, only return chunks at or before this index
 
         Returns:
             List of SearchResult objects sorted by similarity
         """
         await self._ensure_initialized()
-        logger.debug("Searching book %s (top %d)", book_id, top_k)
+        logger.debug("Searching book %s (top %d, max_idx=%s)", book_id, top_k, max_chunk_index)
 
-        book_filter = Filter(
-            must=[FieldCondition(key="book_id", match=MatchValue(value=book_id))]
-        )
+        conditions = [FieldCondition(key="book_id", match=MatchValue(value=book_id))]
+        if max_chunk_index is not None:
+            conditions.append(
+                FieldCondition(key="chunk_index", range=Range(lte=max_chunk_index))
+            )
+        book_filter = Filter(must=conditions)
 
         results = await self._ac.query_points(
             collection_name=CHUNKS_COLLECTION,
@@ -621,6 +632,7 @@ class QdrantVectorStore:
         query_embedding: list[float],
         query_text: str,
         top_k: int = 20,
+        max_chunk_index: int | None = None,
     ) -> list[SearchResult]:
         """
         Combine semantic (vector) search with BM25 (keyword) search using
@@ -635,14 +647,16 @@ class QdrantVectorStore:
         Returns top_k results (typically 20) for downstream reranking to narrow
         down to the final 5.
         """
-        logger.debug("Hybrid search for book %s (top %d)", book_id, top_k)
+        logger.debug("Hybrid search for book %s (top %d, max_idx=%s)", book_id, top_k, max_chunk_index)
 
-        # Semantic search (Qdrant ANN)
-        semantic_results = await self.search(book_id, query_embedding, top_k=top_k)
+        # Semantic search (Qdrant ANN) — position-filtered at index level
+        semantic_results = await self.search(
+            book_id, query_embedding, top_k=top_k, max_chunk_index=max_chunk_index,
+        )
 
-        # BM25 keyword search
+        # BM25 keyword search — position-filtered before top_k cutoff
         bm25 = await self._get_bm25(book_id)
-        bm25_results = bm25.search(query_text, top_k=top_k) if bm25 else []
+        bm25_results = bm25.search(query_text, top_k=top_k, max_chunk_index=max_chunk_index) if bm25 else []
 
         logger.debug("Semantic: %d results, BM25: %d results", len(semantic_results), len(bm25_results))
 
