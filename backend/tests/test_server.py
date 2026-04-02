@@ -117,6 +117,7 @@ def mock_services():
 
     async def mock_run_agent_streaming(
         book_id="", question="", selected_text=None, reader_position=0.0,
+        conversation_history=None,
     ):
         yield {"type": "status", "stage": "thinking"}
         yield {"type": "status", "stage": "searching", "detail": "search_book: test"}

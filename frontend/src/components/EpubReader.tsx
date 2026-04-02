@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import ePub, { Book, Rendition, NavItem } from 'epubjs'
-import { ChevronLeft, ChevronRight, Settings, List, Moon, Sun, RotateCcw, ArrowLeft, Minus, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Settings, List, Moon, Sun, RotateCcw, ArrowLeft, Minus, Plus, MessageSquare } from 'lucide-react'
 
 export interface TextSelection {
   text: string
@@ -27,9 +27,11 @@ interface EpubReaderProps {
   onTextSelect?: (selection: TextSelection) => void
   onLocationChange?: (percentage: number) => void
   onBackToReading?: () => void
+  onOpenChat?: () => void
+  hasChatHistory?: boolean
 }
 
-const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubReader({ epubData, fileName, isIndexing, isIndexed, isChatOpen, sourceNavCfi, onCloseAction, onTextSelect, onLocationChange, onBackToReading }, ref) {
+const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubReader({ epubData, fileName, isIndexing, isIndexed, isChatOpen, sourceNavCfi, onCloseAction, onTextSelect, onLocationChange, onBackToReading, onOpenChat, hasChatHistory }, ref) {
   // Initialize font size from localStorage
   const [fontSize, setFontSize] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -695,6 +697,20 @@ const EpubReader = forwardRef<EpubReaderHandle, EpubReaderProps>(function EpubRe
           >
             {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>
+
+          {onOpenChat && !isChatOpen && (
+            <button
+              onClick={onOpenChat}
+              className="relative p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors"
+              aria-label="Open chat"
+              title="Open chat"
+            >
+              <MessageSquare className="w-5 h-5" />
+              {hasChatHistory && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-accent rounded-full" />
+              )}
+            </button>
+          )}
 
           <button
             onClick={() => setShowToolbar(!showToolbar)}

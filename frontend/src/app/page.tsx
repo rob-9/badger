@@ -12,6 +12,7 @@ import Toast from '@/components/Toast'
 import { addBook, getBookData, getBookHistory, removeBook, type BookMetadata } from '@/lib/bookStorage'
 import { indexBook, isBookIndexed, queryBookStream } from '@/lib/api'
 import { extractCover, extractStructuredText } from '@/lib/parseEpub'
+import { createThread, saveMessage, getThreadsForBook, getThreadMessages, deleteThreadsForBook, type ThreadMeta, type ThreadMessage } from '@/lib/chatStorage'
 
 const STATUS_LABELS: Record<string, string> = {
   thinking: 'Thinking...',
@@ -51,6 +52,11 @@ export default function Home() {
   const streamAbortRef = useRef<(() => void) | null>(null)
   const streamSourcesRef = useRef<ChatMessage['sources']>(undefined)
   const epubReaderRef = useRef<EpubReaderHandle>(null)
+
+  // Thread state
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
+  const [threads, setThreads] = useState<ThreadMeta[]>([])
+  const activeThreadIdRef = useRef<string | null>(null)
   const [savedReadingCfi, setSavedReadingCfi] = useState<string | null>(null)
 
   // Loading transition state
@@ -59,6 +65,23 @@ export default function Home() {
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
+
+  // Keep thread ID ref in sync
+  useEffect(() => {
+    activeThreadIdRef.current = activeThreadId
+  }, [activeThreadId])
+
+  const buildConversationHistory = useCallback(() => {
+    return chatMessages
+      .filter(m => m.content)
+      .map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content.length > 1500 ? m.content.slice(0, 1500) + '...' : m.content,
+        selected_text: m.context,
+        reader_position: m.readerPosition,
+      }))
+      .slice(-6) // last 3 exchanges
+  }, [chatMessages])
 
   // Load history on mount + restore last open book
   useEffect(() => {
@@ -80,6 +103,7 @@ export default function Home() {
             setDocument('loaded')
 
             await indexBookIfNeeded(book.id, data)
+            setThreads(await getThreadsForBook(book.id))
           }
         }
       }
@@ -128,10 +152,16 @@ export default function Home() {
       } catch (error) {
         setToast({ message: 'AI features unavailable. You can still read.', type: 'error' })
       }
+      setThreads([])
     }
   }
 
   const handleOpenFromHistory = useCallback(async (book: BookMetadata) => {
+    // Reset chat/thread state from any previous book
+    setActiveThreadId(null)
+    setChatMessages([])
+    setIsChatOpen(false)
+
     // Show loading screen immediately
     setLoadingBook(book)
     setIsLoadingBook(true)
@@ -153,6 +183,7 @@ export default function Home() {
       setLoadingBook(null)
 
       await indexBookIfNeeded(book.id, data)
+      setThreads(await getThreadsForBook(book.id))
     } else {
       setIsLoadingBook(false)
       setLoadingBook(null)
@@ -161,6 +192,7 @@ export default function Home() {
 
   const handleDeleteBook = useCallback(async (targetBookId: string) => {
     await removeBook(targetBookId)
+    await deleteThreadsForBook(targetBookId)
     setHistory(await getBookHistory())
   }, [])
 
@@ -178,6 +210,8 @@ export default function Home() {
     setSelection(null)
     setChatMessages([])
     setIsChatOpen(false)
+    setActiveThreadId(null)
+    setThreads([])
   }
 
   const handleTextSelect = useCallback((sel: TextSelection) => {
@@ -260,6 +294,25 @@ export default function Home() {
         setIsChatLoading(false)
         setLoadingStatus('')
         streamAbortRef.current = null
+
+        // Save assistant message to IndexedDB
+        const tid = activeThreadIdRef.current
+        if (tid) {
+          setChatMessages(prev => {
+            const lastMsg = prev[prev.length - 1]
+            if (lastMsg?.id === assistantId && lastMsg.role === 'assistant') {
+              saveMessage(tid, {
+                id: lastMsg.id,
+                threadId: tid,
+                role: 'assistant',
+                content: lastMsg.content,
+                sources: lastMsg.sources,
+                createdAt: Date.now(),
+              }).catch(e => console.error('[App] Failed to save assistant message:', e))
+            }
+            return prev // don't modify
+          })
+        }
       },
       onError: (error) => {
         console.error('[App] Stream error:', error)
@@ -280,14 +333,37 @@ export default function Home() {
     streamAbortRef.current = handle.abort
   }, [])
 
-  const handleQuestionSubmit = useCallback((question: string, context: string) => {
+  const handleQuestionSubmit = useCallback(async (question: string, context: string) => {
     setSelection(null)
     setIsChatOpen(true)
     streamAbortRef.current?.()
 
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: question, context }
+    // Create thread if needed
+    let threadId = activeThreadId
+    if (!threadId && bookId) {
+      threadId = await createThread(bookId, question)
+      setActiveThreadId(threadId)
+      setThreads(bookId ? await getThreadsForBook(bookId) : [])
+    }
+    const currentThreadId = threadId
+
+    const conversationHistory = buildConversationHistory()
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: question, context, readerPosition }
     const assistantId = crypto.randomUUID()
     setChatMessages(prev => [...prev, userMessage])
+
+    // Save user message to IndexedDB
+    if (currentThreadId) {
+      saveMessage(currentThreadId, {
+        id: userMessage.id,
+        threadId: currentThreadId,
+        role: 'user',
+        content: question,
+        context,
+        readerPosition,
+        createdAt: Date.now(),
+      }).catch(e => console.error('[App] Failed to save user message:', e))
+    }
 
     startStreaming({
       bookId: bookId || undefined,
@@ -295,23 +371,47 @@ export default function Home() {
       selectedText: context,
       useRag: !!bookId,
       readerPosition,
+      conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
     }, assistantId)
-  }, [bookId, readerPosition, startStreaming])
+  }, [bookId, readerPosition, startStreaming, activeThreadId, buildConversationHistory])
 
-  const handleChatMessage = useCallback((message: string) => {
+  const handleChatMessage = useCallback(async (message: string) => {
     streamAbortRef.current?.()
 
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: message }
+    // Create thread if needed
+    let threadId = activeThreadId
+    if (!threadId && bookId) {
+      threadId = await createThread(bookId, message)
+      setActiveThreadId(threadId)
+      setThreads(bookId ? await getThreadsForBook(bookId) : [])
+    }
+    const currentThreadId = threadId
+
+    const conversationHistory = buildConversationHistory()
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: message, readerPosition }
     const assistantId = crypto.randomUUID()
     setChatMessages(prev => [...prev, userMessage])
+
+    // Save user message to IndexedDB
+    if (currentThreadId) {
+      saveMessage(currentThreadId, {
+        id: userMessage.id,
+        threadId: currentThreadId,
+        role: 'user',
+        content: message,
+        readerPosition,
+        createdAt: Date.now(),
+      }).catch(e => console.error('[App] Failed to save user message:', e))
+    }
 
     startStreaming({
       bookId: bookId || undefined,
       question: message,
       useRag: !!bookId,
       readerPosition,
+      conversationHistory: conversationHistory.length > 0 ? conversationHistory : undefined,
     }, assistantId)
-  }, [bookId, readerPosition, startStreaming])
+  }, [bookId, readerPosition, startStreaming, activeThreadId, buildConversationHistory])
 
   const handleNavigateToSource = useCallback(async (source: NonNullable<ChatMessage['sources']>[0]) => {
     const currentCfi = epubReaderRef.current?.getCurrentCfi()
@@ -327,6 +427,24 @@ export default function Home() {
       setSavedReadingCfi(null)
     }
   }, [savedReadingCfi])
+
+  const handleNewThread = useCallback(() => {
+    setActiveThreadId(null)
+    setChatMessages([])
+  }, [])
+
+  const handleSelectThread = useCallback(async (threadId: string) => {
+    const messages = await getThreadMessages(threadId)
+    setActiveThreadId(threadId)
+    setChatMessages(messages.map(m => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      context: m.context,
+      readerPosition: m.readerPosition,
+      sources: m.sources,
+    })))
+  }, [])
 
   if (!historyLoaded && !document) {
     return <div className="h-screen bg-[#14120b]" />
@@ -367,6 +485,8 @@ export default function Home() {
               onTextSelect={handleTextSelect}
               onLocationChange={setReaderPosition}
               onBackToReading={handleBackToReading}
+              onOpenChat={() => setIsChatOpen(true)}
+              hasChatHistory={chatMessages.length > 0 || threads.length > 0}
             />
             {selection && (
               <QuestionPopup
@@ -386,6 +506,10 @@ export default function Home() {
                 onSendMessage={handleChatMessage}
                 onClose={() => setIsChatOpen(false)}
                 onNavigateToSource={handleNavigateToSource}
+                threadTitle={activeThreadId ? chatMessages.find(m => m.role === 'user')?.content?.slice(0, 50) : undefined}
+                threads={threads}
+                onNewThread={handleNewThread}
+                onSelectThread={handleSelectThread}
               />
             )}
           </>

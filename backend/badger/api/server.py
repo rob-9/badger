@@ -16,12 +16,12 @@ import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, field_validator, model_validator
-from typing import Optional
+from typing import Literal, Optional
 from anthropic import Anthropic, AsyncAnthropic
 
 from badger import config
@@ -116,6 +116,36 @@ class IndexBookRequest(BaseModel):
         return self
 
 
+class ConversationTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+    selected_text: Optional[str] = None
+    reader_position: Optional[float] = None
+
+    @field_validator("content")
+    @classmethod
+    def content_not_empty_or_too_long(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Content must not be empty")
+        if len(v) > 5000:
+            raise ValueError("Content exceeds maximum length of 5000")
+        return v
+
+    @field_validator("selected_text")
+    @classmethod
+    def selected_text_not_too_long(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > config.MAX_SELECTED_TEXT_LENGTH:
+            raise ValueError(f"Selected text exceeds maximum length of {config.MAX_SELECTED_TEXT_LENGTH}")
+        return v
+
+    @field_validator("reader_position")
+    @classmethod
+    def reader_position_in_range(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and (v < 0.0 or v > 1.0):
+            raise ValueError("Reader position must be between 0.0 and 1.0")
+        return v
+
+
 class QueryBookRequest(BaseModel):
     """Request to query a book."""
     book_id: Optional[str] = None
@@ -123,6 +153,7 @@ class QueryBookRequest(BaseModel):
     selected_text: Optional[str] = None
     use_rag: bool = True
     reader_position: Optional[float] = None  # 0-1, where reader currently is
+    conversation_history: Optional[list[ConversationTurn]] = None
 
     @field_validator("question")
     @classmethod
@@ -145,6 +176,13 @@ class QueryBookRequest(BaseModel):
     def reader_position_in_range(cls, v: Optional[float]) -> Optional[float]:
         if v is not None and (v < 0.0 or v > 1.0):
             raise ValueError("Reader position must be between 0.0 and 1.0")
+        return v
+
+    @field_validator("conversation_history")
+    @classmethod
+    def conversation_history_not_too_long(cls, v: Optional[list]) -> Optional[list]:
+        if v is not None and len(v) > 10:
+            raise ValueError("Conversation history exceeds maximum of 10 turns")
         return v
 
 
@@ -203,6 +241,7 @@ async def query_book(request: QueryBookRequest):
                 question=request.question,
                 selected_text=request.selected_text,
                 reader_position=request.reader_position or 0.0,
+                conversation_history=request.conversation_history,
             )
             tool_calls = result.get("tool_calls", [])
             logger.info("RAG done: %d tool calls, %d sources | %s",
@@ -255,6 +294,7 @@ async def query_book_stream(request: QueryBookRequest):
                     question=request.question,
                     selected_text=request.selected_text,
                     reader_position=request.reader_position or 0.0,
+                    conversation_history=request.conversation_history,
                 ):
                     if event["type"] == "status":
                         yield f"event: status\ndata: {json.dumps({'stage': event['stage']})}\n\n"

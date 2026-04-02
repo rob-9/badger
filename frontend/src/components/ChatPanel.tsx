@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Send, BookOpen, Loader2, ChevronDown, ArrowUpRight } from 'lucide-react'
+import { X, Send, BookOpen, Loader2, ChevronDown, ArrowUpRight, Plus, Clock, MessageSquare } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -10,6 +10,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   context?: string
+  readerPosition?: number
   sources?: Array<{ text: string; full_text: string; score: number; chunk_index: number; source_number: number; label: string; chapter_title?: string }>
 }
 
@@ -20,10 +21,15 @@ interface ChatPanelProps {
   onSendMessage: (message: string) => void
   onClose: () => void
   onNavigateToSource?: (source: NonNullable<ChatMessage['sources']>[0]) => void
+  threadTitle?: string
+  threads?: Array<{ id: string; title: string; updatedAt: number; messageCount: number }>
+  onNewThread?: () => void
+  onSelectThread?: (threadId: string) => void
 }
 
-export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose, onNavigateToSource }: ChatPanelProps) {
+export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMessage, onClose, onNavigateToSource, threadTitle, threads, onNewThread, onSelectThread }: ChatPanelProps) {
   const [input, setInput] = useState('')
+  const [showThreadList, setShowThreadList] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set())
   const [activeSource, setActiveSource] = useState<{ msgId: string; num: number } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -103,20 +109,67 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
 
   return (
     <div className="fixed right-0 top-0 h-full w-[400px] max-[768px]:w-full max-[768px]:max-w-[90vw] bg-white dark:bg-[#1e1e1e] border-l border-gray-100 dark:border-[#2a2a2a] shadow-2xl flex flex-col z-40 animate-slide-in-right">
-      {/* Header — matches main navbar height (px-6 py-4) */}
+      {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-[#2a2a2a]">
-        <div className="flex items-center gap-3">
-          <BookOpen className="w-5 h-5 text-gray-400 dark:text-[#666]" />
-          <h2 className="text-lg font-semibold text-gray-800 dark:text-[#e0e0e0]">Agent</h2>
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <BookOpen className="w-5 h-5 text-gray-400 dark:text-[#666] flex-shrink-0" />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-[#e0e0e0] truncate">
+              {threadTitle || 'Agent'}
+            </h2>
+          </div>
         </div>
-        <button
-          onClick={onClose}
-          className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa]"
-          aria-label="Close chat panel"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onNewThread && (
+            <button
+              onClick={onNewThread}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa]"
+              aria-label="New conversation"
+              title="New conversation"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          )}
+          {threads && threads.length > 0 && (
+            <button
+              onClick={() => setShowThreadList(prev => !prev)}
+              className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa]"
+              aria-label="Thread history"
+              title="Thread history"
+            >
+              <Clock className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-[#2a2a2a] rounded-lg transition-colors text-gray-400 hover:text-gray-600 dark:text-[#666] dark:hover:text-[#aaa]"
+            aria-label="Close chat panel"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
+
+      {/* Thread list dropdown */}
+      {showThreadList && threads && threads.length > 0 && (
+        <div className="border-b border-gray-200 dark:border-[#2a2a2a] max-h-64 overflow-y-auto">
+          {threads.map(thread => (
+            <button
+              key={thread.id}
+              onClick={() => { onSelectThread?.(thread.id); setShowThreadList(false) }}
+              className="w-full text-left px-6 py-3 hover:bg-gray-50 dark:hover:bg-[#252525] transition-colors border-b border-gray-100 dark:border-[#222] last:border-b-0"
+            >
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-3.5 h-3.5 text-gray-400 dark:text-[#555] flex-shrink-0" />
+                <span className="text-sm text-gray-700 dark:text-[#ccc] truncate">{thread.title}</span>
+              </div>
+              <div className="text-xs text-gray-400 dark:text-[#555] mt-0.5 ml-[1.375rem]">
+                {thread.messageCount} messages
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6" role="region" aria-label="Chat messages">
@@ -241,13 +294,15 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
                                     <p className="text-[0.72rem] leading-relaxed text-gray-500 dark:text-[#888] italic">
                                       {renderHighlightedSource(source.full_text, source.text)}
                                     </p>
-                                    <button
-                                      onClick={() => onNavigateToSource?.(source)}
-                                      className="mt-1.5 flex items-center gap-1 text-[0.62rem] font-medium text-accent/60 hover:text-accent transition-colors group/nav"
-                                    >
-                                      <span>View in book</span>
-                                      <ArrowUpRight className="w-2.5 h-2.5 transition-transform group-hover/nav:translate-x-px group-hover/nav:-translate-y-px" />
-                                    </button>
+                                    {source.full_text && (
+                                      <button
+                                        onClick={() => onNavigateToSource?.(source)}
+                                        className="mt-1.5 flex items-center gap-1 text-[0.62rem] font-medium text-accent/60 hover:text-accent transition-colors group/nav"
+                                      >
+                                        <span>View in book</span>
+                                        <ArrowUpRight className="w-2.5 h-2.5 transition-transform group-hover/nav:translate-x-px group-hover/nav:-translate-y-px" />
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               </div>

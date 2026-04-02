@@ -39,6 +39,96 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 MAX_TURNS = 3
 
 
+def _format_conversation_history(
+    history: list[dict],
+    max_turns: int = 3,
+    max_selected_len: int = 80,
+    max_answer_len: int = 200,
+) -> str:
+    """Format conversation history as a condensed block for system prompt injection.
+
+    Groups into Q&A pairs, strips [Source N] citations, truncates long content,
+    and keeps only the last `max_turns` exchanges.
+    """
+    import re as _re
+
+    # Normalize Pydantic models to dicts
+    history = [t.model_dump() if hasattr(t, 'model_dump') else t for t in history]
+
+    # Group into Q&A pairs
+    pairs: list[dict] = []
+    current_pair: dict = {}
+    for turn in history:
+        role = turn.get("role", "")
+        content = turn.get("content", "")
+        if role == "user":
+            if current_pair.get("user"):
+                # Previous pair had no assistant response — save it anyway
+                pairs.append(current_pair)
+            current_pair = {
+                "user": content,
+                "selected_text": turn.get("selected_text"),
+                "reader_position": turn.get("reader_position"),
+            }
+        elif role == "assistant" and current_pair.get("user"):
+            # Strip [Source N] citations from prior answers
+            cleaned = _re.sub(r'\[(?:Source\s+)?\d+(?:,\s*(?:Source\s+)?\d+)*\]', '', content)
+            cleaned = _re.sub(r'\s{2,}', ' ', cleaned).strip()
+            current_pair["assistant"] = cleaned
+            pairs.append(current_pair)
+            current_pair = {}
+
+    # Don't lose a trailing user message without assistant response
+    if current_pair.get("user"):
+        pairs.append(current_pair)
+
+    if not pairs:
+        return ""
+
+    # Keep only last max_turns exchanges
+    pairs = pairs[-max_turns:]
+
+    lines = ["\n\n[CONVERSATION HISTORY] (prior exchanges — source numbers below are from NEW searches, not these):\n"]
+    for i, pair in enumerate(pairs, 1):
+        # Position info
+        pos = pair.get("reader_position")
+        pos_str = f"Reader at {int(pos * 100)}%" if pos is not None else ""
+
+        # Selected text (truncated)
+        sel = pair.get("selected_text", "")
+        if sel:
+            if len(sel) > max_selected_len:
+                sel = sel[:max_selected_len] + "..."
+            sel_str = f' | Selected: "{sel}"'
+        else:
+            sel_str = ""
+
+        header_parts = [p for p in [pos_str, sel_str.lstrip(" | ")] if p]
+        if header_parts:
+            if pos_str and sel_str:
+                lines.append(f"[Turn {i}] {pos_str}{sel_str}")
+            elif pos_str:
+                lines.append(f"[Turn {i}] {pos_str}")
+            else:
+                lines.append(f"[Turn {i}] {sel_str.lstrip(' | ')}")
+        else:
+            lines.append(f"[Turn {i}]")
+
+        # Question
+        lines.append(f"Q: {pair['user']}")
+
+        # Answer (truncated)
+        assistant = pair.get("assistant", "")
+        if assistant:
+            if len(assistant) > max_answer_len:
+                assistant = assistant[:max_answer_len] + "..."
+            lines.append(f"A: {assistant}")
+
+        lines.append("")  # blank line between turns
+
+    return "\n".join(lines)
+
+
 def _adaptive_cutoff(chunks: list[dict]) -> list[dict]:
     """Select chunks using score drop-off: keep chunks before the largest gap."""
     floor = config.CUTOFF_FLOOR
@@ -857,6 +947,7 @@ async def run_agent(
     selected_text: str | None = None,
     reader_position: float = 0.0,
     vector_store: VectorStore | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> dict:
     """Run the agent loop (non-streaming). Returns {answer, sources, tool_calls, ...}."""
     source_counter = 1
@@ -878,6 +969,10 @@ async def run_agent(
             logger.info("  Anchor lookup: %d chunks (indices %s)",
                         len(anchor_chunks), [c["chunk_index"] for c in anchor_chunks])
 
+    system = AGENT_SYSTEM_PROMPT
+    if conversation_history:
+        system += _format_conversation_history(conversation_history)
+
     messages = [{"role": "user", "content": _build_user_message(
         question, selected_text, anchor_text, reader_position,
     )}]
@@ -891,7 +986,7 @@ async def run_agent(
             anthropic.messages.create,
             model=config.CLAUDE_MODEL,
             max_tokens=1024,
-            system=AGENT_SYSTEM_PROMPT,
+            system=system,
             tools=TOOL_SCHEMAS,
             messages=messages,
         )
@@ -991,7 +1086,7 @@ async def run_agent(
             anthropic.messages.create,
             model=config.CLAUDE_MODEL,
             max_tokens=1500,
-            system=AGENT_SYSTEM_PROMPT,
+            system=system,
             messages=messages,
         )
         answer = ""
@@ -1034,6 +1129,7 @@ async def run_agent_streaming(
     selected_text: str | None = None,
     reader_position: float = 0.0,
     vector_store: VectorStore | None = None,
+    conversation_history: list[dict] | None = None,
 ):
     """Async generator yielding SSE-compatible events.
 
@@ -1064,6 +1160,10 @@ async def run_agent_streaming(
             logger.info("  Anchor lookup: %d chunks (indices %s)",
                         len(anchor_chunks), [c["chunk_index"] for c in anchor_chunks])
 
+    system = AGENT_SYSTEM_PROMPT
+    if conversation_history:
+        system += _format_conversation_history(conversation_history)
+
     messages = [{"role": "user", "content": _build_user_message(
         question, selected_text, anchor_text, reader_position,
     )}]
@@ -1079,7 +1179,7 @@ async def run_agent_streaming(
             anthropic.messages.create,
             model=config.CLAUDE_MODEL,
             max_tokens=1024,
-            system=AGENT_SYSTEM_PROMPT,
+            system=system,
             tools=TOOL_SCHEMAS,
             messages=messages,
         )
@@ -1216,7 +1316,7 @@ async def run_agent_streaming(
         async with async_anthropic.messages.stream(
             model=config.CLAUDE_MODEL,
             max_tokens=1500,
-            system=AGENT_SYSTEM_PROMPT,
+            system=system,
             messages=messages,
         ) as stream:
             async for text in stream.text_stream:
@@ -1436,10 +1536,12 @@ def build_agent(
         question: str,
         selected_text: str | None = None,
         reader_position: float = 0.0,
+        conversation_history: list[dict] | None = None,
     ) -> dict:
         return await run_agent(
             anthropic, executors, book_id, question, selected_text, reader_position,
             vector_store=vector_store,
+            conversation_history=conversation_history,
         )
 
     async def _run_agent_streaming(
@@ -1447,11 +1549,13 @@ def build_agent(
         question: str,
         selected_text: str | None = None,
         reader_position: float = 0.0,
+        conversation_history: list[dict] | None = None,
     ):
         async for event in run_agent_streaming(
             anthropic, async_anthropic, executors,
             book_id, question, selected_text, reader_position,
             vector_store=vector_store,
+            conversation_history=conversation_history,
         ):
             yield event
 

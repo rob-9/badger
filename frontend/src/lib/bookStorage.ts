@@ -10,12 +10,14 @@ export interface BookMetadata {
 }
 
 const DB_NAME = 'badger-books'
-const DB_VERSION = 2 // Bumped to add metadata store
+const DB_VERSION = 3 // Bumped to add thread stores
 const FILES_STORE = 'epubs'
 const META_STORE = 'metadata'
+const THREADS_STORE = 'threads'
+const THREAD_MESSAGES_STORE = 'thread-messages'
 const LEGACY_KEY = 'book-history' // Old localStorage key for migration
 
-function openDB(): Promise<IDBDatabase> {
+export function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
 
@@ -48,6 +50,16 @@ function openDB(): Promise<IDBDatabase> {
             // Migration failed — stale data will be lost
           }
         }
+      }
+
+      if (!db.objectStoreNames.contains(THREADS_STORE)) {
+        const threadStore = db.createObjectStore(THREADS_STORE, { keyPath: 'id' })
+        threadStore.createIndex('bookId', 'bookId', { unique: false })
+        threadStore.createIndex('updatedAt', 'updatedAt', { unique: false })
+      }
+      if (!db.objectStoreNames.contains(THREAD_MESSAGES_STORE)) {
+        const msgStore = db.createObjectStore(THREAD_MESSAGES_STORE, { keyPath: 'id' })
+        msgStore.createIndex('threadId', 'threadId', { unique: false })
       }
     }
   })
