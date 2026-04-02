@@ -83,6 +83,12 @@ export function queryBookStream(
     selectedText?: string
     useRag?: boolean
     readerPosition?: number
+    conversationHistory?: Array<{
+      role: 'user' | 'assistant'
+      content: string
+      selected_text?: string
+      reader_position?: number
+    }>
   },
   callbacks: {
     onStatus?: (stage: string) => void
@@ -100,6 +106,7 @@ export function queryBookStream(
     selected_text: truncate(params.selectedText, MAX_SELECTED_TEXT_LENGTH),
     use_rag: params.useRag ?? !!params.bookId,
     reader_position: params.readerPosition,
+    conversation_history: params.conversationHistory,
   }
 
   const runStream = async (): Promise<boolean> => {
