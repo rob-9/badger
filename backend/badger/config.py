@@ -24,20 +24,30 @@ def _int_env(name: str, default: str) -> int:
         sys.exit(1)
 
 
+# Dev mode — set DEV_MODE=lite for cheap Haiku-based testing
+DEV_MODE: str = os.getenv("DEV_MODE", "")
+
 # API keys (required)
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 VOYAGE_API_KEY: str = os.getenv("VOYAGE_API_KEY", "")
 
-# Model defaults
-CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+# Model defaults (lite mode → Haiku unless explicitly overridden)
+_lite = DEV_MODE == "lite"
+CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "") or (
+    "claude-haiku-4-5-20251001" if _lite else "claude-sonnet-4-20250514"
+)
 CLAUDE_HAIKU_MODEL: str = os.getenv("CLAUDE_HAIKU_MODEL", "claude-haiku-4-5-20251001")
 VOYAGE_MODEL: str = os.getenv("VOYAGE_MODEL", "voyage-3")
 VOYAGE_CONTEXT_MODEL: str = os.getenv("VOYAGE_CONTEXT_MODEL", "voyage-context-3")
 VOYAGE_RERANK_MODEL: str = os.getenv("VOYAGE_RERANK_MODEL", "rerank-2.5")
 
-# Feature flags
-RERANK_ENABLED: bool = _bool_env("RERANK_ENABLED", "true")
+# Feature flags (lite mode disables reranking unless explicitly set)
+RERANK_ENABLED: bool = _bool_env("RERANK_ENABLED", "false" if _lite else "true")
 COMPRESS_CONTEXT: bool = _bool_env("COMPRESS_CONTEXT", "true")
+
+# Agent tuning (lite mode: single turn, skip eval)
+AGENT_MAX_TURNS: int = _int_env("AGENT_MAX_TURNS", "1" if _lite else "3")
+AGENT_SKIP_EVAL: bool = _bool_env("AGENT_SKIP_EVAL", "true" if _lite else "false")
 
 # Adaptive cutoff bounds
 CUTOFF_FLOOR: int = _int_env("CUTOFF_FLOOR", "3")

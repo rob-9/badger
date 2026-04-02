@@ -72,6 +72,10 @@ async def lifespan(app: FastAPI):
         vector_store=rag_service.vector_store,
         voyage_client=rag_service.voyage,
     )
+    if config.DEV_MODE == "lite":
+        logger.info("DEV_MODE=lite active — using %s, eval=%s, max_turns=%d",
+                     config.CLAUDE_MODEL, "off" if config.AGENT_SKIP_EVAL else "on",
+                     config.AGENT_MAX_TURNS)
     logger.info("Server ready (tool-calling agent active)")
     yield
     logger.info("Shutting down")
@@ -314,8 +318,9 @@ async def query_book_stream(request: QueryBookRequest):
                                 len(tool_calls), len(state.get("sources", [])),
                                 ", ".join(f"{tc['tool']}→{tc['chunks_returned']}ch" for tc in tool_calls) or "no tools")
                     try:
-                        eval_result = await agent["evaluate"](state)
-                        state.update(eval_result)
+                        if not config.AGENT_SKIP_EVAL:
+                            eval_result = await agent["evaluate"](state)
+                            state.update(eval_result)
                         log_agent_query(state)
                     except Exception:
                         logger.warning("Failed to evaluate/log streaming query", exc_info=True)

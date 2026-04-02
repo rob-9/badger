@@ -9,9 +9,10 @@ Reading app with RAG-powered Q&A. Python (FastAPI) backend + Next.js 14 (App Rou
 ## Commands
 
 ```bash
-./dev.sh                # Run both backend + frontend
+./dev.sh                         # Run both backend + frontend
 cd frontend && npm run dev       # Frontend only (port 3000)
 cd backend && uvicorn badger.api.server:app --reload --port 8000  # Backend only
+./smoke-test.sh                  # Quick integration test (~$0.002, real APIs with Haiku)
 ```
 
 ## Environment
@@ -22,6 +23,7 @@ ANTHROPIC_API_KEY=sk-ant-...  # Claude API (required)
 VOYAGE_API_KEY=pa-...         # Voyage AI embeddings (required)
 CLAUDE_MODEL=claude-sonnet-4-20250514  # optional override
 VOYAGE_MODEL=voyage-3                   # optional override
+DEV_MODE=lite                          # optional: cheap Haiku + reduced agent for testing
 CORS_ORIGINS=http://localhost:3000      # optional override
 VECTOR_STORAGE_DIR=.data/vectors        # legacy JSON path (used for auto-migration)
 QDRANT_URL=                             # empty = embedded mode (no server needed)
