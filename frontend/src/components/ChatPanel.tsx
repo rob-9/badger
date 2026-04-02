@@ -79,11 +79,15 @@ export default function ChatPanel({ messages, isLoading, loadingStatus, onSendMe
       if (expanding) next.add(msgId)
       else next.delete(msgId)
       // Auto-scroll to show sources when expanding
+      // Delay accounts for staggered card animations (50ms per card + 300ms duration)
       if (expanding) {
+        const msg = messages.find(m => m.id === msgId)
+        const cardCount = msg?.sources?.length ?? 0
+        const delay = Math.min(cardCount * 50 + 300, 600)
         setTimeout(() => {
           const el = sourceSectionRefs.current.get(msgId)
           el?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-        }, 120)
+        }, delay)
       }
       return next
     })

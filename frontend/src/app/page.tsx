@@ -14,6 +14,19 @@ import { indexBook, isBookIndexed, queryBookStream } from '@/lib/api'
 import { extractCover, extractStructuredText } from '@/lib/parseEpub'
 import { createThread, saveMessage, getThreadsForBook, getThreadMessages, deleteThreadsForBook, type ThreadMeta, type ThreadMessage } from '@/lib/chatStorage'
 
+/** Turn a raw question into a cleaner thread title. */
+function formatThreadTitle(question: string): string {
+  let t = question.trim()
+  // Capitalize first letter
+  if (t.length > 0) t = t[0].toUpperCase() + t.slice(1)
+  // Truncate at word boundary around 50 chars
+  if (t.length > 50) {
+    const cut = t.lastIndexOf(' ', 50)
+    t = t.slice(0, cut > 20 ? cut : 50) + '...'
+  }
+  return t
+}
+
 const STATUS_LABELS: Record<string, string> = {
   thinking: 'Thinking...',
   searching: 'Searching the book...',
@@ -57,6 +70,7 @@ export default function Home() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
   const [threads, setThreads] = useState<ThreadMeta[]>([])
   const activeThreadIdRef = useRef<string | null>(null)
+  const bookIdRef = useRef<string | null>(null)
   const [savedReadingCfi, setSavedReadingCfi] = useState<string | null>(null)
 
   // Loading transition state
@@ -66,7 +80,10 @@ export default function Home() {
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' } | null>(null)
 
-  // Keep thread ID ref in sync
+  // Keep refs in sync for streaming callbacks
+  useEffect(() => {
+    bookIdRef.current = bookId
+  }, [bookId])
   useEffect(() => {
     activeThreadIdRef.current = activeThreadId
   }, [activeThreadId])
@@ -308,6 +325,10 @@ export default function Home() {
                 content: lastMsg.content,
                 sources: lastMsg.sources,
                 createdAt: Date.now(),
+              }).then(() => {
+                // Refresh thread list so message counts are current
+                const bid = bookIdRef.current
+                if (bid) getThreadsForBook(bid).then(setThreads)
               }).catch(e => console.error('[App] Failed to save assistant message:', e))
             }
             return prev // don't modify
@@ -341,7 +362,7 @@ export default function Home() {
     // Create thread if needed
     let threadId = activeThreadId
     if (!threadId && bookId) {
-      threadId = await createThread(bookId, question)
+      threadId = await createThread(bookId, formatThreadTitle(question))
       setActiveThreadId(threadId)
       setThreads(bookId ? await getThreadsForBook(bookId) : [])
     }
@@ -381,7 +402,7 @@ export default function Home() {
     // Create thread if needed
     let threadId = activeThreadId
     if (!threadId && bookId) {
-      threadId = await createThread(bookId, message)
+      threadId = await createThread(bookId, formatThreadTitle(message))
       setActiveThreadId(threadId)
       setThreads(bookId ? await getThreadsForBook(bookId) : [])
     }
@@ -506,7 +527,7 @@ export default function Home() {
                 onSendMessage={handleChatMessage}
                 onClose={() => setIsChatOpen(false)}
                 onNavigateToSource={handleNavigateToSource}
-                threadTitle={activeThreadId ? chatMessages.find(m => m.role === 'user')?.content?.slice(0, 50) : undefined}
+                threadTitle={activeThreadId ? threads.find(t => t.id === activeThreadId)?.title : undefined}
                 threads={threads}
                 onNewThread={handleNewThread}
                 onSelectThread={handleSelectThread}
