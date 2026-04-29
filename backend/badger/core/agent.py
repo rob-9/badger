@@ -694,7 +694,8 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         ]
 
         if not past_only:
-            return f'"{term}" appears in the book, but all mentions are in sections you haven\'t read yet. Keep reading!', [], source_counter
+            # Don't confirm that the term appears later — that itself is a spoiler signal.
+            return f'No matches found for "{term}" in what you\'ve read so far.', [], source_counter
 
         total_past = len(past_only)
         first_mentions = past_only[:max_results]
@@ -768,7 +769,7 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
         current_name = None
         for ch in chapters:
             ci = ch["chapter_index"]
-            title = ch["chapter_title"] or f"Chapter {ci + 1}"
+            real_title = ch["chapter_title"] or f"Chapter {ci + 1}"
             if ch["last_chunk_index"] <= reader_idx:
                 label = "PAST"
             elif ch["first_chunk_index"] > reader_idx:
@@ -776,10 +777,12 @@ def build_tool_executors(vector_store: VectorStore, voyage_client):
             else:
                 label = "CURRENT"
 
+            # Redact AHEAD chapter titles — titles can be major spoilers
+            display_title = f"Chapter {ci + 1}" if label == "AHEAD" else real_title
             marker = ">>>" if ci == current_chapter else "   "
-            lines.append(f"{marker} {ci + 1}. {title} [{label}]")
+            lines.append(f"{marker} {ci + 1}. {display_title} [{label}]")
             if ci == current_chapter:
-                current_name = title
+                current_name = real_title
 
         pct = int(reader_position * 100)
         header = f"Currently reading: {current_name or 'Unknown'} ({pct}% through the book, {len(chapters)} chapters total)"
