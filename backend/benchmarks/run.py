@@ -632,7 +632,7 @@ async def main():
         _load_embedding_cache()
 
     config.validate_keys()
-    rag_service = RAGService(storage_dir=config.VECTOR_STORAGE_DIR)
+    rag_service = RAGService()
     anthropic = Anthropic(api_key=config.ANTHROPIC_API_KEY)
     async_anthropic = AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
     vector_store = rag_service.vector_store
